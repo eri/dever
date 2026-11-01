@@ -22,7 +22,13 @@ a static page that forwards to the app (`http://localhost:47321/slack/callback`)
 
 ## 2. Slack app
 
-1. https://api.slack.com/apps → **Create New App** → *From scratch* → name `Dever`, the team's workspace.
+Fastest: https://api.slack.com/apps → **Create New App** → **From a manifest** → pick the workspace →
+paste [`docs/slack-manifest.json`](slack-manifest.json) (adjust the redirect URL if you host the page
+elsewhere) → **Create**. Then skip to step 3 below.
+
+Manual alternative:
+
+1. https://api.slack.com/apps → **Create New App** → *Blank app* → name `Dever`, the team's workspace.
 2. **OAuth & Permissions**:
    - *Redirect URLs*: the GitHub Pages URL above.
    - *User Token Scopes*: `channels:read`, `groups:read`, `channels:history`, `groups:history`,

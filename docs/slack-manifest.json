@@ -1,0 +1,28 @@
+{
+  "display_information": {
+    "name": "Dever",
+    "description": "Per-project view of Slack, Linear and GitHub"
+  },
+  "oauth_config": {
+    "redirect_urls": [
+      "https://eri.github.io/dever/oauth/slack-callback.html"
+    ],
+    "scopes": {
+      "user": [
+        "channels:read",
+        "groups:read",
+        "channels:history",
+        "groups:history",
+        "channels:write",
+        "groups:write",
+        "users:read",
+        "team:read"
+      ]
+    }
+  },
+  "settings": {
+    "org_deploy_enabled": false,
+    "socket_mode_enabled": false,
+    "token_rotation_enabled": false
+  }
+}
