@@ -1,0 +1,11 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Dever — Slack sign-in</title>
+<!-- Slack only accepts HTTPS redirects: this page (GitHub Pages) forwards the
+     authorization code to the Dever app's local server. -->
+<script>
+  location.replace("http://localhost:47321/slack/callback" + location.search);
+</script>
+<p style="font:16px -apple-system, sans-serif; padding:40px">
+  Returning to Dever… If nothing happens, make sure the app is open and start the sign-in again.
+</p>

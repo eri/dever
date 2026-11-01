@@ -1,0 +1,13 @@
+{
+  "slack": {
+    "clientID": "0000000000.0000000000000",
+    "clientSecret": "slack-client-secret",
+    "redirectURL": "https://eri.github.io/dever/oauth/slack-callback.html"
+  },
+  "linear": {
+    "clientID": "linear-client-id"
+  },
+  "github": {
+    "clientID": null
+  }
+}
