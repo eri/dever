@@ -97,7 +97,7 @@ struct ProjectEditorSheet: View {
                 Spacer()
                 Button("Cancel", role: .cancel) { dismiss() }.keyboardShortcut(.cancelAction)
                 Button(isNew ? "Create project" : "Save changes") { Task { await save() } }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(PrimaryButtonStyle())
                     .keyboardShortcut(.defaultAction)
                     .disabled(saving)
             }
@@ -345,7 +345,7 @@ struct ImportSheet: View {
                 Spacer()
                 Button("Cancel", role: .cancel) { dismiss() }.keyboardShortcut(.cancelAction)
                 Button("Import ^[\(selection.count) project](inflect: true)") { importSelected() }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(PrimaryButtonStyle())
                     .keyboardShortcut(.defaultAction)
                     .disabled(selection.isEmpty)
             }

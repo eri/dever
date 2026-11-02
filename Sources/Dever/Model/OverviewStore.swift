@@ -27,6 +27,9 @@ struct ProjectSnapshot {
         var scoped = false
         /// Open Linear issues whose pull request is already merged (ticket left behind).
         var mergedButOpen: [String] = []
+        /// Issues with an open / merged pull request, for the delivery strip.
+        var openPRIssues: Set<String> = []
+        var mergedPRIssues: Set<String> = []
     }
 
     enum PipelineState { case passing, failing, running, unknown }
@@ -34,6 +37,8 @@ struct ProjectSnapshot {
     var linear: LinearStats?
     var slack: SlackStats?
     var github: GitHubStats?
+    /// Issues by delivery stage (Linear joined with GitHub); nil without Linear.
+    var delivery: Delivery?
     var errors: [ServiceKind: String] = [:]
     var updatedAt = Date()
 }
@@ -171,6 +176,11 @@ final class OverviewStore: ObservableObject {
         case .success(let v): s.github = v
         case .failure(let e): s.errors[.github] = e.localizedDescription
         }
+        if let issues {
+            s.delivery = Delivery(issues: issues.map { ($0.identifier, $0.state.type) },
+                                  openPR: s.github?.openPRIssues ?? [],
+                                  mergedPR: s.github?.mergedPRIssues ?? [])
+        }
         return s
     }
 
@@ -224,9 +234,12 @@ final class OverviewStore: ObservableObject {
                 // Issues still open in Linear although one of their PRs is merged.
                 let open = Set(issues.filter { !["completed", "canceled"].contains($0.state.type) }.map(\.identifier))
                 let merged = ProjectPullRequests(pulls: try await repos.mergedPulls(repo), issues: issues, wholeRepository: false)
-                let stale = Set(merged.matches.compactMap(\.issue)).intersection(open).sorted()
+                let mergedIDs = Set(merged.matches.compactMap(\.issue))
+                let stale = mergedIDs.intersection(open).sorted()
                 return .success(.init(openPRs: prs.matches.count, pipeline: pipeline.state, scoped: true,
-                                      mergedButOpen: stale))
+                                      mergedButOpen: stale,
+                                      openPRIssues: Set(prs.matches.compactMap(\.issue)),
+                                      mergedPRIssues: mergedIDs))
             }
             // Unscoped: the health of the default branch, not of whichever branch ran last.
             let branch = try await repos.defaultBranch(repo)

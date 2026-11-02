@@ -1,6 +1,7 @@
 import SwiftUI
 
-/// Home screen: every project as a card with its Linear progress, Slack activity and pipeline.
+/// Home screen. Its one question: which project needs me now?
+/// The KPI strip is also the list's filter; the list is sorted by urgency.
 struct OverviewView: View {
     @EnvironmentObject var app: AppState
     @EnvironmentObject var store: OverviewStore
@@ -9,33 +10,31 @@ struct OverviewView: View {
     let importFrom: (ImportSheet.Source) -> Void
 
     enum Filter: String, CaseIterable, Identifiable {
-        case all = "All", attention = "Needs attention", incomplete = "Incomplete"
+        case all = "All projects", attention = "Need attention", incomplete = "Incomplete", onTrack = "On track"
         var id: String { rawValue }
     }
 
     @State private var filter: Filter = .all
     @State private var search = ""
 
-    private func needsAttention(_ status: ProjectStatus) -> Bool {
-        status == .needsAttention || status == .quiet
+    private var statuses: [(Project, ProjectStatus)] {
+        app.projects.map { ($0, $0.status(store.snapshots[$0.id])) }
+    }
+
+    private func matches(_ filter: Filter, _ p: Project, _ s: ProjectStatus) -> Bool {
+        switch filter {
+        case .all: true
+        case .attention: s == .needsAttention || s == .quiet
+        case .incomplete: !p.isComplete
+        case .onTrack: s == .onTrack
+        }
     }
 
     private var rows: [(Project, ProjectStatus)] {
-        app.projects
-            .map { ($0, $0.status(store.snapshots[$0.id])) }
-            .filter { p, status in
-                switch filter {
-                case .all: true
-                case .attention: needsAttention(status)
-                case .incomplete: !p.isComplete
-                }
-            }
+        statuses
+            .filter { matches(filter, $0.0, $0.1) }
             .filter { search.isEmpty || $0.0.name.localizedCaseInsensitiveContains(search) }
             .sorted { $0.1 != $1.1 ? $0.1 < $1.1 : $0.0.name.localizedCaseInsensitiveCompare($1.0.name) == .orderedAscending }
-    }
-
-    private func count(_ match: (Project, ProjectStatus) -> Bool) -> Int {
-        app.projects.filter { match($0, $0.status(store.snapshots[$0.id])) }.count
     }
 
     var body: some View {
@@ -44,237 +43,299 @@ struct OverviewView: View {
                 emptyState
             } else {
                 ScrollView {
-                    VStack(alignment: .leading, spacing: 24) {
-                        metrics
-                        VStack(alignment: .leading, spacing: 12) {
-                            Picker("Filter", selection: $filter) {
-                                ForEach(Filter.allCases) { Text($0.rawValue).tag($0) }
-                            }
-                            .pickerStyle(.segmented)
-                            .labelsHidden()
-                            .fixedSize()
-                            if rows.isEmpty {
-                                filteredEmptyState
-                            } else {
-                                LazyVGrid(columns: [GridItem(.adaptive(minimum: 300, maximum: 460), spacing: 16, alignment: .top)], spacing: 16) {
-                                    ForEach(rows, id: \.0.id) { project, status in
-                                        Button { open(project) } label: {
-                                            ProjectCard(project: project, status: status, snapshot: store.snapshots[project.id])
-                                        }
-                                        .buttonStyle(PressableStyle())
-                                    }
-                                }
-                            }
-                        }
+                    VStack(alignment: .leading, spacing: Theme.gap) {
+                        titleRow
+                        kpiTabs
+                        projectList
                     }
-                    .padding(24)
+                    .padding(Theme.pad)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 .searchable(text: $search, placement: .toolbar, prompt: "Search projects")
             }
         }
+        .sheetBackground()
         .navigationTitle("Overview")
-        .navigationSubtitle(subtitle)
-        .toolbar {
-            Button { Task { await store.refresh(app) } } label: {
-                Label("Refresh", systemImage: "arrow.clockwise")
-            }
-            .help("Refresh all projects")
-            .keyboardShortcut("r")
-            .disabled(store.isRefreshing)
-        }
         .task { if store.isStale { await store.refresh(app) } }
     }
 
-    private var subtitle: String {
-        if store.isRefreshing { return "Refreshing…" }
-        guard let last = store.lastRefresh else { return "" }
-        return "Updated \(last.formatted(.relative(presentation: .named)))"
-    }
+    // MARK: Title row
 
-    private var metrics: some View {
-        HStack(spacing: 12) {
-            MetricTile(value: app.projects.count, label: "Projects", symbol: "square.grid.2x2", tint: .accentColor)
-            MetricTile(value: count { _, s in s == .onTrack }, label: "On track",
-                       symbol: ProjectStatus.onTrack.symbol, tint: ProjectStatus.onTrack.tint)
-            MetricTile(value: count { _, s in needsAttention(s) }, label: "Needs attention",
-                       symbol: ProjectStatus.needsAttention.symbol, tint: ProjectStatus.needsAttention.tint)
-            MetricTile(value: count { p, _ in !p.isComplete }, label: "Incomplete",
-                       symbol: ProjectStatus.incomplete.symbol, tint: ProjectStatus.incomplete.tint)
+    private var titleRow: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Overview").font(Theme.title).foregroundStyle(Theme.text)
+                    .accessibilityAddTraits(.isHeader)
+                Text(finding).font(Theme.body).foregroundStyle(Theme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 16)
+            freshness
+            Button("New project", action: newProject).buttonStyle(PrimaryButtonStyle())
         }
     }
 
-    private var filteredEmptyState: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            EmptySection(
-                title: search.isEmpty ? "No projects in \u{201C}\(filter.rawValue)\u{201D}" : "No projects match \u{201C}\(search)\u{201D}",
-                message: filter == .attention ? "Every tracked project is on track." : "Try another filter or search."
-            )
-            Button("Show all projects") { filter = .all; search = "" }
+    /// The fact that most needs attention, stated first.
+    private var finding: String {
+        let attention = statuses.filter { matches(.attention, $0.0, $0.1) }.map(\.0)
+        guard let lead = attention.max(by: { a, b in
+            (store.snapshots[a.id]?.github?.mergedButOpen.count ?? 0) < (store.snapshots[b.id]?.github?.mergedButOpen.count ?? 0)
+        }) else {
+            return store.snapshots.isEmpty ? "Loading your projects…" : "Every project is on track."
         }
+        let summary = Plural.text("^[\(attention.count) of \(app.projects.count) project](inflect: true) need attention.")
+        guard let signal = lead.signals(store.snapshots[lead.id]).first else { return summary }
+        return "\(summary) \(lead.name): \(signal.prefix(1).lowercased() + signal.dropFirst())."
+    }
+
+    private var freshness: some View {
+        HStack(spacing: 6) {
+            if store.isRefreshing {
+                ProgressView().controlSize(.small).accessibilityLabel("Refreshing")
+            } else if let last = store.lastRefresh {
+                Text("Updated \(last.formatted(.relative(presentation: .named)))")
+                    .font(Theme.small).foregroundStyle(Theme.muted)
+            }
+            Button { Task { await store.refresh(app) } } label: {
+                Image(systemName: "arrow.clockwise").foregroundStyle(Theme.muted)
+            }
+            .buttonStyle(.borderless)
+            .help("Refresh all projects")
+            .accessibilityLabel("Refresh all projects")
+            .keyboardShortcut("r")
+            .disabled(store.isRefreshing)
+        }
+    }
+
+    // MARK: KPI strip, doubling as the filter
+
+    private var kpiTabs: some View {
+        HStack(spacing: 0) {
+            ForEach(Filter.allCases) { f in
+                if f != Filter.allCases.first {
+                    Rectangle().fill(Theme.border).frame(width: 1).padding(.vertical, 14)
+                }
+                kpiCell(f)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .background(Theme.sheet, in: RoundedRectangle(cornerRadius: Theme.radiusCard))
+        .overlay(RoundedRectangle(cornerRadius: Theme.radiusCard).strokeBorder(Theme.border))
+    }
+
+    private func kpiCell(_ f: Filter) -> some View {
+        let count = statuses.filter { matches(f, $0.0, $0.1) }.count
+        let selected = filter == f
+        let valueColor: Color = f == .attention && count > 0 ? Theme.negative : Theme.text
+        return Button { filter = f } label: {
+            VStack(alignment: .leading, spacing: 6) {
+                Text(f.rawValue).font(Theme.smallStrong).foregroundStyle(selected ? Theme.text : Theme.muted)
+                Text(count, format: .number).font(Theme.kpi).foregroundStyle(valueColor).monospacedDigit()
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 20)
+            .padding(.vertical, 16)
+            .overlay(alignment: .bottom) {
+                Rectangle().fill(selected ? Theme.text : Color.clear).frame(height: 2).padding(.horizontal, 20)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(f.rawValue): \(count)")
+        .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+
+    // MARK: Project list
+
+    private var projectList: some View {
+        VStack(spacing: 0) {
+            ProjectListHeader()
+            ForEach(rows, id: \.0.id) { project, status in
+                Rectangle().fill(Theme.rule).frame(height: 1)
+                Button { open(project) } label: {
+                    ProjectRow(project: project, status: status, snapshot: store.snapshots[project.id])
+                }
+                .buttonStyle(.plain)
+                .hoverRow()
+            }
+            if rows.isEmpty {
+                Rectangle().fill(Theme.rule).frame(height: 1)
+                filteredEmpty
+            }
+        }
+        .background(Theme.sheet, in: RoundedRectangle(cornerRadius: Theme.radiusCard))
+        .overlay(RoundedRectangle(cornerRadius: Theme.radiusCard).strokeBorder(Theme.border))
+        .clipShape(RoundedRectangle(cornerRadius: Theme.radiusCard))
+    }
+
+    private var filteredEmpty: some View {
+        HStack(spacing: 8) {
+            Text(search.isEmpty ? "No project in \u{201C}\(filter.rawValue)\u{201D}."
+                                : "No project matches \u{201C}\(search)\u{201D}.")
+                .foregroundStyle(Theme.muted)
+            Button("Show all projects") { filter = .all; search = "" }.buttonStyle(.link)
+            Spacer()
+        }
+        .font(Theme.body)
+        .padding(.horizontal, 20)
+        .frame(height: 56)
     }
 
     private var emptyState: some View {
         ContentUnavailableView {
-            Label("No projects yet", systemImage: "square.grid.2x2")
+            Label("No projects yet", systemImage: "square.stack")
         } description: {
-            Text("A project links a Slack channel to a Linear project, so you can follow both in one place.")
+            Text("A project joins a Slack channel, a Linear project and, if you like, a GitHub repository.")
         } actions: {
-            Button("Create project…", action: newProject).buttonStyle(.borderedProminent)
-            HStack {
+            Button("New project", action: newProject).buttonStyle(PrimaryButtonStyle())
+            HStack(spacing: 16) {
                 Button("Import from Slack…") { importFrom(.slack) }.disabled(app.slack == nil)
                 Button("Import from Linear…") { importFrom(.linear) }.disabled(app.linear == nil)
             }
+            .buttonStyle(.link)
             if app.slack == nil || app.linear == nil {
-                Text("Connect Slack and Linear in Accounts to import.")
-                    .font(.callout).foregroundStyle(.secondary)
+                Text("Connect Slack and Linear in Accounts to import.").font(Theme.small).foregroundStyle(Theme.muted)
             }
         }
     }
 }
 
-private struct MetricTile: View {
-    let value: Int
-    let label: String
-    let symbol: String
-    let tint: Color
+// MARK: - Columns
 
+/// Column widths shared by the header and the rows, so every figure lines up.
+private enum Column {
+    static let project: CGFloat = 240
+    static let pulls: CGFloat = 96
+    static let pipeline: CGFloat = 104
+    static let slack: CGFloat = 132
+    static let spacing: CGFloat = 24
+}
+
+private struct ProjectListHeader: View {
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Image(systemName: symbol).foregroundStyle(tint).font(.callout)
-            Text(value, format: .number)
-                .font(.system(size: 24, weight: .semibold, design: .rounded))
-                .monospacedDigit()
-            Text(label).font(.callout).foregroundStyle(.secondary)
+        HStack(spacing: Column.spacing) {
+            Text("Project").frame(width: Column.project, alignment: .leading)
+            Text("Delivery").frame(maxWidth: .infinity, alignment: .leading)
+            Text("Pull requests").frame(width: Column.pulls, alignment: .trailing)
+            Text("Pipeline").frame(width: Column.pipeline, alignment: .leading)
+            Text("Slack this week").frame(width: Column.slack, alignment: .trailing)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(16)
-        .surface()
-        .accessibilityElement(children: .combine)
+        .font(Theme.small)
+        .foregroundStyle(Theme.muted)
+        .padding(.horizontal, 20)
+        .frame(height: 40)
     }
 }
 
-private struct ProjectCard: View {
+private struct ProjectRow: View {
     let project: Project
     let status: ProjectStatus
     let snapshot: ProjectSnapshot?
-    @State private var hovering = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            VStack(alignment: .leading, spacing: 8) {
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Text(project.name).font(.headline).lineLimit(1).help(project.name)
-                    Spacer(minLength: 8)
-                    StatusBadge(status: status)
-                }
-                linksRow
-            }
-            linearSection
-            VStack(alignment: .leading, spacing: 6) {
-                slackRow
-                if project.githubRepo != nil { githubRow }
-            }
-            let signals = project.signals(snapshot)
-            if !signals.isEmpty {
-                Label {
-                    Text(signals.joined(separator: " · ")).foregroundStyle(.secondary).lineLimit(2)
-                } icon: {
-                    Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
-                }
-                .font(.caption)
-                .help(signals.joined(separator: "\n"))
-            }
+        HStack(alignment: .center, spacing: Column.spacing) {
+            identity.frame(width: Column.project, alignment: .leading)
+            delivery.frame(maxWidth: .infinity, alignment: .leading)
+            pulls.frame(width: Column.pulls, alignment: .trailing)
+            pipeline.frame(width: Column.pipeline, alignment: .leading)
+            slack.frame(width: Column.slack, alignment: .trailing)
         }
-        .padding(16)
-        .frame(maxWidth: .infinity, minHeight: 210, alignment: .topLeading)
-        .surface(highlighted: hovering)
-        .contentShape(RoundedRectangle(cornerRadius: 12))
-        .onHover { hovering = $0 }
-        .animation(.easeOut(duration: 0.15), value: hovering)
+        .font(Theme.body)
+        .padding(.horizontal, 20)
+        .padding(.vertical, 14)
+        .frame(minHeight: 72)
+        .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
         .accessibilityHint("Opens the project")
     }
 
-    private var linksRow: some View {
-        HStack(spacing: 12) {
-            linkBadge(.slack, project.slack.map { "#\($0.name)" })
-            linkBadge(.linear, project.linear?.name)
-            if let repo = project.githubRepo {
-                linkBadge(.github, repo.split(separator: "/").last.map(String.init))
+    private var identity: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                Text(project.name).font(Theme.bodyStrong).foregroundStyle(Theme.text).lineLimit(1)
+                    .help(project.name)
+                StatusBadge(status: status)
             }
+            Text(links).font(Theme.small).foregroundStyle(Theme.muted).lineLimit(1).help(links)
         }
-        .font(.caption)
     }
 
-    private func linkBadge(_ service: ServiceKind, _ text: String?) -> some View {
-        Label(text ?? "No \(service.label)", systemImage: text == nil ? "circle.dashed" : service.symbol)
-            .lineLimit(1)
-            .foregroundStyle(.secondary)
-            .help(text ?? "No \(service.label) linked")
+    private var links: String {
+        let slack = project.slack.map { "#\($0.name)" } ?? "No Slack channel"
+        let linear = project.linear?.name ?? "No Linear project"
+        return "\(slack) · \(linear)"
     }
 
     @ViewBuilder
-    private var linearSection: some View {
-        if let l = snapshot?.linear {
+    private var delivery: some View {
+        if let d = snapshot?.delivery {
             VStack(alignment: .leading, spacing: 6) {
-                HStack(alignment: .firstTextBaseline) {
-                    Text(l.progress, format: .percent.precision(.fractionLength(0)))
-                        .font(.title3.weight(.semibold)).monospacedDigit()
-                    Text("\(l.done) of ^[\(l.total) issue](inflect: true) done")
-                        .font(.caption).foregroundStyle(.secondary).monospacedDigit()
-                    Spacer()
-                    if let target = l.targetDate {
-                        Label(target.formatted(.dateTime.day().month(.abbreviated)), systemImage: "flag")
-                            .font(.caption).foregroundStyle(.secondary)
-                            .help("Target date")
-                    }
-                }
-                ProgressView(value: l.progress)
-                    .tint(l.progress >= 1 ? .green : .accentColor)
-                    .accessibilityLabel("Progress")
-                Text("\(l.inProgress) in progress · \(l.todo) to do" + (l.lead.map { " · Lead: \($0)" } ?? ""))
-                    .font(.caption).foregroundStyle(.secondary).lineLimit(1).monospacedDigit()
+                DeliveryStrip(delivery: d)
+                deliveryCaption(d)
             }
         } else if project.linear == nil {
-            EmptySection(title: "No Linear project", message: "Link one to track progress.")
-        } else if snapshot == nil {
-            ProgressView().controlSize(.small).accessibilityLabel("Loading")
-        }
-    }
-
-    @ViewBuilder
-    private var slackRow: some View {
-        if let s = snapshot?.slack {
-            row(ServiceKind.slack.symbol) {
-                Text("^[\(s.messagesThisWeek) message](inflect: true) this week").monospacedDigit()
-                if let last = s.lastActivity {
-                    Text("· last \(last.formatted(.relative(presentation: .named)))").foregroundStyle(.secondary)
-                }
+            Text("Link a Linear project to see delivery").font(Theme.small).foregroundStyle(Theme.muted)
+        } else if let e = snapshot?.errors[.linear] {
+            Text("Linear unavailable").font(Theme.small).foregroundStyle(Theme.negative).help(e)
+        } else {
+            VStack(alignment: .leading, spacing: 6) {
+                RoundedRectangle(cornerRadius: 2).fill(Theme.raised).frame(height: 8)
+                RoundedRectangle(cornerRadius: 2).fill(Theme.raised).frame(width: 120, height: 12)
             }
+            .accessibilityLabel("Loading")
         }
     }
 
-    @ViewBuilder
-    private var githubRow: some View {
-        if let g = snapshot?.github {
-            row(ServiceKind.github.symbol) {
-                PipelineBadge(state: g.pipeline)
-                if let branch = g.branch {
-                    Text(branch).foregroundStyle(.secondary).lineLimit(1).help("Default branch")
-                }
-                Text("· ^[\(g.openPRs) open pull request](inflect: true)").foregroundStyle(.secondary).monospacedDigit()
-            }
-            .help(g.scoped
-                  ? "Pull requests linked to this project's Linear issues, and the latest run on their branches"
-                  : "All open pull requests in the repository, and the latest run on its default branch")
-        }
-    }
-
-    private func row<C: View>(_ symbol: String, @ViewBuilder content: () -> C) -> some View {
+    private func deliveryCaption(_ d: Delivery) -> some View {
         HStack(spacing: 4) {
-            Image(systemName: symbol).frame(width: 16).foregroundStyle(.secondary).accessibilityHidden(true)
-            content()
+            Text("\(d.shipped) of ^[\(d.total) issue](inflect: true) shipped")
+                .foregroundStyle(Theme.text).monospacedDigit()
+            if d.merged > 0 {
+                Text("· \(d.merged) to close in Linear").foregroundStyle(Theme.chart3).monospacedDigit()
+            } else if let target = snapshot?.linear?.targetDate {
+                Text("· due \(target.formatted(.dateTime.day().month(.abbreviated)))").foregroundStyle(Theme.muted)
+            }
         }
-        .font(.caption)
+        .font(Theme.small)
+        .lineLimit(1)
+    }
+
+    @ViewBuilder
+    private var pulls: some View {
+        if let g = snapshot?.github {
+            VStack(alignment: .trailing, spacing: 2) {
+                Text(g.openPRs, format: .number).foregroundStyle(Theme.text).monospacedDigit()
+                Text("open").font(Theme.small).foregroundStyle(Theme.muted)
+            }
+        } else {
+            dash(project.githubRepo == nil ? "No repository linked" : nil)
+        }
+    }
+
+    @ViewBuilder
+    private var pipeline: some View {
+        if let g = snapshot?.github {
+            PipelineBadge(state: g.pipeline)
+        } else {
+            dash(project.githubRepo == nil ? "No repository linked" : nil)
+        }
+    }
+
+    @ViewBuilder
+    private var slack: some View {
+        if let s = snapshot?.slack {
+            VStack(alignment: .trailing, spacing: 2) {
+                Text(s.messagesThisWeek, format: .number).foregroundStyle(Theme.text).monospacedDigit()
+                Text(s.lastActivity.map { "last \($0.formatted(.relative(presentation: .named)))" } ?? "no messages")
+                    .font(Theme.small).foregroundStyle(Theme.muted).lineLimit(1)
+            }
+        } else {
+            dash(project.slack == nil ? "No Slack channel linked" : nil)
+        }
+    }
+
+    /// Missing or not applicable: a grey dash, never a zero.
+    private func dash(_ help: String?) -> some View {
+        Text("—").foregroundStyle(Theme.muted).help(help ?? "Loading")
     }
 }

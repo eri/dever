@@ -1,5 +1,6 @@
 import SwiftUI
 
+/// One project. Its question: what is left to ship, and what needs closing?
 struct ProjectDetailView: View {
     @EnvironmentObject var app: AppState
     @EnvironmentObject var store: OverviewStore
@@ -11,72 +12,97 @@ struct ProjectDetailView: View {
     @State private var users: [String: String] = [:]
     @State private var pulls: [ProjectPullRequests.Match] = []
     @State private var pullsScoped = false
-    @State private var merged: [MergedPull] = []
-    @State private var showAllMerged = false
     @State private var runs: [GitHubRun] = []
+    @State private var merged: [MergedPull] = []
     @State private var errors: [ServiceKind: String] = [:]
     @State private var loading = false
     @State private var loaded = false
+    @State private var expanded: Set<String> = []
 
     private var status: ProjectStatus { project.status(store.snapshots[project.id]) }
 
+    private var delivery: Delivery {
+        Delivery(issues: issues.map { ($0.identifier, $0.state.type) },
+                 openPR: Set(pulls.compactMap(\.issue)),
+                 mergedPR: Set(merged.compactMap(\.issue)))
+    }
+
+    /// Open issues whose code is merged: the screen's finding and its action.
+    private var toClose: [(issue: LinearIssue, pull: MergedPull)] {
+        let open = issues.filter { !["completed", "canceled"].contains($0.state.type) }
+        return open.compactMap { issue in
+            merged.first { $0.issue == issue.identifier }.map { (issue, $0) }
+        }
+    }
+
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 24) {
-                header
-                // Two columns while they fit, stacked otherwise.
+            VStack(alignment: .leading, spacing: Theme.gap) {
+                titleRow
+                if project.linear != nil { deliveryPanel }
                 ViewThatFits(in: .horizontal) {
-                    HStack(alignment: .top, spacing: 16) {
-                        linearSection.frame(minWidth: 360)
-                        slackSection.frame(minWidth: 320)
+                    HStack(alignment: .top, spacing: Theme.gap) {
+                        issuesPanel.frame(minWidth: 380)
+                        slackPanel.frame(minWidth: 320)
                     }
-                    VStack(spacing: 16) {
-                        linearSection
-                        slackSection
-                    }
+                    VStack(spacing: Theme.gap) { issuesPanel; slackPanel }
                 }
-                if project.githubRepo != nil { githubSection }
+                if project.githubRepo != nil { githubPanel }
             }
-            .padding(24)
+            .padding(Theme.pad)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .sheetBackground()
         .navigationTitle(project.name)
-        .navigationSubtitle(loading ? "Refreshing…" : "")
-        .toolbar {
-            Button { Task { await load() } } label: { Label("Refresh", systemImage: "arrow.clockwise") }
-                .help("Refresh this project")
-                .keyboardShortcut("r")
-                .disabled(loading)
-            Button(action: edit) { Label("Edit links…", systemImage: "link") }
-                .help("Change the linked Slack channel, Linear project and repository")
-        }
         .task { await load() }
     }
 
-    // MARK: Header
+    // MARK: Title row
 
-    private var header: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 16) {
-                StatusBadge(status: status)
-                linkButton(.slack, project.slack.map { "#\($0.name)" }, url: slackURL)
-                linkButton(.linear, project.linear?.name, url: project.linear.flatMap { URL(string: $0.url) })
-                linkButton(.github, project.githubRepo, url: project.githubRepo.flatMap { URL(string: "https://github.com/\($0)") })
-            }
-            if !project.isComplete {
-                HStack(spacing: 12) {
-                    Label {
-                        Text("Link a Slack channel and a Linear project to start tracking.")
-                    } icon: {
-                        Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
-                    }
-                    Button("Edit links…", action: edit)
+    private var titleRow: some View {
+        HStack(alignment: .top, spacing: 12) {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(alignment: .firstTextBaseline, spacing: 10) {
+                    Text(project.name).font(Theme.title).foregroundStyle(Theme.text)
+                        .accessibilityAddTraits(.isHeader)
+                    StatusBadge(status: status)
                 }
-                .font(.callout)
-                .padding(12)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(.orange.opacity(0.1), in: RoundedRectangle(cornerRadius: 8))
+                Text(finding).font(Theme.body).foregroundStyle(Theme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+                linkRow
+            }
+            Spacer(minLength: 16)
+            HStack(spacing: 8) {
+                if loading { ProgressView().controlSize(.small).accessibilityLabel("Refreshing") }
+                Button { Task { await load() } } label: {
+                    Image(systemName: "arrow.clockwise").foregroundStyle(Theme.muted)
+                }
+                .buttonStyle(.borderless)
+                .help("Refresh this project")
+                .accessibilityLabel("Refresh this project")
+                .keyboardShortcut("r")
+                .disabled(loading)
+                Button("Edit links…", action: edit).buttonStyle(SecondaryButtonStyle())
+                if !toClose.isEmpty, let url = project.linear.flatMap({ URL(string: $0.url) }) {
+                    Link(destination: url) { Text("Close \(toClose.count) in Linear") }
+                        .buttonStyle(PrimaryButtonStyle())
+                        .help("Open the project in Linear to mark its merged issues as done")
+                }
             }
         }
+    }
+
+    private var finding: String {
+        if !project.isComplete { return "Link a Slack channel and a Linear project to start tracking." }
+        if !toClose.isEmpty {
+            return Plural.text("^[\(toClose.count) issue](inflect: true) shipped in code but still open in Linear.")
+        }
+        if loaded, delivery.total > 0 {
+            let left = delivery.total - delivery.shipped
+            return left == 0 ? "Every issue has shipped."
+                : Plural.text("\(delivery.shipped) of ^[\(delivery.total) issue](inflect: true) shipped, \(left) to go.")
+        }
+        return " "
     }
 
     private var slackURL: URL? {
@@ -84,258 +110,315 @@ struct ProjectDetailView: View {
         return URL(string: "https://\(slack.domain).slack.com/archives/\(channel.id)")
     }
 
-    @ViewBuilder
-    private func linkButton(_ service: ServiceKind, _ text: String?, url: URL?) -> some View {
-        if let text, let url {
-            Link(destination: url) { Label(text, systemImage: service.symbol).lineLimit(1) }
-                .help("Open \(text) in \(service.label)")
-        } else if text == nil, service != .github {
-            Label("No \(service.label)", systemImage: "circle.dashed").foregroundStyle(.secondary)
+    private var linkRow: some View {
+        HStack(spacing: 16) {
+            if let channel = project.slack, let url = slackURL {
+                Link(destination: url) { Label("#\(channel.name)", systemImage: ServiceKind.slack.symbol) }
+            }
+            if let linear = project.linear, let url = URL(string: linear.url) {
+                Link(destination: url) { Label(linear.name, systemImage: ServiceKind.linear.symbol) }
+            }
+            if let repo = project.githubRepo, let url = URL(string: "https://github.com/\(repo)") {
+                Link(destination: url) { Label(repo, systemImage: ServiceKind.github.symbol) }
+            }
+        }
+        .font(Theme.small)
+        .foregroundStyle(Theme.muted)
+        .lineLimit(1)
+    }
+
+    // MARK: Delivery (the signature block)
+
+    private var deliveryPanel: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            SectionHeader("Delivery", subtitle: "Linear issues joined with their pull requests")
+            if let e = errors[.linear] {
+                LoadErrorRow(service: .linear, message: e) { Task { await load() } }
+            } else if !loaded {
+                RoundedRectangle(cornerRadius: 2).fill(Theme.raised).frame(height: 12)
+            } else if delivery.total == 0 {
+                EmptySection(title: "No issues yet", message: "Issues added to this project in Linear appear here.")
+            } else {
+                DeliveryStrip(delivery: delivery, height: 12)
+                DeliveryLegend(delivery: delivery)
+                if !toClose.isEmpty { toCloseList }
+            }
+        }
+        .panel()
+    }
+
+    private var toCloseList: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text("Merged, not closed in Linear").font(Theme.smallStrong).foregroundStyle(Theme.text)
+                .padding(.bottom, 8)
+            ForEach(capped(toClose, key: "close"), id: \.issue.id) { item in
+                Rectangle().fill(Theme.rule).frame(height: 1)
+                HStack(spacing: 12) {
+                    issueID(item.issue)
+                    Text(item.issue.title).foregroundStyle(Theme.text).lineLimit(1).help(item.issue.title)
+                    Spacer(minLength: 12)
+                    if let url = URL(string: item.pull.url) {
+                        Link(destination: url) { Text(verbatim: "#\(item.pull.number)").font(Theme.id) }
+                            .help("Open the merged pull request")
+                    }
+                    Text(item.pull.mergedAt.map { "merged \($0.formatted(.relative(presentation: .named)))" } ?? "merged")
+                        .font(Theme.small).foregroundStyle(Theme.muted)
+                        .frame(width: 130, alignment: .trailing)
+                }
+                .font(Theme.body)
+                .frame(minHeight: 36)
+            }
+            showAll(toClose.count, key: "close")
         }
     }
 
-    // MARK: Linear
+    // MARK: Issues
 
     private var activeIssues: [LinearIssue] { issues.filter { $0.state.type == "started" } }
     private var todoIssues: [LinearIssue] { issues.filter { ["unstarted", "backlog", "triage"].contains($0.state.type) } }
     private var doneIssues: [LinearIssue] { issues.filter { $0.state.type == "completed" } }
 
-    private var linearSection: some View {
-        SectionCard("Linear", symbol: ServiceKind.linear.symbol) {
-            if let url = project.linear.flatMap({ URL(string: $0.url) }) {
-                Link("Open in Linear", destination: url).font(.callout)
-            }
-        } content: {
+    private var issuesPanel: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            SectionHeader("Issues", subtitle: loaded && !issues.isEmpty
+                          ? "\(activeIssues.count) in progress · \(todoIssues.count) to do · \(doneIssues.count) done" : nil)
             if project.linear == nil {
-                EmptySection(title: "No Linear project", message: "Link a Linear project to see its issues here.")
-                Button("Edit links…", action: edit)
+                EmptySection(title: "No Linear project", message: "Link one to see its issues here.")
             } else if let e = errors[.linear] {
                 LoadErrorRow(service: .linear, message: e) { Task { await load() } }
+            } else if !loaded {
+                ProgressView().controlSize(.small).accessibilityLabel("Loading issues")
             } else if issues.isEmpty {
-                if loaded {
-                    EmptySection(title: "No issues yet", message: "Issues added to this project in Linear appear here.")
-                } else {
-                    ProgressView().controlSize(.small).accessibilityLabel("Loading issues")
-                }
+                EmptySection(title: "No issues yet", message: "Issues added to this project in Linear appear here.")
             } else {
-                let total = activeIssues.count + todoIssues.count + doneIssues.count
-                VStack(alignment: .leading, spacing: 6) {
-                    HStack(alignment: .firstTextBaseline) {
-                        Text(total == 0 ? 0 : Double(doneIssues.count) / Double(total), format: .percent.precision(.fractionLength(0)))
-                            .font(.title2.weight(.semibold)).monospacedDigit()
-                        Text("\(doneIssues.count) of ^[\(total) issue](inflect: true) done")
-                            .foregroundStyle(.secondary).monospacedDigit()
-                    }
-                    ProgressView(value: Double(doneIssues.count), total: Double(max(total, 1)))
-                        .accessibilityLabel("Progress")
-                }
-                issueGroup("In progress", activeIssues)
-                issueGroup("To do", todoIssues)
+                issueGroup("In progress", activeIssues, key: "active")
+                issueGroup("To do", todoIssues, key: "todo")
                 if !doneIssues.isEmpty {
                     DisclosureGroup {
-                        issueList(doneIssues)
+                        issueRows(doneIssues, key: "done")
                     } label: {
-                        Text("Done · \(doneIssues.count)").font(.subheadline.weight(.semibold)).monospacedDigit()
+                        Text("Done · \(doneIssues.count)").font(Theme.smallStrong).foregroundStyle(Theme.text).monospacedDigit()
                     }
                 }
             }
         }
+        .panel()
     }
 
     @ViewBuilder
-    private func issueGroup(_ title: String, _ list: [LinearIssue]) -> some View {
+    private func issueGroup(_ title: String, _ list: [LinearIssue], key: String) -> some View {
         if !list.isEmpty {
-            VStack(alignment: .leading, spacing: 8) {
-                Text("\(title) · \(list.count)").font(.subheadline.weight(.semibold)).monospacedDigit()
-                    .accessibilityAddTraits(.isHeader)
-                issueList(list)
+            VStack(alignment: .leading, spacing: 0) {
+                Text("\(title) · \(list.count)").font(Theme.smallStrong).foregroundStyle(Theme.text).monospacedDigit()
+                    .padding(.bottom, 8)
+                issueRows(list, key: key)
             }
         }
     }
 
-    private func issueList(_ list: [LinearIssue]) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            ForEach(list) { issue in
-                HStack(spacing: 8) {
-                    Text(issue.identifier).font(.caption.monospaced()).foregroundStyle(.secondary)
-                    if let url = URL(string: issue.url) {
-                        Link(issue.title, destination: url).lineLimit(1).help(issue.title)
-                    } else {
-                        Text(issue.title).lineLimit(1).help(issue.title)
-                    }
-                    Spacer(minLength: 8)
-                    Text(issue.assignee?.name ?? "Unassigned").font(.caption).foregroundStyle(.secondary).lineLimit(1)
+    private func issueRows(_ list: [LinearIssue], key: String) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            ForEach(capped(list, key: key)) { issue in
+                Rectangle().fill(Theme.rule).frame(height: 1)
+                HStack(spacing: 12) {
+                    issueID(issue)
+                    Text(issue.title).foregroundStyle(Theme.text).lineLimit(1).help(issue.title)
+                    Spacer(minLength: 12)
+                    Text(issue.assignee?.name ?? "Unassigned").font(Theme.small).foregroundStyle(Theme.muted).lineLimit(1)
                 }
+                .font(Theme.body)
+                .frame(minHeight: 36)
                 .accessibilityElement(children: .combine)
             }
+            showAll(list.count, key: key)
         }
+    }
+
+    private func issueID(_ issue: LinearIssue) -> some View {
+        Group {
+            if let url = URL(string: issue.url) {
+                Link(destination: url) { Text(issue.identifier) }.help("Open \(issue.identifier) in Linear")
+            } else {
+                Text(issue.identifier)
+            }
+        }
+        .font(Theme.id)
+        .frame(width: 76, alignment: .leading)
     }
 
     // MARK: Slack
 
-    private var slackSection: some View {
-        SectionCard("Slack", symbol: ServiceKind.slack.symbol) {
-            if let url = slackURL { Link("Open in Slack", destination: url).font(.callout) }
-        } content: {
+    private var slackPanel: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            SectionHeader("Slack", subtitle: project.slack.map { "#\($0.name)" }) {
+                if let url = slackURL { Link("Open in Slack", destination: url).font(Theme.small) }
+            }
             if project.slack == nil {
                 EmptySection(title: "No Slack channel", message: "Link a channel to follow its conversation here.")
-                Button("Edit links…", action: edit)
             } else if let e = errors[.slack] {
                 LoadErrorRow(service: .slack, message: e) { Task { await load() } }
+            } else if !loaded {
+                ProgressView().controlSize(.small).accessibilityLabel("Loading messages")
             } else if messages.isEmpty {
-                if loaded {
-                    EmptySection(title: "No messages yet", message: "Messages posted in #\(project.slack?.name ?? "") appear here.")
-                } else {
-                    ProgressView().controlSize(.small).accessibilityLabel("Loading messages")
-                }
+                EmptySection(title: "No messages yet", message: "Messages posted in #\(project.slack?.name ?? "") appear here.")
             } else {
-                VStack(alignment: .leading, spacing: 16) {
-                    ForEach(messages.prefix(20)) { m in
-                        VStack(alignment: .leading, spacing: 4) {
-                            HStack(spacing: 6) {
-                                Text(m.user.flatMap { users[$0] } ?? "Integration").font(.callout.weight(.semibold))
-                                Text(m.date.formatted(.relative(presentation: .named)))
-                                    .font(.caption).foregroundStyle(.secondary)
-                                if let r = m.reply_count, r > 0 {
-                                    Text("· ^[\(r) reply](inflect: true)").font(.caption).foregroundStyle(.secondary)
-                                }
-                            }
-                            Text(m.text ?? "")
-                                .lineLimit(4)
-                                .lineSpacing(2)
-                                .textSelection(.enabled)
-                                .help(m.text ?? "")
-                        }
-                        .accessibilityElement(children: .combine)
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(Array(messages.prefix(6).enumerated()), id: \.element.id) { index, m in
+                        if index > 0 { Rectangle().fill(Theme.rule).frame(height: 1) }
+                        message(m).padding(.vertical, 10)
                     }
                 }
             }
         }
+        .panel()
+    }
+
+    private func message(_ m: SlackMessage) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 6) {
+                Text(m.user.flatMap { users[$0] } ?? "Integration").font(Theme.bodyStrong).foregroundStyle(Theme.text)
+                Text(m.date.formatted(.relative(presentation: .named))).font(Theme.small).foregroundStyle(Theme.muted)
+                if let r = m.reply_count, r > 0 {
+                    Text("· ^[\(r) reply](inflect: true)").font(Theme.small).foregroundStyle(Theme.muted)
+                }
+            }
+            Text(m.text ?? "")
+                .font(Theme.body)
+                .foregroundStyle(Theme.text)
+                .lineLimit(3)
+                .lineSpacing(2)
+                .textSelection(.enabled)
+                .help(m.text ?? "")
+        }
+        .accessibilityElement(children: .combine)
     }
 
     // MARK: GitHub
 
-    private var githubSection: some View {
-        SectionCard("GitHub", symbol: ServiceKind.github.symbol) {
-            if let repo = project.githubRepo, let url = URL(string: "https://github.com/\(repo)") {
-                Link("Open on GitHub", destination: url).font(.callout)
+    private var githubPanel: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            SectionHeader("GitHub", subtitle: pullsScoped ? "Pull requests linked to this project's Linear issues"
+                                                          : "Whole repository") {
+                if let repo = project.githubRepo, let url = URL(string: "https://github.com/\(repo)") {
+                    Link("Open on GitHub", destination: url).font(Theme.small)
+                }
             }
-        } content: {
             if let e = errors[.github] {
                 LoadErrorRow(service: .github, message: e) { Task { await load() } }
             } else {
                 ViewThatFits(in: .horizontal) {
-                    HStack(alignment: .top, spacing: 32) { pullList; runList }
-                    VStack(alignment: .leading, spacing: 16) { pullList; runList }
+                    HStack(alignment: .top, spacing: 32) { openPulls; pipelineRuns }
+                    VStack(alignment: .leading, spacing: 20) { openPulls; pipelineRuns }
                 }
-                mergedList
+                mergedPulls
             }
         }
+        .panel()
     }
 
-    private var pullList: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Open pull requests · \(pulls.count)").font(.subheadline.weight(.semibold)).monospacedDigit()
-                Text(pullsScoped ? "Linked to this project's Linear issues" : "Whole repository")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
+    private var openPulls: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text("Open · \(pulls.count)").font(Theme.smallStrong).foregroundStyle(Theme.text).monospacedDigit()
+                .padding(.bottom, 8)
             if pulls.isEmpty && loaded {
-                Text(pullsScoped
-                     ? "No open pull request mentions this project's issues. Name branches after the Linear issue (e.g. its suggested branch) to link them."
-                     : "No open pull requests.")
-                    .font(.callout).foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                Text(pullsScoped ? "No open pull request mentions this project's issues." : "No open pull requests.")
+                    .font(Theme.body).foregroundStyle(Theme.muted)
             }
-            ForEach(pulls) { match in
-                let pr = match.pull
-                HStack(spacing: 8) {
-                    if let issue = match.issue {
-                        if let url = issues.first(where: { $0.identifier == issue }).flatMap({ URL(string: $0.url) }) {
-                            Link(issue, destination: url).font(.caption.monospaced()).help("Open \(issue) in Linear")
-                        } else {
-                            Text(issue).font(.caption.monospaced()).foregroundStyle(.secondary)
-                        }
-                    }
-                    Text(verbatim: "#\(pr.number)").font(.caption.monospaced()).foregroundStyle(.secondary)
-                    if let url = URL(string: pr.html_url) {
-                        Link(pr.title, destination: url).lineLimit(1).help(pr.title)
-                    }
-                    if pr.draft == true { Text("Draft").font(.caption).foregroundStyle(.secondary) }
-                    Spacer(minLength: 8)
-                    Text(pr.user.login).font(.caption).foregroundStyle(.secondary)
-                }
-                .accessibilityElement(children: .combine)
+            ForEach(capped(pulls, key: "open")) { match in
+                Rectangle().fill(Theme.rule).frame(height: 1)
+                pullRow(issue: match.issue, number: match.pull.number, title: match.pull.title,
+                        url: match.pull.html_url, trailing: match.pull.draft == true ? "Draft" : match.pull.user.login)
             }
+            showAll(pulls.count, key: "open")
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private var runList: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Pipeline").font(.subheadline.weight(.semibold))
-                Text(pullsScoped ? "Latest run of each pull request branch" : "Recent runs, all branches")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
+    private var pipelineRuns: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text(pullsScoped ? "Pipeline · latest run per branch" : "Pipeline · recent runs")
+                .font(Theme.smallStrong).foregroundStyle(Theme.text)
+                .padding(.bottom, 8)
             if runs.isEmpty && loaded {
-                Text(pullsScoped && pulls.isEmpty ? "No open pull requests, so no runs to show."
-                     : pullsScoped ? "No runs on these branches yet." : "No workflow runs yet.")
-                    .font(.callout).foregroundStyle(.secondary)
+                Text(pullsScoped && pulls.isEmpty ? "No open pull requests, so no runs to show." : "No runs yet.")
+                    .font(Theme.body).foregroundStyle(Theme.muted)
             }
-            ForEach(runs.prefix(8)) { run in
-                HStack(spacing: 8) {
-                    PipelineBadge(state: .init(run: run)).font(.caption)
+            ForEach(runs.prefix(6)) { run in
+                Rectangle().fill(Theme.rule).frame(height: 1)
+                HStack(spacing: 12) {
+                    PipelineBadge(state: .init(run: run)).frame(width: 96, alignment: .leading)
                     if let url = URL(string: run.html_url) {
                         Link(run.name ?? "Workflow run", destination: url).lineLimit(1)
                     }
-                    Text(run.head_branch ?? "").font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                    Spacer(minLength: 8)
+                    Text(run.head_branch ?? "").font(Theme.small).foregroundStyle(Theme.muted).lineLimit(1)
+                        .help(run.head_branch ?? "")
                 }
+                .font(Theme.body)
+                .frame(minHeight: 36)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private var mergedList: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Recently merged · \(merged.count)").font(.subheadline.weight(.semibold)).monospacedDigit()
-                Text(pullsScoped ? "Linked to this project's Linear issues" : "Whole repository")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
+    private var mergedPulls: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text("Recently merged · \(merged.count)").font(Theme.smallStrong).foregroundStyle(Theme.text).monospacedDigit()
+                .padding(.bottom, 8)
             if merged.isEmpty && loaded {
-                Text(pullsScoped ? "No merged pull request is linked to this project's issues."
-                                 : "No recently merged pull requests.")
-                    .font(.callout).foregroundStyle(.secondary)
+                Text(pullsScoped ? "No merged pull request is linked to this project's issues." : "No recently merged pull requests.")
+                    .font(Theme.body).foregroundStyle(Theme.muted)
             }
-            ForEach(showAllMerged ? merged : Array(merged.prefix(8))) { item in
-                HStack(spacing: 8) {
-                    Image(systemName: "arrow.triangle.merge").foregroundStyle(.purple).accessibilityHidden(true)
-                    if let issue = item.issue {
-                        if let url = issues.first(where: { $0.identifier == issue }).flatMap({ URL(string: $0.url) }) {
-                            Link(issue, destination: url).font(.caption.monospaced()).help("Open \(issue) in Linear")
-                        } else {
-                            Text(issue).font(.caption.monospaced()).foregroundStyle(.secondary)
-                        }
-                    }
-                    Text(verbatim: "#\(item.number)").font(.caption.monospaced()).foregroundStyle(.secondary)
-                    if let url = URL(string: item.url) {
-                        Link(item.title ?? "Pull request #" + String(item.number), destination: url)
-                            .lineLimit(1).help(item.title ?? "Linked in Linear; older than the recent history Dever scans on GitHub")
-                    }
-                    Spacer(minLength: 8)
-                    if let date = item.mergedAt {
-                        Text(date.formatted(.relative(presentation: .named))).font(.caption).foregroundStyle(.secondary)
-                    }
-                }
-                .accessibilityElement(children: .combine)
+            ForEach(capped(merged, key: "merged")) { item in
+                Rectangle().fill(Theme.rule).frame(height: 1)
+                pullRow(issue: item.issue, number: item.number, title: item.title ?? "Pull request #" + String(item.number),
+                        url: item.url, trailing: item.mergedAt.map { $0.formatted(.relative(presentation: .named)) } ?? "")
             }
-            if merged.count > 8 {
-                Button(showAllMerged ? "Show fewer" : "Show all \(merged.count)") { showAllMerged.toggle() }
-                    .buttonStyle(.link)
-            }
+            showAll(merged.count, key: "merged")
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func pullRow(issue: String?, number: Int, title: String, url: String, trailing: String) -> some View {
+        HStack(spacing: 12) {
+            Group {
+                if let issue, let link = issues.first(where: { $0.identifier == issue }).flatMap({ URL(string: $0.url) }) {
+                    Link(destination: link) { Text(issue) }.help("Open \(issue) in Linear")
+                } else {
+                    Text(issue ?? "").foregroundStyle(Theme.muted)
+                }
+            }
+            .font(Theme.id)
+            .frame(width: 76, alignment: .leading)
+            Text(verbatim: "#\(number)").font(Theme.id).foregroundStyle(Theme.muted).frame(width: 52, alignment: .leading)
+            if let link = URL(string: url) {
+                Link(title, destination: link).foregroundStyle(Theme.text).lineLimit(1).help(title)
+            }
+            Spacer(minLength: 12)
+            Text(trailing).font(Theme.small).foregroundStyle(Theme.muted).lineLimit(1)
+        }
+        .font(Theme.body)
+        .frame(minHeight: 36)
+        .accessibilityElement(children: .combine)
+    }
+
+    // MARK: Capped lists
+
+    private static let cap = 6
+
+    private func capped<T>(_ list: [T], key: String) -> [T] {
+        expanded.contains(key) ? list : Array(list.prefix(Self.cap))
+    }
+
+    @ViewBuilder
+    private func showAll(_ count: Int, key: String) -> some View {
+        if count > Self.cap {
+            Button(expanded.contains(key) ? "Show fewer" : "Show all \(count)") {
+                if expanded.contains(key) { expanded.remove(key) } else { expanded.insert(key) }
+            }
+            .buttonStyle(.link)
+            .font(Theme.small)
+            .padding(.top, 8)
+        }
     }
 
     // MARK: Loading

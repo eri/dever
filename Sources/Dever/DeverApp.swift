@@ -12,7 +12,7 @@ struct DeverApp: App {
             ContentView()
                 .environmentObject(app)
                 .environmentObject(store)
-                .frame(minWidth: 900, minHeight: 600)
+                .frame(minWidth: 1080, minHeight: 680)
         }
     }
 }

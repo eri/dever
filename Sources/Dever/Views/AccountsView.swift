@@ -3,37 +3,57 @@ import UserNotifications
 
 struct AccountsView: View {
     @EnvironmentObject var app: AppState
+
+    private var summary: String {
+        let connected = ServiceKind.allCases.filter(app.isConnected)
+        if connected.count == ServiceKind.allCases.count { return "Slack, Linear and GitHub are connected." }
+        let missing = ServiceKind.allCases.filter { !app.isConnected($0) }.map(\.label)
+        return "Connect \(ListFormatter.localizedString(byJoining: missing)) to see every part of your projects."
+    }
     @AppStorage("slackChannelPrefix") private var channelPrefix = "proj-"
     @State private var loginSheet: ServiceKind?
 
     var body: some View {
-        Form {
-            Section("Accounts") {
-                ForEach(ServiceKind.allCases) { s in
-                    AccountRow(service: s, connect: { loginSheet = s })
+        ScrollView {
+            VStack(alignment: .leading, spacing: 32) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Accounts").font(Theme.title).foregroundStyle(Theme.text).accessibilityAddTraits(.isHeader)
+                    Text(summary).font(Theme.body).foregroundStyle(Theme.muted)
+                }
+                SettingsSection("Connected services",
+                                description: "Connect opens your browser, where you approve the team's Dever app. Linear renews its access on its own; Slack and GitHub don't expire. Tokens stay in the macOS Keychain.") {
+                    VStack(spacing: 0) {
+                        ForEach(Array(ServiceKind.allCases.enumerated()), id: \.element) { index, s in
+                            if index > 0 { Rectangle().fill(Theme.border).frame(height: 1) }
+                            AccountRow(service: s, connect: { loginSheet = s }).padding(.vertical, 12)
+                        }
+                    }
+                }
+                Rectangle().fill(Theme.border).frame(height: 1)
+                SettingsSection("Notifications",
+                                description: "Dever checks your projects every 5 minutes while it runs, even with its window closed, and tells you once about each situation.") {
+                    NotificationSettings()
+                }
+                Rectangle().fill(Theme.border).frame(height: 1)
+                SettingsSection("Slack channel naming",
+                                description: "Project channels start with this prefix. Import from Slack uses it to find them and to name the projects.") {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Prefix").font(Theme.bodyStrong).foregroundStyle(Theme.text)
+                        TextField("Prefix", text: $channelPrefix, prompt: Text("proj-"))
+                            .textFieldStyle(.roundedBorder)
+                            .frame(maxWidth: 240)
+                            .labelsHidden()
+                        Text("A project named \u{201C}Acme website\u{201D} gets #\(Naming.channelName(for: "Acme website", prefix: channelPrefix)).")
+                            .font(Theme.small).foregroundStyle(Theme.muted)
+                    }
+                    .padding(.vertical, 12)
                 }
             }
-            NotificationSettings()
-            Section {
-                TextField("Project channel prefix", text: $channelPrefix)
-                Text("Example: \(Naming.channelName(for: "Acme Corp", prefix: channelPrefix))")
-                    .font(.caption).foregroundStyle(.secondary)
-            } header: {
-                Text("Slack convention")
-            }
-            Section {
-                Text("""
-                Slack and Linear: "Connect" opens your browser, you approve the team's Dever app, \
-                then come back here. Linear renews its access automatically; Slack never expires. \
-                GitHub: enter a code on github.com, or reuse your GitHub CLI session. \
-                No API key to create; access tokens are stored in the macOS Keychain.
-                """)
-                .font(.callout).foregroundStyle(.secondary)
-            } header: {
-                Text("How it works")
-            }
+            .padding(Theme.pad)
+            .frame(maxWidth: 1100, alignment: .leading)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .formStyle(.grouped)
+        .sheetBackground()
         .navigationTitle("Accounts")
         .sheet(item: $loginSheet) { s in
             switch s {
@@ -85,7 +105,9 @@ private struct AccountRow: View {
 
     var body: some View {
         HStack {
-            Label(service.label, systemImage: service.symbol).frame(width: 110, alignment: .leading)
+            Label(service.label, systemImage: service.symbol)
+                .font(Theme.bodyStrong).foregroundStyle(Theme.text)
+                .frame(width: 100, alignment: .leading)
             VStack(alignment: .leading, spacing: 2) {
                 if let detail {
                     Label {
@@ -116,8 +138,11 @@ private struct AccountRow: View {
                 if checking {
                     ProgressView().controlSize(.small).accessibilityLabel("Checking connection")
                 }
-                Button("Check connection") { Task { await test() } }.disabled(checking)
+                Button("Check connection") { Task { await test() } }
+                    .buttonStyle(SecondaryButtonStyle())
+                    .disabled(checking)
                 Button("Disconnect…") { confirmDisconnect = true }
+                    .buttonStyle(SecondaryButtonStyle())
                     .confirmationDialog("Disconnect \(service.label)?", isPresented: $confirmDisconnect) {
                         Button("Disconnect \(service.label)", role: .destructive) {
                             status = nil
@@ -132,7 +157,7 @@ private struct AccountRow: View {
                 Text("Approve in your browser…").font(.caption).foregroundStyle(.secondary)
                 Button("Cancel") { browserFlow?.cancel(); browserFlow = nil }
             } else {
-                Button("Connect") { start() }.buttonStyle(.borderedProminent)
+                Button("Connect") { start() }.buttonStyle(PrimaryButtonStyle())
             }
         }
     }
@@ -179,7 +204,7 @@ private struct GitHubLoginSheet: View {
                 Link("Open \(code.verification_uri)", destination: URL(string: code.verification_uri)!)
                 ProgressView("Waiting for authorization…").controlSize(.small)
             } else {
-                Button("Sign in with GitHub (code)") { startDeviceFlow() }.buttonStyle(.borderedProminent)
+                Button("Sign in with GitHub (code)") { startDeviceFlow() }.buttonStyle(PrimaryButtonStyle())
                 Button("Use GitHub CLI session (gh)") { importGh() }
             }
             if let error {
@@ -230,7 +255,7 @@ private struct NotificationSettings: View {
     @State private var status: UNAuthorizationStatus = .notDetermined
 
     var body: some View {
-        Section {
+        VStack(alignment: .leading, spacing: 12) {
             switch status {
             case .denied:
                 HStack {
@@ -253,7 +278,7 @@ private struct NotificationSettings: View {
                     Button("Turn on notifications") {
                         Task { _ = await Notifier.shared.requestAuthorization(); await refresh() }
                     }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(PrimaryButtonStyle())
                 }
             default:
                 ForEach(AlertKind.allCases) { kind in
@@ -263,16 +288,53 @@ private struct NotificationSettings: View {
                     ))
                 }
             }
-        } header: {
-            Text("Notifications")
-        } footer: {
-            Text("Dever checks your projects every 5 minutes while it's running, even with its window closed. Each situation is notified once.")
-                .font(.caption).foregroundStyle(.secondary)
         }
+        .font(Theme.body)
+        .padding(.vertical, 12)
         .task { await refresh() }
     }
 
     private func refresh() async {
         status = await Notifier.shared.authorizationStatus()
+    }
+}
+
+/// Settings row: a label column with the section's title and description, beside its panel.
+private struct SettingsSection<Content: View>: View {
+    let title: String
+    let description: String
+    @ViewBuilder var content: () -> Content
+
+    init(_ title: String, description: String, @ViewBuilder content: @escaping () -> Content) {
+        self.title = title
+        self.description = description
+        self.content = content
+    }
+
+    var body: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(alignment: .top, spacing: 32) {
+                label.frame(width: 280, alignment: .leading)
+                panel.frame(minWidth: 480)
+            }
+            VStack(alignment: .leading, spacing: 12) { label; panel }
+        }
+    }
+
+    private var label: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title).font(Theme.section).foregroundStyle(Theme.text).accessibilityAddTraits(.isHeader)
+            Text(description).font(Theme.body).foregroundStyle(Theme.muted)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.top, 6)
+    }
+
+    private var panel: some View {
+        content()
+            .padding(.horizontal, 16)
+            .padding(.vertical, 4)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Theme.raised, in: RoundedRectangle(cornerRadius: Theme.radiusSheet))
     }
 }
