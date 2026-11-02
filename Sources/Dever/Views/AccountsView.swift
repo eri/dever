@@ -137,10 +137,7 @@ private struct AccountRow: View {
             }
             Spacer(minLength: 12)
             if app.isConnected(service) {
-                if checking {
-                    ProgressView().controlSize(.small).accessibilityLabel("Checking connection")
-                }
-                Button("Check connection") { Task { await test() } }
+                Button(checking ? "Checking…" : "Check connection") { Task { await test() } }
                     .buttonStyle(SecondaryButtonStyle())
                     .disabled(checking)
                 Button("Disconnect…") { confirmDisconnect = true }
@@ -155,7 +152,6 @@ private struct AccountRow: View {
                         Text("Dever stops showing \(service.label) data until you connect again. Your projects and their links are kept.")
                     }
             } else if browserFlow != nil {
-                ProgressView().controlSize(.small)
                 Text("Approve in your browser…").font(.caption).foregroundStyle(.secondary)
                 Button("Cancel") { browserFlow?.cancel(); browserFlow = nil }
             } else {
@@ -204,7 +200,7 @@ private struct GitHubLoginSheet: View {
                     }
                 }
                 Link("Open \(code.verification_uri)", destination: URL(string: code.verification_uri)!)
-                ProgressView("Waiting for authorization…").controlSize(.small)
+                Text("Waiting for you to approve on GitHub…").font(Theme.body).foregroundStyle(Theme.muted)
             } else {
                 Button("Sign in with GitHub (code)") { startDeviceFlow() }.buttonStyle(PrimaryButtonStyle())
                 Button("Use GitHub CLI session (gh)") { importGh() }

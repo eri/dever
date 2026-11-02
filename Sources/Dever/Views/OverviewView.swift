@@ -95,7 +95,7 @@ struct OverviewView: View {
     private var freshness: some View {
         HStack(spacing: 6) {
             if store.isRefreshing {
-                ProgressView().controlSize(.small).accessibilityLabel("Refreshing")
+                Text("Refreshing…").font(Theme.small).foregroundStyle(Theme.muted)
             } else if let last = store.lastRefresh {
                 Text("Updated \(last.formatted(.relative(presentation: .named)))")
                     .font(Theme.small).foregroundStyle(Theme.muted)
@@ -131,10 +131,16 @@ struct OverviewView: View {
         let count = statuses.filter { matches(f, $0.0, $0.1) }.count
         let selected = filter == f
         let valueColor: Color = f == .attention && count > 0 ? Theme.negative : Theme.text
+        // Until every project has loaded, only the total is known.
+        let known = f == .all || app.projects.allSatisfy { store.snapshots[$0.id] != nil }
         return Button { filter = f } label: {
             VStack(alignment: .leading, spacing: 6) {
                 Text(f.rawValue).font(Theme.smallStrong).foregroundStyle(selected ? Theme.text : Theme.muted)
-                Text(count, format: .number).font(Theme.kpi).foregroundStyle(valueColor).monospacedDigit()
+                if known {
+                    Text(count, format: .number).font(Theme.kpi).foregroundStyle(valueColor).monospacedDigit()
+                } else {
+                    Skeleton(width: 28, height: 26, radius: 4).padding(.vertical, 4)
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 20)
@@ -258,7 +264,11 @@ private struct ProjectRow: View {
             HStack(spacing: 8) {
                 Text(project.name).font(Theme.bodyStrong).foregroundStyle(Theme.text).lineLimit(1)
                     .help(project.name)
-                StatusBadge(status: status)
+                if status == .loading {
+                    Skeleton(width: 72, height: 20, radius: 4)
+                } else {
+                    StatusBadge(status: status)
+                }
             }
             Text(links).font(Theme.small).foregroundStyle(Theme.muted).lineLimit(1).help(links)
         }
@@ -283,9 +293,10 @@ private struct ProjectRow: View {
             Text("Linear unavailable").font(Theme.small).foregroundStyle(Theme.negative).help(e)
         } else {
             VStack(alignment: .leading, spacing: 6) {
-                RoundedRectangle(cornerRadius: 2).fill(Theme.raised).frame(height: 8)
-                RoundedRectangle(cornerRadius: 2).fill(Theme.raised).frame(width: 120, height: 12)
+                Skeleton(height: 8, radius: 2)
+                Skeleton(width: 120)
             }
+            .accessibilityElement()
             .accessibilityLabel("Loading")
         }
     }
@@ -295,8 +306,8 @@ private struct ProjectRow: View {
             Text("\(d.shipped)/\(d.total) shipped")
                 .foregroundStyle(Theme.text).monospacedDigit()
             if d.merged > 0 {
-                Text("· \(d.merged) to close").foregroundStyle(Theme.chart3).monospacedDigit()
-                    .help("Merged in GitHub but still open in Linear")
+                Text("· \(d.merged) to move").foregroundStyle(Theme.chart3).monospacedDigit()
+                    .help("Merged in GitHub but still marked in progress in Linear")
             } else if let target = snapshot?.linear?.targetDate {
                 Text("· due \(target.formatted(.dateTime.day().month(.abbreviated)))").foregroundStyle(Theme.muted)
             }
@@ -312,8 +323,10 @@ private struct ProjectRow: View {
                 Text(g.openPRs, format: .number).foregroundStyle(Theme.text).monospacedDigit()
                 Text("open").font(Theme.small).foregroundStyle(Theme.muted)
             }
+        } else if project.githubRepo == nil {
+            dash("No repository linked")
         } else {
-            dash(project.githubRepo == nil ? "No repository linked" : nil)
+            VStack(alignment: .trailing, spacing: 4) { Skeleton(width: 20, height: 14); Skeleton(width: 32, height: 10) }
         }
     }
 
@@ -321,8 +334,10 @@ private struct ProjectRow: View {
     private var pipeline: some View {
         if let g = snapshot?.github {
             PipelineBadge(state: g.pipeline)
+        } else if project.githubRepo == nil {
+            dash("No repository linked")
         } else {
-            dash(project.githubRepo == nil ? "No repository linked" : nil)
+            Skeleton(width: 72, height: 14)
         }
     }
 
@@ -334,13 +349,15 @@ private struct ProjectRow: View {
                 Text(s.lastActivity.map { "last \($0.formatted(.relative(presentation: .named)))" } ?? "no messages")
                     .font(Theme.small).foregroundStyle(Theme.muted).lineLimit(1)
             }
+        } else if project.slack == nil {
+            dash("No Slack channel linked")
         } else {
-            dash(project.slack == nil ? "No Slack channel linked" : nil)
+            VStack(alignment: .trailing, spacing: 4) { Skeleton(width: 20, height: 14); Skeleton(width: 96, height: 10) }
         }
     }
 
     /// Missing or not applicable: a grey dash, never a zero.
-    private func dash(_ help: String?) -> some View {
-        Text("—").foregroundStyle(Theme.muted).help(help ?? "Loading")
+    private func dash(_ help: String) -> some View {
+        Text("—").foregroundStyle(Theme.muted).help(help)
     }
 }

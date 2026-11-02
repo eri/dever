@@ -80,7 +80,7 @@ extension Project {
             out.append("No Slack activity for \(Int(Date().timeIntervalSince(last) / 86_400)) days")
         }
         if let stale = s.github?.mergedButOpen, !stale.isEmpty {
-            out.append(Plural.text("^[\(stale.count) issue](inflect: true) merged but not done"))
+            out.append(Plural.text("^[\(stale.count) merged issue](inflect: true) still marked in progress"))
         }
         out += s.errors.keys.sorted { $0.rawValue < $1.rawValue }.map { "Couldn't load \($0.label) data" }
         return out
@@ -177,7 +177,7 @@ final class OverviewStore: ObservableObject {
         case .failure(let e): s.errors[.github] = e.localizedDescription
         }
         if let issues {
-            s.delivery = Delivery(issues: issues.map { ($0.identifier, $0.state.type) },
+            s.delivery = Delivery(issues: issues.map { ($0.identifier, $0.state.type, $0.state.name) },
                                   openPR: s.github?.openPRIssues ?? [],
                                   mergedPR: s.github?.mergedPRIssues ?? [])
         }
@@ -231,11 +231,12 @@ final class OverviewStore: ObservableObject {
                                           wholeRepository: p.showsWholeRepository)
             if prs.scoped, let issues {
                 let pipeline = prs.pipeline(from: try await repos.runs(repo))
-                // Issues still open in Linear although one of their PRs is merged.
-                let open = Set(issues.filter { !["completed", "canceled"].contains($0.state.type) }.map(\.identifier))
                 let merged = ProjectPullRequests(pulls: try await repos.mergedPulls(repo), issues: issues, wholeRepository: false)
                 let mergedIDs = Set(merged.matches.compactMap(\.issue))
-                let stale = mergedIDs.intersection(open).sorted()
+                // Merged in code while the ticket still says "in progress" (review states are fine).
+                let stale = issues.filter {
+                    Delivery.isBehind(stateType: $0.state.type, stateName: $0.state.name, merged: mergedIDs.contains($0.identifier))
+                }.map(\.identifier).sorted()
                 return .success(.init(openPRs: prs.matches.count, pipeline: pipeline.state, scoped: true,
                                       mergedButOpen: stale,
                                       openPRIssues: Set(prs.matches.compactMap(\.issue)),

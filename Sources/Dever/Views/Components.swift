@@ -214,3 +214,52 @@ struct HoverRow: ViewModifier {
 extension View {
     func hoverRow() -> some View { modifier(HoverRow()) }
 }
+
+// MARK: - Skeletons
+
+/// Placeholder at the real size of the value it stands for, so nothing shifts when data lands.
+/// Flat (no shimmer); a slow pulse says it's alive, except under Reduce Motion.
+struct Skeleton: View {
+    var width: CGFloat? = nil
+    var height: CGFloat = 12
+    var radius: CGFloat = 3
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var dim = false
+
+    var body: some View {
+        RoundedRectangle(cornerRadius: radius)
+            .fill(Theme.empty)
+            .frame(width: width, height: height)
+            .frame(maxWidth: width == nil ? .infinity : nil, alignment: .leading)
+            .opacity(dim ? 0.5 : 1)
+            .onAppear {
+                guard !reduceMotion else { return }
+                withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) { dim = true }
+            }
+            .accessibilityHidden(true)
+    }
+}
+
+/// Rows of skeleton lines in the shape of a list.
+struct SkeletonRows: View {
+    var count = 4
+    var leading: CGFloat? = 64
+    var trailing: CGFloat? = 72
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            ForEach(0..<count, id: \.self) { i in
+                if i > 0 { Rectangle().fill(Theme.rule).frame(height: 1) }
+                HStack(spacing: 12) {
+                    if let leading { Skeleton(width: leading) }
+                    Skeleton().frame(maxWidth: [260, 200, 300, 230, 180, 280][i % 6])
+                    Spacer(minLength: 12)
+                    if let trailing { Skeleton(width: trailing) }
+                }
+                .frame(height: 36)
+            }
+        }
+        .accessibilityElement()
+        .accessibilityLabel("Loading")
+    }
+}

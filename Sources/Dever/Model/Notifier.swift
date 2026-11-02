@@ -12,7 +12,7 @@ enum AlertKind: String, CaseIterable, Identifiable {
         switch self {
         case .pipelineFailing: "Notify when a project's pipeline starts failing"
         case .pastTarget: "Notify when a project passes its target date"
-        case .mergedButOpen: "Notify when issues have merged pull requests but aren't done"
+        case .mergedButOpen: "Notify when merged issues are still marked in progress"
         }
     }
 
@@ -48,8 +48,8 @@ extension Project {
         if let stale = s.github?.mergedButOpen, !stale.isEmpty {
             // Keyed by the issue list, so a newly affected issue notifies again.
             out.append(.init(kind: .mergedButOpen, key: "merged:" + stale.joined(separator: ","),
-                             title: "\(name): " + Plural.text("^[\(stale.count) issue](inflect: true) to close"),
-                             body: "Merged but not done in Linear: \(stale.prefix(5).joined(separator: ", "))\(stale.count > 5 ? "…" : "")."))
+                             title: "\(name): " + Plural.text("^[\(stale.count) issue](inflect: true) to move forward"),
+                             body: "Merged in code, still in progress in Linear: \(stale.prefix(5).joined(separator: ", "))\(stale.count > 5 ? "…" : "")."))
         }
         return out
     }

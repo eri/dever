@@ -16,13 +16,16 @@ enum Snapshotter {
         if let first = projects.first { screens.append(("project", .project(first.id))) }
         screens.append(("accounts", .accounts))
 
-        // Let the first refresh land before the first picture.
-        try? await Task.sleep(nanoseconds: 15_000_000_000)
+        // Let the first refresh land before the first picture; DEVER_SNAPSHOT_WAIT=0 captures
+        // the loading state instead.
+        let wait = ProcessInfo.processInfo.environment["DEVER_SNAPSHOT_WAIT"].flatMap(Double.init) ?? 15
+        try? await Task.sleep(nanoseconds: UInt64(wait * 1_000_000_000))
         for (themeName, appearance) in [("dark", NSAppearance.Name.darkAqua), ("light", .aqua)] {
             NSApp.appearance = NSAppearance(named: appearance)
             for (name, item) in screens {
                 NotificationCenter.default.post(name: .showScreen, object: item)
-                try? await Task.sleep(nanoseconds: (item == .overview ? 3 : 8) * 1_000_000_000)
+                let settle: Double = wait == 0 ? 0.4 : (item == .overview ? 3 : 8)
+                try? await Task.sleep(nanoseconds: UInt64(settle * 1_000_000_000))
                 capture(to: dir.appendingPathComponent("\(name)-\(themeName).png"))
             }
         }

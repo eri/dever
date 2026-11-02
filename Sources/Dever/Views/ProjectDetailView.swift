@@ -22,16 +22,18 @@ struct ProjectDetailView: View {
     private var status: ProjectStatus { project.status(store.snapshots[project.id]) }
 
     private var delivery: Delivery {
-        Delivery(issues: issues.map { ($0.identifier, $0.state.type) },
+        Delivery(issues: issues.map { ($0.identifier, $0.state.type, $0.state.name) },
                  openPR: Set(pulls.compactMap(\.issue)),
                  mergedPR: Set(merged.compactMap(\.issue)))
     }
 
-    /// Open issues whose code is merged: the screen's finding and its action.
+    /// Issues whose code is merged while the ticket still says work is ongoing (review
+    /// and QA states excluded): the screen's finding and its action.
     private var toClose: [(issue: LinearIssue, pull: MergedPull)] {
-        let open = issues.filter { !["completed", "canceled"].contains($0.state.type) }
-        return open.compactMap { issue in
-            merged.first { $0.issue == issue.identifier }.map { (issue, $0) }
+        issues.compactMap { issue in
+            guard let pull = merged.first(where: { $0.issue == issue.identifier }),
+                  Delivery.isBehind(stateType: issue.state.type, stateName: issue.state.name, merged: true) else { return nil }
+            return (issue, pull)
         }
     }
 
@@ -66,15 +68,18 @@ struct ProjectDetailView: View {
                 HStack(alignment: .firstTextBaseline, spacing: 10) {
                     Text(project.name).font(Theme.title).foregroundStyle(Theme.text)
                         .accessibilityAddTraits(.isHeader)
-                    StatusBadge(status: status)
+                    if status == .loading { Skeleton(width: 72, height: 20, radius: 4) } else { StatusBadge(status: status) }
                 }
-                Text(finding).font(Theme.body).foregroundStyle(Theme.muted)
-                    .fixedSize(horizontal: false, vertical: true)
+                if loaded || !project.isComplete {
+                    Text(finding).font(Theme.body).foregroundStyle(Theme.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                } else {
+                    Skeleton(width: 280, height: 14).padding(.vertical, 2)
+                }
                 linkRow
             }
             Spacer(minLength: 16)
             HStack(spacing: 8) {
-                if loading { ProgressView().controlSize(.small).accessibilityLabel("Refreshing") }
                 Button { Task { await load() } } label: {
                     Image(systemName: "arrow.clockwise").foregroundStyle(Theme.muted)
                 }
@@ -85,9 +90,9 @@ struct ProjectDetailView: View {
                 .disabled(loading)
                 Button("Edit links…", action: edit).buttonStyle(SecondaryButtonStyle())
                 if !toClose.isEmpty, let url = project.linear.flatMap({ URL(string: $0.url) }) {
-                    Link(destination: url) { Text("Close \(toClose.count) in Linear") }
+                    Link(destination: url) { Text("Update \(toClose.count) in Linear") }
                         .buttonStyle(PrimaryButtonStyle())
-                        .help("Open the project in Linear to mark its merged issues as done")
+                        .help("Open the project in Linear to move these merged issues forward")
                 }
             }
         }
@@ -96,7 +101,7 @@ struct ProjectDetailView: View {
     private var finding: String {
         if !project.isComplete { return "Link a Slack channel and a Linear project to start tracking." }
         if !toClose.isEmpty {
-            return Plural.text("^[\(toClose.count) issue](inflect: true) shipped in code but still open in Linear.")
+            return Plural.text("^[\(toClose.count) issue](inflect: true) merged in code but still marked in progress in Linear.")
         }
         if loaded, delivery.total > 0 {
             let left = delivery.total - delivery.shipped
@@ -136,7 +141,8 @@ struct ProjectDetailView: View {
             if let e = errors[.linear] {
                 LoadErrorRow(service: .linear, message: e) { Task { await load() } }
             } else if !loaded {
-                RoundedRectangle(cornerRadius: 2).fill(Theme.raised).frame(height: 12)
+                Skeleton(height: 12, radius: 2)
+                HStack(spacing: 16) { Skeleton(width: 110); Skeleton(width: 90); Skeleton(width: 120) }
             } else if delivery.total == 0 {
                 EmptySection(title: "No issues yet", message: "Issues added to this project in Linear appear here.")
             } else {
@@ -150,7 +156,7 @@ struct ProjectDetailView: View {
 
     private var toCloseList: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text("Merged, not closed in Linear").font(Theme.smallStrong).foregroundStyle(Theme.text)
+            Text("Merged, still in progress in Linear").font(Theme.smallStrong).foregroundStyle(Theme.text)
                 .padding(.bottom, 8)
             ForEach(capped(toClose, key: "close"), id: \.issue.id) { item in
                 Rectangle().fill(Theme.rule).frame(height: 1)
@@ -175,24 +181,29 @@ struct ProjectDetailView: View {
 
     // MARK: Issues
 
-    private var activeIssues: [LinearIssue] { issues.filter { $0.state.type == "started" } }
+    private var activeIssues: [LinearIssue] { issues.filter { $0.state.type == "started" && !Delivery.isReviewState($0.state.name) } }
+    private var reviewIssues: [LinearIssue] { issues.filter { $0.state.type == "started" && Delivery.isReviewState($0.state.name) } }
     private var todoIssues: [LinearIssue] { issues.filter { ["unstarted", "backlog", "triage"].contains($0.state.type) } }
     private var doneIssues: [LinearIssue] { issues.filter { $0.state.type == "completed" } }
 
     private var issuesPanel: some View {
         VStack(alignment: .leading, spacing: 16) {
             SectionHeader("Issues", subtitle: loaded && !issues.isEmpty
-                          ? "\(activeIssues.count) in progress · \(todoIssues.count) to do · \(doneIssues.count) done" : nil)
+                          ? "\(activeIssues.count) in progress · \(reviewIssues.count) in review · \(todoIssues.count) to do · \(doneIssues.count) done" : nil)
             if project.linear == nil {
                 EmptySection(title: "No Linear project", message: "Link one to see its issues here.")
             } else if let e = errors[.linear] {
                 LoadErrorRow(service: .linear, message: e) { Task { await load() } }
             } else if !loaded {
-                ProgressView().controlSize(.small).accessibilityLabel("Loading issues")
+                VStack(alignment: .leading, spacing: 8) {
+                    Skeleton(width: 110)
+                    SkeletonRows(count: 5, leading: 64, trailing: 80)
+                }
             } else if issues.isEmpty {
                 EmptySection(title: "No issues yet", message: "Issues added to this project in Linear appear here.")
             } else {
                 issueGroup("In progress", activeIssues, key: "active")
+                issueGroup("In review", reviewIssues, key: "review")
                 issueGroup("To do", todoIssues, key: "todo")
                 if !doneIssues.isEmpty {
                     DisclosureGroup {
@@ -259,7 +270,17 @@ struct ProjectDetailView: View {
             } else if let e = errors[.slack] {
                 LoadErrorRow(service: .slack, message: e) { Task { await load() } }
             } else if !loaded {
-                ProgressView().controlSize(.small).accessibilityLabel("Loading messages")
+                VStack(alignment: .leading, spacing: 20) {
+                    ForEach(0..<3, id: \.self) { i in
+                        VStack(alignment: .leading, spacing: 6) {
+                            Skeleton(width: [120, 96, 140][i], height: 14)
+                            Skeleton(height: 12)
+                            Skeleton(width: [220, 160, 260][i], height: 12)
+                        }
+                    }
+                }
+                .accessibilityElement()
+                .accessibilityLabel("Loading messages")
             } else if messages.isEmpty {
                 EmptySection(title: "No messages yet", message: "Messages posted in #\(project.slack?.name ?? "") appear here.")
             } else {
@@ -298,8 +319,8 @@ struct ProjectDetailView: View {
 
     private var githubPanel: some View {
         VStack(alignment: .leading, spacing: 20) {
-            SectionHeader("GitHub", subtitle: pullsScoped ? "Pull requests linked to this project's Linear issues"
-                                                          : "Whole repository") {
+            SectionHeader("GitHub", subtitle: !loaded ? nil
+                          : pullsScoped ? "Pull requests linked to this project's Linear issues" : "Whole repository") {
                 if let repo = project.githubRepo, let url = URL(string: "https://github.com/\(repo)") {
                     Link("Open on GitHub", destination: url).font(Theme.small)
                 }
@@ -319,8 +340,9 @@ struct ProjectDetailView: View {
 
     private var openPulls: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text("Open · \(pulls.count)").font(Theme.smallStrong).foregroundStyle(Theme.text).monospacedDigit()
+            Text(loaded ? "Open · \(pulls.count)" : "Open").font(Theme.smallStrong).foregroundStyle(Theme.text).monospacedDigit()
                 .padding(.bottom, 8)
+            if !loaded { SkeletonRows(count: 3, leading: 64, trailing: 56) }
             if pulls.isEmpty && loaded {
                 Text(pullsScoped ? "No open pull request mentions this project's issues." : "No open pull requests.")
                     .font(Theme.body).foregroundStyle(Theme.muted)
@@ -340,6 +362,7 @@ struct ProjectDetailView: View {
             Text(pullsScoped ? "Pipeline · latest run per branch" : "Pipeline · recent runs")
                 .font(Theme.smallStrong).foregroundStyle(Theme.text)
                 .padding(.bottom, 8)
+            if !loaded { SkeletonRows(count: 3, leading: 72, trailing: 80) }
             if runs.isEmpty && loaded {
                 Text(pullsScoped && pulls.isEmpty ? "No open pull requests, so no runs to show." : "No runs yet.")
                     .font(Theme.body).foregroundStyle(Theme.muted)
@@ -364,8 +387,9 @@ struct ProjectDetailView: View {
 
     private var mergedPulls: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text("Recently merged · \(merged.count)").font(Theme.smallStrong).foregroundStyle(Theme.text).monospacedDigit()
+            Text(loaded ? "Recently merged · \(merged.count)" : "Recently merged").font(Theme.smallStrong).foregroundStyle(Theme.text).monospacedDigit()
                 .padding(.bottom, 8)
+            if !loaded { SkeletonRows(count: 4, leading: 64, trailing: 96) }
             if merged.isEmpty && loaded {
                 Text(pullsScoped ? "No merged pull request is linked to this project's issues." : "No recently merged pull requests.")
                     .font(Theme.body).foregroundStyle(Theme.muted)

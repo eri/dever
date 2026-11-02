@@ -69,9 +69,13 @@ struct ProjectEditorSheet: View {
                     if app.github == nil {
                         Text("GitHub not connected").foregroundStyle(.secondary)
                     } else {
-                        Picker("Repository", selection: $project.githubRepo) {
-                            Text("None").tag(String?.none)
-                            ForEach(catalog.repos) { Text($0.full_name).tag(Optional($0.full_name)) }
+                        if catalog.loading {
+                            loadingRow("Repository")
+                        } else {
+                            Picker("Repository", selection: $project.githubRepo) {
+                                Text("None").tag(String?.none)
+                                ForEach(catalog.repos) { Text($0.full_name).tag(Optional($0.full_name)) }
+                            }
                         }
                         if project.githubRepo != nil {
                             Toggle(isOn: Binding(get: { project.githubWholeRepo == true },
@@ -90,10 +94,7 @@ struct ProjectEditorSheet: View {
             }
             .formStyle(.grouped)
             HStack(spacing: 12) {
-                if catalog.loading || saving {
-                    ProgressView().controlSize(.small).accessibilityLabel(saving ? "Saving" : "Loading")
-                }
-                Text(consequence).font(.callout).foregroundStyle(.secondary).lineLimit(2)
+                Text(saving ? "Saving…" : consequence).font(.callout).foregroundStyle(.secondary).lineLimit(2)
                 Spacer()
                 Button("Cancel", role: .cancel) { dismiss() }.keyboardShortcut(.cancelAction)
                 Button(isNew ? "Create project" : "Save changes") { Task { await save() } }
@@ -134,9 +135,13 @@ struct ProjectEditorSheet: View {
                               prompt: Text(Naming.channelName(for: project.name, prefix: channelPrefix)))
                     Toggle("Private channel", isOn: $privateChannel)
                 case .existing:
-                    Picker("Channel", selection: $slackPick) {
-                        Text("—").tag(String?.none)
-                        ForEach(availableChannels) { Text("#\($0.name)").tag(Optional($0.id)) }
+                    if catalog.loading {
+                        loadingRow("Channel")
+                    } else {
+                        Picker("Channel", selection: $slackPick) {
+                            Text("—").tag(String?.none)
+                            ForEach(availableChannels) { Text("#\($0.name)").tag(Optional($0.id)) }
+                        }
                     }
                 case .none:
                     EmptyView()
@@ -157,19 +162,33 @@ struct ProjectEditorSheet: View {
                 }.pickerStyle(.segmented).labelsHidden()
                 switch linearMode {
                 case .create:
-                    Picker("Team", selection: $teamPick) {
-                        ForEach(catalog.teams) { Text("\($0.name) (\($0.key))").tag(Optional($0.id)) }
+                    if catalog.loading {
+                        loadingRow("Team")
+                    } else {
+                        Picker("Team", selection: $teamPick) {
+                            ForEach(catalog.teams) { Text("\($0.name) (\($0.key))").tag(Optional($0.id)) }
+                        }
                     }
                 case .existing:
-                    Picker("Project", selection: $linearPick) {
-                        Text("—").tag(String?.none)
-                        ForEach(availableLinear) { Text($0.name).tag(Optional($0.id)) }
+                    if catalog.loading {
+                        loadingRow("Project")
+                    } else {
+                        Picker("Project", selection: $linearPick) {
+                            Text("—").tag(String?.none)
+                            ForEach(availableLinear) { Text($0.name).tag(Optional($0.id)) }
+                        }
                     }
                 case .none:
                     EmptyView()
                 }
             }
         }
+    }
+
+    /// A picker row while its options load: the label, and a skeleton where the value goes.
+    private func loadingRow(_ label: String) -> some View {
+        LabeledContent(label) { Skeleton(width: 160, height: 14) }
+            .accessibilityLabel("\(label), loading")
     }
 
     private var availableChannels: [SlackChannel] {
@@ -316,13 +335,21 @@ struct ImportSheet: View {
                     Toggle("Only \"\(channelPrefix)…\"", isOn: $onlyConvention)
                 }
             }
-            if catalog.loading { ProgressView().controlSize(.small).accessibilityLabel("Loading") }
             ForEach(catalog.errors, id: \.self) { ErrorLabel($0) }
             Table(candidates, selection: $selection) {
                 TableColumn(source == .slack ? "Channel" : "Linear project", value: \.title)
                 TableColumn("Dever project name", value: \.projectName)
                 TableColumn(source == .slack ? "Matching Linear project" : "Matching Slack channel") {
                     Text($0.match ?? "None found").foregroundStyle($0.match == nil ? .secondary : .primary)
+                }
+            }
+            .overlay(alignment: .top) {
+                if catalog.loading {
+                    SkeletonRows(count: 8, leading: 180, trailing: 140)
+                        .padding(.horizontal, 12)
+                        .padding(.top, 28)
+                        .background(Theme.sheet)
+                        .padding(.top, 1)
                 }
             }
             .overlay {
