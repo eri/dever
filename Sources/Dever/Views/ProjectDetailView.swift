@@ -11,6 +11,8 @@ struct ProjectDetailView: View {
     @State private var users: [String: String] = [:]
     @State private var pulls: [ProjectPullRequests.Match] = []
     @State private var pullsScoped = false
+    @State private var merged: [MergedPull] = []
+    @State private var showAllMerged = false
     @State private var runs: [GitHubRun] = []
     @State private var errors: [ServiceKind: String] = [:]
     @State private var loading = false
@@ -226,6 +228,7 @@ struct ProjectDetailView: View {
                     HStack(alignment: .top, spacing: 32) { pullList; runList }
                     VStack(alignment: .leading, spacing: 16) { pullList; runList }
                 }
+                mergedList
             }
         }
     }
@@ -293,6 +296,48 @@ struct ProjectDetailView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
+    private var mergedList: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Recently merged · \(merged.count)").font(.subheadline.weight(.semibold)).monospacedDigit()
+                Text(pullsScoped ? "Linked to this project's Linear issues" : "Whole repository")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            if merged.isEmpty && loaded {
+                Text(pullsScoped ? "No merged pull request is linked to this project's issues."
+                                 : "No recently merged pull requests.")
+                    .font(.callout).foregroundStyle(.secondary)
+            }
+            ForEach(showAllMerged ? merged : Array(merged.prefix(8))) { item in
+                HStack(spacing: 8) {
+                    Image(systemName: "arrow.triangle.merge").foregroundStyle(.purple).accessibilityHidden(true)
+                    if let issue = item.issue {
+                        if let url = issues.first(where: { $0.identifier == issue }).flatMap({ URL(string: $0.url) }) {
+                            Link(issue, destination: url).font(.caption.monospaced()).help("Open \(issue) in Linear")
+                        } else {
+                            Text(issue).font(.caption.monospaced()).foregroundStyle(.secondary)
+                        }
+                    }
+                    Text("#\(item.number)").font(.caption.monospaced()).foregroundStyle(.secondary)
+                    if let url = URL(string: item.url) {
+                        Link(item.title ?? "Pull request #\(item.number)", destination: url)
+                            .lineLimit(1).help(item.title ?? "Linked in Linear; older than the recent history Dever scans on GitHub")
+                    }
+                    Spacer(minLength: 8)
+                    if let date = item.mergedAt {
+                        Text(date.formatted(.relative(presentation: .named))).font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+                .accessibilityElement(children: .combine)
+            }
+            if merged.count > 8 {
+                Button(showAllMerged ? "Show fewer" : "Show all \(merged.count)") { showAllMerged.toggle() }
+                    .buttonStyle(.link)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
     // MARK: Loading
 
     private func load() async {
@@ -324,13 +369,17 @@ struct ProjectDetailView: View {
         guard let repo = project.githubRepo else { return }
         do {
             let client = try app.githubClient()
+            let refs: [IssueReference]? = project.linear == nil || errors[.linear] != nil ? nil : issues
             async let allRuns = client.runs(repo)
-            let prs = ProjectPullRequests(pulls: try await client.pulls(repo),
-                                          issues: project.linear == nil || errors[.linear] != nil ? nil : issues,
+            async let recentlyMerged = client.mergedPulls(repo)
+            let prs = ProjectPullRequests(pulls: try await client.pulls(repo), issues: refs,
                                           wholeRepository: project.showsWholeRepository)
             pulls = prs.matches
             pullsScoped = prs.scoped
             runs = prs.scoped ? prs.pipeline(from: try await allRuns).latest : try await allRuns
+            merged = MergedPull.list(repo: repo, recentlyMerged: try await recentlyMerged, issues: refs,
+                                     wholeRepository: project.showsWholeRepository,
+                                     open: Set(prs.matches.map(\.pull.number)))
         } catch { errors[.github] = error.localizedDescription }
     }
 }

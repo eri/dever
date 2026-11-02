@@ -66,6 +66,24 @@ struct ProjectPullRequests {
         return (state, latest)
     }
 
+    /// Pull requests of `repo` that Linear attached to the issues, by number. Covers PRs
+    /// merged long ago, beyond what the GitHub scan of recent pull requests reaches.
+    static func linkedPullRequests(in repo: String, issues: [IssueReference]) -> [(number: Int, url: String, issue: String)] {
+        let prefix = "https://github.com/\(repo.lowercased())/pull/"
+        var seen = Set<Int>()
+        var out: [(number: Int, url: String, issue: String)] = []
+        for issue in issues {
+            for node in issue.attachments?.nodes ?? [] {
+                let url = node.url.lowercased()
+                guard url.hasPrefix(prefix),
+                      let number = Int(url.dropFirst(prefix.count).prefix { $0.isNumber }),
+                      seen.insert(number).inserted else { continue }
+                out.append((number, node.url, issue.identifier))
+            }
+        }
+        return out.sorted { $0.number > $1.number }
+    }
+
     private static func normalized(_ url: String) -> String {
         url.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "/"))
     }
@@ -87,5 +105,33 @@ extension ProjectSnapshot.PipelineState {
         } else {
             self = run.conclusion == "success" ? .passing : .failing
         }
+    }
+}
+
+/// A merged pull request of the project, from GitHub's recent history or, for older
+/// ones, from the links Linear attached to the project's issues.
+struct MergedPull: Identifiable {
+    var number: Int
+    var title: String?
+    var url: String
+    var issue: String?
+    var mergedAt: Date?
+    var id: Int { number }
+
+    static func list(repo: String, recentlyMerged: [GitHubPull], issues: [IssueReference]?,
+                     wholeRepository: Bool, open: Set<Int>) -> [MergedPull] {
+        let matched = ProjectPullRequests(pulls: recentlyMerged, issues: issues, wholeRepository: wholeRepository)
+        let iso = ISO8601DateFormatter()
+        var items = matched.matches.map {
+            MergedPull(number: $0.pull.number, title: $0.pull.title, url: $0.pull.html_url,
+                       issue: $0.issue, mergedAt: $0.pull.merged_at.flatMap(iso.date(from:)))
+        }
+        guard matched.scoped, let issues else { return items }
+        // Older PRs Linear knows about, minus those already listed or still open.
+        let known = Set(items.map(\.number)).union(open)
+        items += ProjectPullRequests.linkedPullRequests(in: repo, issues: issues)
+            .filter { !known.contains($0.number) }
+            .map { MergedPull(number: $0.number, title: nil, url: $0.url, issue: $0.issue, mergedAt: nil) }
+        return items
     }
 }

@@ -24,6 +24,7 @@ struct GitHubPull: Codable, Identifiable {
     var user: User
     var updated_at: String
     var head: Head
+    var merged_at: String?
 }
 
 struct GitHubRun: Codable, Identifiable {
@@ -159,6 +160,18 @@ struct GitHubClient {
             if batch.count < 100 { break }
         }
         return all
+    }
+
+    /// Pull requests merged recently, newest first (scans the last 300 closed ones).
+    func mergedPulls(_ repo: String) async throws -> [GitHubPull] {
+        var all: [GitHubPull] = []
+        for page in 1...3 {
+            let batch: [GitHubPull] = try await get(
+                "/repos/\(repo)/pulls?state=closed&sort=updated&direction=desc&per_page=100&page=\(page)")
+            all += batch.filter { $0.merged_at != nil }
+            if batch.count < 100 { break }
+        }
+        return all.sorted { ($0.merged_at ?? "") > ($1.merged_at ?? "") }
     }
 
     func runs(_ repo: String, branch: String? = nil) async throws -> [GitHubRun] {
