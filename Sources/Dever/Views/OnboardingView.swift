@@ -223,8 +223,7 @@ private struct ServiceRow: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            Image(systemName: service.symbol)
-                .font(.system(size: 15, weight: .medium))
+            BrandLogo(service: service, size: 20)
                 .foregroundStyle(Soot.ink)
                 .frame(width: 22)
                 .accessibilityHidden(true)
