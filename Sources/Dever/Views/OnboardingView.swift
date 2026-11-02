@@ -34,7 +34,8 @@ struct OnboardingView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .background(Onboarding.board)
+        .background(Keynote.board)
+        .environment(\.colorScheme, .dark)
         .onReceive(NotificationCenter.default.publisher(for: .showOnboardingStage)) { note in
             if let raw = note.object as? Int, let s = Stage(rawValue: raw) { stage = s }
         }
@@ -117,7 +118,61 @@ private struct TileTitle: View {
     }
 }
 
-// MARK: - Welcome: the bento board and the display name
+// MARK: - Welcome: a keynote-style board and the display name
+
+/// Keynote palette: black board, near-black tiles, light carried by the objects themselves.
+private enum Keynote {
+    static let board = Color(red: 0, green: 0, blue: 0)
+    static let tile = Color(red: 0.086, green: 0.086, blue: 0.094)        // #161618
+    static let raised = Color(red: 0.145, green: 0.145, blue: 0.157)      // #252528
+    static let text = Color.white
+    static let muted = Color(white: 0.62)
+    static let slack = Color(red: 0.31, green: 0.69, blue: 0.78)          // teal
+    static let linear = Color(red: 0.42, green: 0.64, blue: 0.90)         // blue
+    static let github = Color(red: 0.85, green: 0.64, blue: 0.25)         // amber
+    static let spectrum = LinearGradient(colors: [slack, linear, github], startPoint: .leading, endPoint: .trailing)
+    static let radius: CGFloat = 22
+}
+
+private struct KTile<Content: View>: View {
+    var alignment: Alignment = .center
+    @ViewBuilder var content: () -> Content
+    var body: some View {
+        content()
+            .padding(20)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: alignment)
+            .background(Keynote.tile, in: RoundedRectangle(cornerRadius: Keynote.radius))
+            .clipShape(RoundedRectangle(cornerRadius: Keynote.radius))
+    }
+}
+
+/// A short tile label, centred, at most a few words.
+private struct KLabel: View {
+    let text: String
+    var size: CGFloat = 17
+    var body: some View {
+        Text(text)
+            .font(.system(size: size, weight: .semibold))
+            .multilineTextAlignment(.center)
+            .foregroundStyle(Keynote.text)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+}
+
+/// An SF Symbol lit from within: the glyph, plus a soft halo in its colour.
+private struct Glow: View {
+    let symbol: String
+    let color: Color
+    var size: CGFloat = 38
+    var body: some View {
+        Image(systemName: symbol)
+            .font(.system(size: size, weight: .medium))
+            .foregroundStyle(color)
+            .shadow(color: color.opacity(0.9), radius: 14)
+            .shadow(color: color.opacity(0.5), radius: 32)
+            .accessibilityHidden(true)
+    }
+}
 
 private struct WelcomeStage: View {
     @AppStorage("displayName") private var displayName = ""
@@ -126,233 +181,248 @@ private struct WelcomeStage: View {
 
     var body: some View {
         GeometryReader { geo in
-            let heroWidth = max(320, geo.size.width * 0.34)
-            HStack(spacing: Onboarding.gap) {
-                hero.frame(width: heroWidth)
-                board
+            let g: CGFloat = 12
+            let w = geo.size.width, h = geo.size.height
+            let c1 = (w - 3 * g) * 0.24, c2 = (w - 3 * g) * 0.19, c3 = (w - 3 * g) * 0.33, c4 = (w - 3 * g) * 0.24
+            let r1 = (h - 2 * g) * 0.27, r2 = (h - 2 * g) * 0.43, r3 = (h - 2 * g) * 0.30
+            HStack(alignment: .top, spacing: g) {
+                VStack(spacing: g) {
+                    oneList.frame(height: r1)
+                    nameTile.frame(height: r2 + r3 + g)
+                }
+                .frame(width: c1)
+                VStack(spacing: g) {
+                    HStack(spacing: g) {
+                        service(.slack, label: "Channels", color: Keynote.slack).frame(width: c2)
+                        delivery.frame(width: c3)
+                        alerts.frame(width: c4)
+                    }
+                    .frame(height: r1)
+                    HStack(spacing: g) {
+                        hero.frame(width: c2 + c3 + g)
+                        service(.linear, label: "Issues", color: Keynote.linear).frame(width: c4)
+                    }
+                    .frame(height: r2)
+                    HStack(spacing: g) {
+                        service(.github, label: "Pull requests", color: Keynote.github).frame(width: c2)
+                        urgency.frame(width: c3)
+                        privacy.frame(width: c4)
+                    }
+                    .frame(height: r3)
+                }
             }
-            .padding([.horizontal, .bottom], Onboarding.margin)
         }
-        .onAppear {
-            if displayName.isEmpty { nameFocused = true }
-        }
+        .padding([.horizontal, .bottom], Onboarding.margin)
+        .onAppear { if displayName.isEmpty { nameFocused = true } }
     }
 
-    // The one dominant tile: what Dever is, and the first thing to do.
+    // The centrepiece: three tools converging on Dever, inside rings of light.
+    // Everything scales with the tile so it never spills onto its neighbours.
     private var hero: some View {
-        Tile(fill: Onboarding.dark, padding: 32) {
-            VStack(alignment: .leading, spacing: 0) {
-                DeverMark().frame(width: 40, height: 40)
-                Spacer(minLength: 24)
-                Text("Every project, in one place.")
-                    .font(.system(size: 38, weight: .medium))
-                    .tracking(-0.6)
-                    .lineSpacing(2)
-                    .foregroundStyle(Onboarding.onDark)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .accessibilityAddTraits(.isHeader)
-                Text("Slack, Linear and GitHub, joined project by project.")
-                    .font(.system(size: 16))
-                    .foregroundStyle(Onboarding.onDark.opacity(0.7))
-                    .padding(.top, 12)
-                Spacer(minLength: 28)
-                nameForm
+        KTile {
+            GeometryReader { geo in
+                let d = max(120, min(geo.size.height - 64, geo.size.width * 0.6))   // outer ring diameter
+                VStack(spacing: 14) {
+                    ZStack {
+                        ForEach(0..<3) { i in
+                            Circle()
+                                .stroke(AngularGradient(colors: [Keynote.slack, Keynote.linear, Keynote.github, Keynote.slack],
+                                                        center: .center),
+                                        lineWidth: 2)
+                                .frame(width: d * (0.62 + CGFloat(i) * 0.19), height: d * (0.62 + CGFloat(i) * 0.19))
+                                .opacity(0.55 - Double(i) * 0.15)
+                                .blur(radius: CGFloat(i))
+                        }
+                        Circle()
+                            .fill(RadialGradient(colors: [Keynote.linear.opacity(0.35), .clear], center: .center,
+                                                 startRadius: 0, endRadius: d * 0.45))
+                            .frame(width: d * 0.9, height: d * 0.9)
+                        DeverMark().frame(width: d * 0.26, height: d * 0.26)
+                            .shadow(color: Keynote.slack.opacity(0.8), radius: 18)
+                        orbit(.slack, color: Keynote.slack, angle: -150, radius: d * 0.405)
+                        orbit(.linear, color: Keynote.linear, angle: -30, radius: d * 0.405)
+                        orbit(.github, color: Keynote.github, angle: 90, radius: d * 0.405)
+                    }
+                    .frame(width: d, height: d)
+                    Text("Every project, in one place.")
+                        .font(.system(size: min(30, geo.size.width / 16), weight: .semibold))
+                        .tracking(-0.5)
+                        .foregroundStyle(Keynote.text)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
+                        .accessibilityAddTraits(.isHeader)
+                }
+                .frame(width: geo.size.width, height: geo.size.height)
             }
         }
     }
 
-    private var nameForm: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("What should we call you?")
-                .font(Theme.bodyStrong).foregroundStyle(Onboarding.onDark)
-            TextField("Display name", text: $displayName,
-                      prompt: Text(Self.suggestedName).foregroundStyle(Onboarding.onDark.opacity(0.4)))
-                .textFieldStyle(.plain)
-                .font(.system(size: 16))
-                .foregroundStyle(Onboarding.onDark)
-                .padding(.horizontal, 12)
-                .frame(height: 40)
-                .background(Onboarding.onDark.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
-                .overlay(RoundedRectangle(cornerRadius: 10)
-                    .strokeBorder(Onboarding.onDark.opacity(nameFocused ? 0.6 : 0.18)))
-                .focused($nameFocused)
-                .onSubmit(continueTapped)
-                .accessibilityLabel("Display name")
-            Text("Shown in Dever's sidebar. You can change it later.")
-                .font(Theme.small).foregroundStyle(Onboarding.onDark.opacity(0.6))
-            Button(action: continueTapped) {
-                Text("Continue").frame(maxWidth: .infinity)
+    private func orbit(_ service: ServiceKind, color: Color, angle: Double, radius r: CGFloat) -> some View {
+        Image(systemName: service.symbol)
+            .font(.system(size: 15, weight: .semibold))
+            .foregroundStyle(color)
+            .frame(width: 38, height: 38)
+            .background(Keynote.raised, in: Circle())
+            .overlay(Circle().strokeBorder(color.opacity(0.5)))
+            .shadow(color: color.opacity(0.7), radius: 10)
+            .offset(x: r * cos(angle * .pi / 180), y: r * sin(angle * .pi / 180))
+            .accessibilityHidden(true)
+    }
+
+    private func service(_ service: ServiceKind, label: String, color: Color) -> some View {
+        KTile {
+            VStack(spacing: 14) {
+                Spacer(minLength: 0)
+                Glow(symbol: service.symbol, color: color)
+                Spacer(minLength: 0)
+                VStack(spacing: 2) {
+                    KLabel(text: label)
+                    Text("from \(service.label)").font(.system(size: 13)).foregroundStyle(Keynote.muted)
+                }
             }
-            .buttonStyle(OnDarkPrimaryStyle())
-            .keyboardShortcut(.defaultAction)
-            .padding(.top, 8)
         }
+    }
+
+    private var oneList: some View {
+        KTile {
+            VStack(spacing: 6) {
+                Text("3 → 1")
+                    .font(.system(size: 54, weight: .bold))
+                    .tracking(-1.5)
+                    .foregroundStyle(Keynote.spectrum)
+                    .accessibilityLabel("Three tools, one view")
+                Text("tools, one view").font(.system(size: 15, weight: .medium)).foregroundStyle(Keynote.muted)
+            }
+        }
+    }
+
+    private var delivery: some View {
+        KTile {
+            VStack(spacing: 16) {
+                KLabel(text: "Delivery at a glance")
+                HStack(spacing: 3) {
+                    Capsule().fill(Keynote.slack).frame(width: 110)
+                    Capsule().fill(Keynote.github).frame(width: 18)
+                    Capsule().fill(Keynote.linear).frame(width: 46)
+                    Capsule().fill(Keynote.raised)
+                }
+                .frame(height: 14)
+                .shadow(color: Keynote.slack.opacity(0.6), radius: 12)
+                .accessibilityHidden(true)
+                Text("10 of 18 shipped").font(.system(size: 13, weight: .medium)).foregroundStyle(Keynote.muted)
+                    .monospacedDigit()
+            }
+        }
+    }
+
+    // A real notification, as macOS would show it.
+    private var alerts: some View {
+        KTile {
+            VStack(spacing: 14) {
+                HStack(alignment: .top, spacing: 10) {
+                    DeverMark().frame(width: 22, height: 22)
+                        .padding(6)
+                        .background(Keynote.board, in: RoundedRectangle(cornerRadius: 8))
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Checkout: pipeline failing").font(.system(size: 12, weight: .semibold)).foregroundStyle(.white)
+                        Text("A pull request fails its checks.").font(.system(size: 11)).foregroundStyle(Keynote.muted)
+                    }
+                    Spacer(minLength: 0)
+                }
+                .padding(10)
+                .background(Keynote.raised, in: RoundedRectangle(cornerRadius: 14))
+                .shadow(color: .black.opacity(0.5), radius: 10, y: 4)
+                .accessibilityHidden(true)
+                KLabel(text: "Alerts that matter")
+            }
+        }
+    }
+
+    private var urgency: some View {
+        KTile {
+            VStack(spacing: 14) {
+                VStack(spacing: 6) {
+                    urgencyRow("Checkout", status: "Needs attention", color: Color(red: 0.94, green: 0.36, blue: 0.40))
+                    urgencyRow("Mobile app", status: "On track", color: Color(red: 0.25, green: 0.75, blue: 0.48))
+                }
+                .accessibilityHidden(true)
+                KLabel(text: "Sorted by urgency")
+            }
+        }
+    }
+
+    private func urgencyRow(_ name: String, status: String, color: Color) -> some View {
+        HStack(spacing: 8) {
+            Circle().fill(color).frame(width: 7, height: 7).shadow(color: color, radius: 5)
+            Text(name).font(.system(size: 13, weight: .medium)).foregroundStyle(.white)
+            Spacer()
+            Text(status).font(.system(size: 12)).foregroundStyle(color)
+        }
+        .padding(.horizontal, 12)
+        .frame(height: 30)
+        .background(Keynote.raised, in: RoundedRectangle(cornerRadius: 10))
+    }
+
+    private var privacy: some View {
+        KTile {
+            VStack(spacing: 14) {
+                Spacer(minLength: 0)
+                Glow(symbol: "lock.fill", color: .white, size: 32)
+                Spacer(minLength: 0)
+                VStack(spacing: 2) {
+                    KLabel(text: "Private by design")
+                    Text("No server. Keychain only.").font(.system(size: 13)).foregroundStyle(Keynote.muted)
+                }
+            }
+        }
+    }
+
+    // The one action: a greeting that answers as you type.
+    private var nameTile: some View {
+        KTile(alignment: .bottomLeading) {
+            VStack(alignment: .leading, spacing: 14) {
+                Spacer(minLength: 0)
+                Text("Hi,\n\(greetingName).")
+                    .font(.system(size: 44, weight: .bold))
+                    .tracking(-1)
+                    .lineSpacing(-4)
+                    .foregroundStyle(Keynote.spectrum)
+                    .lineLimit(3)
+                    .minimumScaleFactor(0.6)
+                    .accessibilityLabel("Hi, \(greetingName)")
+                Spacer(minLength: 0)
+                TextField("Your name", text: $displayName,
+                          prompt: Text(Self.suggestedName).foregroundStyle(Color.white.opacity(0.35)))
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 15))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 12)
+                    .frame(height: 38)
+                    .background(Keynote.raised, in: RoundedRectangle(cornerRadius: 10))
+                    .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Color.white.opacity(nameFocused ? 0.5 : 0.1)))
+                    .focused($nameFocused)
+                    .onSubmit(continueTapped)
+                    .accessibilityLabel("Your name, shown in Dever's sidebar")
+                Button(action: continueTapped) { Text("Continue").frame(maxWidth: .infinity) }
+                    .buttonStyle(OnDarkPrimaryStyle())
+                    .keyboardShortcut(.defaultAction)
+            }
+        }
+    }
+
+    private var greetingName: String {
+        let trimmed = displayName.trimmingCharacters(in: .whitespaces)
+        return trimmed.isEmpty ? Self.suggestedName : trimmed
     }
 
     private func continueTapped() {
-        let trimmed = displayName.trimmingCharacters(in: .whitespaces)
-        displayName = trimmed.isEmpty ? Self.suggestedName : trimmed
+        displayName = greetingName
         next()
     }
 
     /// The first name from the Mac account, as a starting point.
     static var suggestedName: String {
-        NSFullUserName().split(separator: " ").first.map(String.init) ?? "You"
-    }
-
-    // The supporting tiles, three equal columns over three rows of different heights.
-    private var board: some View {
-        GeometryReader { geo in
-            let h = geo.size.height - Onboarding.gap * 2
-            VStack(spacing: Onboarding.gap) {
-                HStack(spacing: Onboarding.gap) {
-                    mission.frame(width: twoCols(geo.size.width))
-                    proof
-                }
-                .frame(height: h * 0.30)
-                HStack(spacing: Onboarding.gap) {
-                    serviceTile(.slack, fill: Onboarding.tealTint,
-                                line: "Each project's channel: who talked, and when.")
-                    serviceTile(.linear, fill: Onboarding.paper,
-                                line: "Its issues, from to do to done.")
-                    serviceTile(.github, fill: Onboarding.amberTint,
-                                line: "Its pull requests and their pipeline.")
-                }
-                .frame(height: h * 0.32)
-                HStack(spacing: Onboarding.gap) {
-                    howItWorks.frame(width: twoCols(geo.size.width))
-                    alerts
-                }
-            }
-        }
-    }
-
-    private func twoCols(_ width: CGFloat) -> CGFloat {
-        (width - Onboarding.gap * 2) / 3 * 2 + Onboarding.gap
-    }
-
-    private var mission: some View {
-        Tile {
-            VStack(alignment: .leading, spacing: 0) {
-                TileTitle(text: "What Dever does")
-                Spacer(minLength: 8)
-                Text("Dever follows each project across its Slack channel, Linear issues and GitHub pull requests, and tells you which one needs you.")
-                    .font(.system(size: 21, weight: .medium))
-                    .lineSpacing(3)
-                    .foregroundStyle(Onboarding.ink)
-                    .fixedSize(horizontal: false, vertical: true)
-                Spacer(minLength: 8)
-            }
-        }
-    }
-
-    private var proof: some View {
-        Tile(fill: Onboarding.blueTint) {
-            VStack(alignment: .leading, spacing: 4) {
-                TileTitle(text: "In one list")
-                Spacer(minLength: 8)
-                Text("3 → 1").font(.system(size: 48, weight: .medium)).tracking(-1).foregroundStyle(Onboarding.ink)
-                    .accessibilityLabel("Three tools, one list")
-                Text("tools to check, list to read").font(.system(size: 14)).foregroundStyle(Onboarding.ink.opacity(0.75))
-            }
-        }
-    }
-
-    private func serviceTile(_ service: ServiceKind, fill: Color, line: String) -> some View {
-        Tile(fill: fill) {
-            VStack(alignment: .leading, spacing: 0) {
-                TileTitle(text: service.label)
-                Spacer(minLength: 8)
-                Image(systemName: service.symbol)
-                    .font(.system(size: 30, weight: .regular))
-                    .foregroundStyle(Onboarding.ink)
-                    .frame(maxWidth: .infinity, alignment: .center)
-                    .accessibilityHidden(true)
-                Spacer(minLength: 8)
-                Text(line).font(.system(size: 14)).foregroundStyle(Onboarding.ink.opacity(0.8))
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-        }
-    }
-
-    /// The one concrete tile: a real piece of Dever's interface, drawn with its own components.
-    private var howItWorks: some View {
-        Tile(fill: Onboarding.paper) {
-            HStack(alignment: .center, spacing: 20) {
-                VStack(alignment: .leading, spacing: 0) {
-                    TileTitle(text: "How it works")
-                    Spacer(minLength: 8)
-                    Text("See what shipped, and what's stuck.")
-                        .font(.system(size: 20, weight: .medium))
-                        .foregroundStyle(Onboarding.ink)
-                        .fixedSize(horizontal: false, vertical: true)
-                    Spacer(minLength: 8)
-                }
-                .frame(maxWidth: 170, alignment: .leading)
-                SampleProjectRow()
-            }
-        }
-    }
-
-    private var alerts: some View {
-        Tile(fill: Onboarding.teal) {
-            VStack(alignment: .leading, spacing: 0) {
-                TileTitle(text: "Alerts", color: .white)
-                Spacer(minLength: 8)
-                Image(systemName: "bell")
-                    .font(.system(size: 30))
-                    .foregroundStyle(.white)
-                    .accessibilityHidden(true)
-                Spacer(minLength: 8)
-                Text("Told once when a pipeline fails or a ticket falls behind.")
-                    .font(.system(size: 14)).foregroundStyle(.white.opacity(0.9))
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-        }
-    }
-}
-
-/// A sample project row built from Dever's own components, so the board shows the real product.
-private struct SampleProjectRow: View {
-    private let delivery = Delivery(
-        issues: (1...18).map { i in
-            let (type, name): (String, String) = switch i {
-            case 1...9: ("completed", "Done")
-            case 10...12: ("started", "In Review")
-            case 13...14: ("started", "In Progress")
-            default: ("unstarted", "Todo")
-            }
-            return ("WEB-\(i)", type, name)
-        },
-        openPR: [], mergedPR: ["WEB-13"])
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 8) {
-                Text("Checkout redesign").font(Theme.bodyStrong).foregroundStyle(Theme.text)
-                Pill(text: "Needs attention", tone: .negative)
-            }
-            Text("#proj-checkout-redesign · Checkout").font(Theme.small).foregroundStyle(Theme.muted)
-            DeliveryStrip(delivery: delivery)
-            HStack(spacing: 4) {
-                Text("\(delivery.shipped)/\(delivery.total) shipped").foregroundStyle(Theme.text)
-                Text("· \(delivery.merged) to move").foregroundStyle(Theme.chart3)
-            }
-            .font(Theme.small)
-            .monospacedDigit()
-            HStack(spacing: 16) {
-                PipelineBadge(state: .failing)
-                Text("4 open pull requests").foregroundStyle(Theme.muted)
-            }
-            .font(Theme.small)
-        }
-        .padding(16)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Theme.sheet, in: RoundedRectangle(cornerRadius: 12))
-        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Theme.border))
-        .shadow(color: .black.opacity(0.06), radius: 8, y: 2)
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("Example: a project with 10 of 18 issues shipped, one to move, and a failing pipeline")
+        NSFullUserName().split(separator: " ").first.map(String.init) ?? "there"
     }
 }
 
