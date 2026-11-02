@@ -59,7 +59,7 @@ extension Project {
 @MainActor
 final class Notifier {
     static let shared = Notifier()
-    static let projectIDKey = "projectID"
+    nonisolated static let projectIDKey = "projectID"
 
     private let center = UNUserNotificationCenter.current()
     private let defaults = UserDefaults.standard
