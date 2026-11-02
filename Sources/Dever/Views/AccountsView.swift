@@ -180,7 +180,7 @@ private struct AccountRow: View {
 
 // MARK: - GitHub
 
-private struct GitHubLoginSheet: View {
+struct GitHubLoginSheet: View {
     @EnvironmentObject var app: AppState
     @Environment(\.dismiss) private var dismiss
     @State private var code: GitHubAuth.DeviceCode?

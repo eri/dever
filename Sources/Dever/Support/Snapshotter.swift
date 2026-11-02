@@ -29,6 +29,17 @@ enum Snapshotter {
                 capture(to: dir.appendingPathComponent("\(name)-\(themeName).png"))
             }
         }
+        if ProcessInfo.processInfo.environment["DEVER_SNAPSHOT_ONBOARDING"] == "1" {
+            NotificationCenter.default.post(name: .showOnboarding, object: nil)
+            for (themeName, appearance) in [("dark", NSAppearance.Name.darkAqua), ("light", .aqua)] {
+                NSApp.appearance = NSAppearance(named: appearance)
+                for stage in OnboardingView.Stage.allCases {
+                    NotificationCenter.default.post(name: .showOnboardingStage, object: stage.rawValue)
+                    try? await Task.sleep(nanoseconds: 1_500_000_000)
+                    capture(to: dir.appendingPathComponent("onboarding-\(stage)-\(themeName).png"))
+                }
+            }
+        }
         NSApp.terminate(nil)
     }
 
@@ -44,4 +55,6 @@ enum Snapshotter {
 extension Notification.Name {
     /// Switches the main window to a screen; `object` is a `SidebarItem`.
     static let showScreen = Notification.Name("dever.showScreen")
+    /// Opens the onboarding flow (Help menu, snapshots).
+    static let showOnboarding = Notification.Name("dever.showOnboarding")
 }

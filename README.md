@@ -36,3 +36,9 @@ DEVER_SNAPSHOT_DIR=/tmp/dever-shots ./build/Dever.app/Contents/MacOS/Dever
 ```
 
 It opens Overview, the first project and Accounts in dark then light mode, saves one PNG per screen, and quits.
+Add `DEVER_SNAPSHOT_ONBOARDING=1` to capture the onboarding stages too, and `DEVER_SNAPSHOT_WAIT=0` to capture the loading state.
+
+## Onboarding
+
+New users (no project yet) start with a three-stage welcome: what Dever does and their display name, connecting
+Slack, Linear and GitHub (with what each one is used for), then a first project. Reopen it from Help → Welcome to Dever….

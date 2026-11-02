@@ -14,6 +14,13 @@ struct DeverApp: App {
                 .environmentObject(store)
                 .frame(minWidth: 1080, minHeight: 680)
         }
+        .commands {
+            CommandGroup(after: .help) {
+                Button("Welcome to Dever…") {
+                    NotificationCenter.default.post(name: .showOnboarding, object: nil)
+                }
+            }
+        }
     }
 }
 

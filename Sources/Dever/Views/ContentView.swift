@@ -14,8 +14,39 @@ struct ContentView: View {
     @State private var importSource: ImportSheet.Source?
     @State private var editing: Project?
     @State private var removing: Project?
+    @AppStorage("onboardingDone") private var onboardingDone = false
+    @AppStorage("displayName") private var displayName = ""
+    @State private var showOnboarding = false
 
     var body: some View {
+        Group {
+            if showOnboarding {
+                OnboardingView(finish: endOnboarding)
+            } else {
+                main
+            }
+        }
+        .onAppear {
+            // New users only: anyone who already has projects has been through setup.
+            if !app.projects.isEmpty { onboardingDone = true }
+            showOnboarding = !onboardingDone || ProcessInfo.processInfo.environment["DEVER_ONBOARDING"] == "1"
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .showOnboarding)) { _ in showOnboarding = true }
+    }
+
+    private func endOnboarding(_ exit: OnboardingExit) {
+        onboardingDone = true
+        showOnboarding = false
+        selection = .overview
+        switch exit {
+        case .overview: break
+        case .newProject: showNew = true
+        case .importSlack: importSource = .slack
+        case .importLinear: importSource = .linear
+        }
+    }
+
+    private var main: some View {
         NavigationSplitView {
             sidebar
                 .navigationSplitViewColumnWidth(min: 200, ideal: Theme.sidebarWidth, max: 280)
@@ -104,8 +135,7 @@ struct ContentView: View {
                 .padding(.horizontal, 8)
             }
             Spacer(minLength: 0)
-            navRow("Accounts", symbol: "person.crop.circle", item: .accounts,
-                   trailing: missingAccounts > 0 ? "\(missingAccounts) to connect" : nil)
+            userRow
                 .padding(.horizontal, 8)
                 .padding(.bottom, 12)
         }
@@ -171,6 +201,34 @@ struct ContentView: View {
             Divider()
             Button("Remove from Dever…", role: .destructive) { removing = p }
         }
+    }
+
+    /// The person using Dever; opens Accounts, where their connections live.
+    private var userRow: some View {
+        let name = displayName.isEmpty ? "Accounts" : displayName
+        return Button { selection = .accounts } label: {
+            HStack(spacing: 10) {
+                Text(String(name.prefix(1)).uppercased())
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(Theme.chart1)
+                    .frame(width: 22, height: 22)
+                    .background(Theme.chart1.opacity(0.15), in: Circle())
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 0) {
+                    Text(name).font(Theme.body).foregroundStyle(Theme.text).lineLimit(1)
+                    Text(missingAccounts > 0 ? "\(missingAccounts) account\(missingAccounts == 1 ? "" : "s") to connect" : "Accounts")
+                        .font(Theme.small).foregroundStyle(missingAccounts > 0 ? Theme.chart3 : Theme.muted)
+                }
+                Spacer(minLength: 4)
+            }
+            .padding(.horizontal, 8)
+            .frame(height: 44)
+            .background(selection == .accounts ? Theme.active : Color.clear, in: RoundedRectangle(cornerRadius: 8))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(name), accounts")
+        .accessibilityAddTraits(selection == .accounts ? .isSelected : [])
     }
 
     private var addMenu: some View {
