@@ -1,4 +1,5 @@
 import SwiftUI
+import UserNotifications
 
 // First run, after the "product performs" direction: every screen is a short headline and one
 // control on the left; on the right, a crop of Dever's own window on a flat lime stage fills in
@@ -326,40 +327,120 @@ private struct Breathing: ViewModifier {
 
 private struct ProjectControls: View {
     @EnvironmentObject var app: AppState
+    @AppStorage("slackChannelPrefix") private var channelPrefix = "proj-"
     let finish: (OnboardingExit) -> Void
-    @State private var notificationsOn = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 28) {
             Headline(text: "Add your projects")
-            VStack(alignment: .leading, spacing: 8) {
-                Button { finish(.importSlack) } label: { Label("Import from Slack", systemImage: ServiceKind.slack.symbol) }
-                    .buttonStyle(LimeButton())
-                    .disabled(app.slack == nil)
-                    .help("Finds channels named with your project prefix and pairs each with its Linear project.")
-                HStack(spacing: 8) {
-                    Button { finish(.importLinear) } label: { Label("From Linear", systemImage: ServiceKind.linear.symbol) }
-                        .buttonStyle(QuietButton())
-                        .disabled(app.linear == nil)
-                    Button { finish(.newProject) } label: { Label("New project", systemImage: "plus") }
-                        .buttonStyle(QuietButton())
-                }
+            // Same row language as Connect: one recommended path first, the others under it.
+            VStack(spacing: 8) {
+                OptionRow(icon: AnyView(BrandLogo(service: .slack, size: 20)),
+                          title: "Import from Slack",
+                          detail: app.slack == nil ? "Connect Slack first" : "Channels starting with \(channelPrefix)",
+                          recommended: true, enabled: app.slack != nil) { finish(.importSlack) }
+                OptionRow(icon: AnyView(BrandLogo(service: .linear, size: 20).foregroundStyle(Soot.ink)),
+                          title: "Import from Linear",
+                          detail: app.linear == nil ? "Connect Linear first" : "Your Linear projects",
+                          recommended: false, enabled: app.linear != nil) { finish(.importLinear) }
+                OptionRow(icon: AnyView(Image(systemName: "plus").font(.system(size: 16, weight: .medium)).foregroundStyle(Soot.ink)),
+                          title: "Start a new project",
+                          detail: "Creates its channel and Linear project",
+                          recommended: false, enabled: true) { finish(.newProject) }
             }
-            Toggle(isOn: Binding(get: { notificationsOn }, set: { on in
-                guard on else { return }
-                Task {
-                    _ = await Notifier.shared.requestAuthorization()
-                    notificationsOn = await Notifier.shared.authorizationStatus() == .authorized
-                }
-            })) {
-                Text("Alert me when a project needs me").font(.system(size: 14)).foregroundStyle(Soot.ink)
-            }
-            .toggleStyle(.switch)
-            .tint(Soot.lime)
-            .disabled(notificationsOn)
-            .help("A failing pipeline, a missed target date, merged work whose ticket didn't move.")
+            .frame(maxWidth: 400)
+            AlertsRow()
+                .frame(maxWidth: 400)
+                .padding(.top, 12)
         }
-        .task { notificationsOn = await Notifier.shared.authorizationStatus() == .authorized }
+    }
+}
+
+/// A choice that is its own button: icon, title, one short line, and where it leads.
+private struct OptionRow: View {
+    let icon: AnyView
+    let title: String
+    let detail: String
+    let recommended: Bool
+    let enabled: Bool
+    let action: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 12) {
+                icon.frame(width: 22).accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title).font(.system(size: 16, weight: .medium)).foregroundStyle(Soot.ink)
+                    Text(detail).font(.system(size: 13)).foregroundStyle(Soot.muted).lineLimit(1)
+                }
+                Spacer()
+                Image(systemName: "arrow.right")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(recommended ? Soot.limeInk : Soot.muted)
+                    .frame(width: 28, height: 28)
+                    .background(recommended ? Soot.lime : Color.clear, in: Circle())
+            }
+            .padding(.horizontal, 16)
+            .frame(height: 64)
+            .background(hovering && enabled ? Soot.surface.opacity(0.7) : Soot.surface,
+                        in: RoundedRectangle(cornerRadius: Soot.radius))
+            .overlay(RoundedRectangle(cornerRadius: Soot.radius)
+                .strokeBorder(recommended && enabled ? Soot.lime.opacity(0.5) : .clear))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(!enabled)
+        .opacity(enabled ? 1 : 0.45)
+        .onHover { hovering = $0 }
+    }
+}
+
+/// Alerts, with a control that matches what macOS allows right now.
+private struct AlertsRow: View {
+    @State private var status: UNAuthorizationStatus = .notDetermined
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "bell").font(.system(size: 16)).foregroundStyle(Soot.ink).frame(width: 22)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Alerts").font(.system(size: 16, weight: .medium)).foregroundStyle(Soot.ink)
+                Text("When a pipeline fails or a ticket stalls").font(.system(size: 13)).foregroundStyle(Soot.muted)
+                    .lineLimit(1)
+            }
+            Spacer()
+            switch status {
+            case .authorized, .provisional:
+                Image(systemName: "checkmark.circle.fill").foregroundStyle(Soot.lime).font(.system(size: 18))
+                    .accessibilityLabel("Alerts on")
+            case .denied:
+                Button("Open Settings") {
+                    if let url = URL(string: "x-apple.systempreferences:com.apple.Notifications-Settings.extension") {
+                        NSWorkspace.shared.open(url)
+                    }
+                }
+                .buttonStyle(.plain).font(.system(size: 14, weight: .semibold)).foregroundStyle(Soot.lime)
+                .help("Alerts are turned off for Dever in System Settings.")
+            default:
+                Button("Turn on") {
+                    Task { _ = await Notifier.shared.requestAuthorization(); await refresh() }
+                }
+                .buttonStyle(.plain).font(.system(size: 14, weight: .semibold)).foregroundStyle(Soot.lime)
+            }
+        }
+        .padding(.horizontal, 16)
+        .frame(height: 64)
+        .overlay(RoundedRectangle(cornerRadius: Soot.radius).strokeBorder(Soot.surface, lineWidth: 1.5))
+        .task { await refresh() }
+        // Back from System Settings: show the new state.
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            Task { await refresh() }
+        }
+    }
+
+    private func refresh() async {
+        status = await Notifier.shared.authorizationStatus()
     }
 }
 

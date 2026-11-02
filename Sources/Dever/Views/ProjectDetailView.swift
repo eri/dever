@@ -119,13 +119,13 @@ struct ProjectDetailView: View {
     private var linkRow: some View {
         HStack(spacing: 16) {
             if let channel = project.slack, let url = slackURL {
-                Link(destination: url) { Label("#\(channel.name)", systemImage: ServiceKind.slack.symbol) }
+                Link(destination: url) { Label { Text("#\(channel.name)") } icon: { BrandLogo(service: .slack, size: 12) } }
             }
             if let linear = project.linear, let url = URL(string: linear.url) {
-                Link(destination: url) { Label(linear.name, systemImage: ServiceKind.linear.symbol) }
+                Link(destination: url) { Label { Text(linear.name) } icon: { BrandLogo(service: .linear, size: 12) } }
             }
             if let repo = project.githubRepo, let url = URL(string: "https://github.com/\(repo)") {
-                Link(destination: url) { Label(repo, systemImage: ServiceKind.github.symbol) }
+                Link(destination: url) { Label { Text(repo) } icon: { BrandLogo(service: .github, size: 12) } }
             }
         }
         .font(Theme.small)

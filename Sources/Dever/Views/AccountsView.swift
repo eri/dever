@@ -107,7 +107,7 @@ private struct AccountRow: View {
     var body: some View {
         HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 4) {
-                Label(service.label, systemImage: service.symbol)
+                Label { Text(service.label) } icon: { BrandLogo(service: service, size: 16) }
                     .font(Theme.bodyStrong).foregroundStyle(Theme.text)
                 Group {
                     if let detail {
