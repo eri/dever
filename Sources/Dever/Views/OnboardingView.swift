@@ -225,6 +225,7 @@ private struct ServiceRow: View {
         HStack(spacing: 12) {
             BrandLogo(service: service, size: 20)
                 .foregroundStyle(Soot.ink)
+                .modifier(Breathing(active: flow != nil))
                 .frame(width: 22)
                 .accessibilityHidden(true)
             Text(service.label).font(.system(size: 16, weight: .medium)).foregroundStyle(Soot.ink)
@@ -247,10 +248,22 @@ private struct ServiceRow: View {
         .padding(.horizontal, 16)
         .frame(height: 52)
         .background(Soot.surface, in: RoundedRectangle(cornerRadius: Soot.radius))
+        .overlay(alignment: .bottom) {
+            // While the browser is open: a lime light sweeping along the row's bottom edge.
+            if flow != nil { SweepLine().transition(.opacity) }
+        }
+        .clipShape(RoundedRectangle(cornerRadius: Soot.radius))
+        .accessibilityValue(flow != nil ? "Waiting for approval in your browser" : "")
         .overlay(alignment: .bottomLeading) {
             if let error { Text(error).font(.system(size: 12)).foregroundStyle(.red).offset(y: 18).lineLimit(1) }
         }
         .help(why)
+        .onAppear {
+            // Snapshots: DEVER_SNAPSHOT_CONNECTING=slack shows that row mid-connection.
+            if ProcessInfo.processInfo.environment["DEVER_SNAPSHOT_CONNECTING"] == service.rawValue {
+                flow = Task { try? await Task.sleep(nanoseconds: 60_000_000_000) }
+            }
+        }
     }
 
     private func connect() {
@@ -269,6 +282,43 @@ private struct ServiceRow: View {
             }
             flow = nil
         }
+    }
+}
+
+/// Indeterminate progress as light travelling along an edge, not a spinner.
+/// Under Reduce Motion it is a still, half-lit line.
+private struct SweepLine: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var phase: CGFloat = 0
+
+    var body: some View {
+        GeometryReader { geo in
+            let w = geo.size.width
+            Rectangle()
+                .fill(LinearGradient(colors: [Soot.lime.opacity(0), Soot.lime, Soot.lime.opacity(0)],
+                                     startPoint: .leading, endPoint: .trailing))
+                .frame(width: w * 0.35, height: 2)
+                .offset(x: reduceMotion ? w * 0.325 : -w * 0.35 + phase * w * 1.35)
+                .animation(reduceMotion ? nil : .easeInOut(duration: 1.2).repeatForever(autoreverses: false), value: phase)
+        }
+        .frame(height: 2)
+        .onAppear { phase = 1 }
+        .accessibilityHidden(true)
+    }
+}
+
+/// A slow, small pulse on the logo of the service being connected.
+private struct Breathing: ViewModifier {
+    let active: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var up = false
+
+    func body(content: Content) -> some View {
+        content
+            .scaleEffect(active && up && !reduceMotion ? 1.12 : 1)
+            .opacity(active && up ? 0.7 : 1)
+            .animation(active ? .easeInOut(duration: 0.6).repeatForever(autoreverses: true) : .default, value: up)
+            .onChange(of: active) { _, isActive in up = isActive }
     }
 }
 
