@@ -47,13 +47,16 @@ private struct AccountRow: View {
     let service: ServiceKind
     let connect: () -> Void
     @State private var status: String?
+    @State private var statusIsError = false
     @State private var checking = false
+    @State private var confirmDisconnect = false
     @State private var browserFlow: Task<Void, Never>?
 
     /// GitHub opens its sheet (code entry); Slack and Linear go through the browser.
     private func start() {
         guard service != .github else { return connect() }
         status = nil
+        statusIsError = false
         browserFlow = Task {
             do {
                 switch service {
@@ -64,6 +67,7 @@ private struct AccountRow: View {
             } catch is CancellationError {
             } catch {
                 status = error.localizedDescription
+                statusIsError = true
             }
             browserFlow = nil
         }
@@ -80,18 +84,47 @@ private struct AccountRow: View {
     var body: some View {
         HStack {
             Label(service.label, systemImage: service.symbol).frame(width: 110, alignment: .leading)
-            if let detail {
-                Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
-                Text(detail)
-                if let status { Text(status).font(.caption).foregroundStyle(.secondary) }
-            } else {
-                Text(status ?? "Not connected").foregroundStyle(status == nil ? Color.secondary : Color.red)
-                    .font(status == nil ? .body : .caption)
+            VStack(alignment: .leading, spacing: 2) {
+                if let detail {
+                    Label {
+                        Text(detail).lineLimit(1).help(detail)
+                    } icon: {
+                        Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+                    }
+                    .accessibilityLabel("Connected: \(detail)")
+                } else {
+                    Label {
+                        Text("Not connected").foregroundStyle(.secondary)
+                    } icon: {
+                        Image(systemName: "circle.dashed").foregroundStyle(.secondary)
+                    }
+                }
+                if let status {
+                    Label {
+                        Text(status).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    } icon: {
+                        Image(systemName: statusIsError ? "exclamationmark.triangle.fill" : "checkmark")
+                            .foregroundStyle(statusIsError ? Color.orange : Color.green)
+                    }
+                    .font(.caption)
+                }
             }
             Spacer()
             if app.isConnected(service) {
-                Button(checking ? "…" : "Test") { Task { await test() } }.disabled(checking)
-                Button("Disconnect", role: .destructive) { app.disconnect(service) }
+                if checking {
+                    ProgressView().controlSize(.small).accessibilityLabel("Checking connection")
+                }
+                Button("Check connection") { Task { await test() } }.disabled(checking)
+                Button("Disconnect…") { confirmDisconnect = true }
+                    .confirmationDialog("Disconnect \(service.label)?", isPresented: $confirmDisconnect) {
+                        Button("Disconnect \(service.label)", role: .destructive) {
+                            status = nil
+                            app.disconnect(service)
+                        }
+                        Button("Cancel", role: .cancel) {}
+                    } message: {
+                        Text("Dever stops showing \(service.label) data until you connect again. Your projects and their links are kept.")
+                    }
             } else if browserFlow != nil {
                 ProgressView().controlSize(.small)
                 Text("Approve in your browser…").font(.caption).foregroundStyle(.secondary)
@@ -106,13 +139,16 @@ private struct AccountRow: View {
         checking = true
         defer { checking = false }
         do {
-            switch service {
-            case .github: status = "OK (@\(try await app.githubClient().viewerLogin()))"
-            case .slack: status = "OK (\(try await app.withSlack { try await $0.authTest() }))"
-            case .linear: status = "OK (\(try await app.withLinear { try await $0.viewer() }.userName))"
+            let who: String = switch service {
+            case .github: "@" + (try await app.githubClient().viewerLogin())
+            case .slack: try await app.withSlack { try await $0.authTest() }
+            case .linear: try await app.withLinear { try await $0.viewer() }.userName
             }
+            status = "Working — signed in as \(who)"
+            statusIsError = false
         } catch {
             status = error.localizedDescription
+            statusIsError = true
         }
     }
 }
@@ -144,7 +180,14 @@ private struct GitHubLoginSheet: View {
                 Button("Sign in with GitHub (code)") { startDeviceFlow() }.buttonStyle(.borderedProminent)
                 Button("Use GitHub CLI session (gh)") { importGh() }
             }
-            if let error { Text(error).foregroundStyle(.red).font(.callout) }
+            if let error {
+                Label {
+                    Text(error).fixedSize(horizontal: false, vertical: true)
+                } icon: {
+                    Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+                }
+                .font(.callout)
+            }
             HStack { Spacer(); Button("Close") { task?.cancel(); dismiss() } }
         }
         .padding(24)

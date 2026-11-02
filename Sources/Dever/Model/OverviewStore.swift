@@ -74,7 +74,7 @@ extension Project {
            Date().timeIntervalSince(last) > Double(Self.quietAfterDays) * 86_400 {
             out.append("No Slack activity for \(Int(Date().timeIntervalSince(last) / 86_400)) days")
         }
-        out += s.errors.keys.sorted { $0.rawValue < $1.rawValue }.map { "\($0.label) unavailable" }
+        out += s.errors.keys.sorted { $0.rawValue < $1.rawValue }.map { "Couldn't load \($0.label) data" }
         return out
     }
 

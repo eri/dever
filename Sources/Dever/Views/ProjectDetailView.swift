@@ -2,6 +2,7 @@ import SwiftUI
 
 struct ProjectDetailView: View {
     @EnvironmentObject var app: AppState
+    @EnvironmentObject var store: OverviewStore
     let project: Project
     let edit: () -> Void
 
@@ -12,144 +13,273 @@ struct ProjectDetailView: View {
     @State private var runs: [GitHubRun] = []
     @State private var errors: [ServiceKind: String] = [:]
     @State private var loading = false
+    @State private var loaded = false
+
+    private var status: ProjectStatus { project.status(store.snapshots[project.id]) }
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
+            VStack(alignment: .leading, spacing: 24) {
                 header
-                if !project.isComplete {
-                    Label("Link a Slack channel and a Linear project to start tracking.",
-                          systemImage: "exclamationmark.triangle")
-                        .foregroundStyle(.orange)
+                // Two columns while they fit, stacked otherwise.
+                ViewThatFits(in: .horizontal) {
+                    HStack(alignment: .top, spacing: 16) {
+                        linearSection.frame(minWidth: 360)
+                        slackSection.frame(minWidth: 320)
+                    }
+                    VStack(spacing: 16) {
+                        linearSection
+                        slackSection
+                    }
                 }
-                HStack(alignment: .top, spacing: 16) {
-                    panel(.linear, title: "Linear issues") { linearPanel }
-                    panel(.slack, title: "Slack") { slackPanel }
-                }
-                if project.githubRepo != nil {
-                    panel(.github, title: "GitHub") { githubPanel }
-                }
+                if project.githubRepo != nil { githubSection }
             }
-            .padding(20)
+            .padding(24)
         }
         .navigationTitle(project.name)
+        .navigationSubtitle(loading ? "Refreshing…" : "")
         .toolbar {
             Button { Task { await load() } } label: { Label("Refresh", systemImage: "arrow.clockwise") }
+                .help("Refresh this project")
+                .keyboardShortcut("r")
                 .disabled(loading)
-            Button("Links…", action: edit)
+            Button(action: edit) { Label("Edit links…", systemImage: "link") }
+                .help("Change the linked Slack channel, Linear project and repository")
         }
         .task { await load() }
     }
 
+    // MARK: Header
+
     private var header: some View {
-        HStack(spacing: 16) {
-            linkChip("number", project.slack.map { "#\($0.name)" },
-                     url: project.slack.flatMap { s in app.slack.map { URL(string: "https://\($0.domain).slack.com/archives/\(s.id)")! } })
-            linkChip("checklist", project.linear?.name, url: project.linear.flatMap { URL(string: $0.url) })
-            linkChip("chevron.left.forwardslash.chevron.right", project.githubRepo,
-                     url: project.githubRepo.flatMap { URL(string: "https://github.com/\($0)") })
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 16) {
+                StatusBadge(status: status)
+                linkButton(.slack, project.slack.map { "#\($0.name)" }, url: slackURL)
+                linkButton(.linear, project.linear?.name, url: project.linear.flatMap { URL(string: $0.url) })
+                linkButton(.github, project.githubRepo, url: project.githubRepo.flatMap { URL(string: "https://github.com/\($0)") })
+            }
+            if !project.isComplete {
+                HStack(spacing: 12) {
+                    Label {
+                        Text("Link a Slack channel and a Linear project to start tracking.")
+                    } icon: {
+                        Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+                    }
+                    Button("Edit links…", action: edit)
+                }
+                .font(.callout)
+                .padding(12)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(.orange.opacity(0.1), in: RoundedRectangle(cornerRadius: 8))
+            }
+        }
+    }
+
+    private var slackURL: URL? {
+        guard let channel = project.slack, let slack = app.slack else { return nil }
+        return URL(string: "https://\(slack.domain).slack.com/archives/\(channel.id)")
+    }
+
+    @ViewBuilder
+    private func linkButton(_ service: ServiceKind, _ text: String?, url: URL?) -> some View {
+        if let text, let url {
+            Link(destination: url) { Label(text, systemImage: service.symbol).lineLimit(1) }
+                .help("Open \(text) in \(service.label)")
+        } else if text == nil, service != .github {
+            Label("No \(service.label)", systemImage: "circle.dashed").foregroundStyle(.secondary)
+        }
+    }
+
+    // MARK: Linear
+
+    private var activeIssues: [LinearIssue] { issues.filter { $0.state.type == "started" } }
+    private var todoIssues: [LinearIssue] { issues.filter { ["unstarted", "backlog", "triage"].contains($0.state.type) } }
+    private var doneIssues: [LinearIssue] { issues.filter { $0.state.type == "completed" } }
+
+    private var linearSection: some View {
+        SectionCard("Linear", symbol: ServiceKind.linear.symbol) {
+            if let url = project.linear.flatMap({ URL(string: $0.url) }) {
+                Link("Open in Linear", destination: url).font(.callout)
+            }
+        } content: {
+            if project.linear == nil {
+                EmptySection(title: "No Linear project", message: "Link a Linear project to see its issues here.")
+                Button("Edit links…", action: edit)
+            } else if let e = errors[.linear] {
+                LoadErrorRow(service: .linear, message: e) { Task { await load() } }
+            } else if issues.isEmpty {
+                if loaded {
+                    EmptySection(title: "No issues yet", message: "Issues added to this project in Linear appear here.")
+                } else {
+                    ProgressView().controlSize(.small).accessibilityLabel("Loading issues")
+                }
+            } else {
+                let total = activeIssues.count + todoIssues.count + doneIssues.count
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(alignment: .firstTextBaseline) {
+                        Text(total == 0 ? 0 : Double(doneIssues.count) / Double(total), format: .percent.precision(.fractionLength(0)))
+                            .font(.title2.weight(.semibold)).monospacedDigit()
+                        Text("\(doneIssues.count) of ^[\(total) issue](inflect: true) done")
+                            .foregroundStyle(.secondary).monospacedDigit()
+                    }
+                    ProgressView(value: Double(doneIssues.count), total: Double(max(total, 1)))
+                        .accessibilityLabel("Progress")
+                }
+                issueGroup("In progress", activeIssues)
+                issueGroup("To do", todoIssues)
+                if !doneIssues.isEmpty {
+                    DisclosureGroup {
+                        issueList(doneIssues)
+                    } label: {
+                        Text("Done · \(doneIssues.count)").font(.subheadline.weight(.semibold)).monospacedDigit()
+                    }
+                }
+            }
         }
     }
 
     @ViewBuilder
-    private func linkChip(_ symbol: String, _ text: String?, url: URL?) -> some View {
-        if let text {
-            if let url { Link(destination: url) { Label(text, systemImage: symbol) } } else { Label(text, systemImage: symbol) }
-        } else {
-            Label("not linked", systemImage: symbol).foregroundStyle(.secondary)
-        }
-    }
-
-    private func panel<C: View>(_ s: ServiceKind, title: String, @ViewBuilder content: () -> C) -> some View {
-        GroupBox {
+    private func issueGroup(_ title: String, _ list: [LinearIssue]) -> some View {
+        if !list.isEmpty {
             VStack(alignment: .leading, spacing: 8) {
-                if let e = errors[s] { Text(e).foregroundStyle(.red).font(.callout) }
-                content()
+                Text("\(title) · \(list.count)").font(.subheadline.weight(.semibold)).monospacedDigit()
+                    .accessibilityAddTraits(.isHeader)
+                issueList(list)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-        } label: {
-            Label(title, systemImage: s.symbol).font(.headline)
         }
     }
 
-    private var linearPanel: some View {
-        let groups = Dictionary(grouping: issues, by: \.state.type)
-        let order = ["started", "unstarted", "backlog", "triage", "completed", "canceled"]
-        return VStack(alignment: .leading, spacing: 10) {
-            if !issues.isEmpty {
-                let done = issues.filter { $0.state.type == "completed" }.count
-                ProgressView(value: Double(done), total: Double(issues.count)) {
-                    Text("\(done)/\(issues.count) done").font(.caption)
+    private func issueList(_ list: [LinearIssue]) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            ForEach(list) { issue in
+                HStack(spacing: 8) {
+                    Text(issue.identifier).font(.caption.monospaced()).foregroundStyle(.secondary)
+                    if let url = URL(string: issue.url) {
+                        Link(issue.title, destination: url).lineLimit(1).help(issue.title)
+                    } else {
+                        Text(issue.title).lineLimit(1).help(issue.title)
+                    }
+                    Spacer(minLength: 8)
+                    Text(issue.assignee?.name ?? "Unassigned").font(.caption).foregroundStyle(.secondary).lineLimit(1)
                 }
+                .accessibilityElement(children: .combine)
             }
-            ForEach(order.filter { groups[$0] != nil && !["completed", "canceled"].contains($0) }, id: \.self) { type in
-                ForEach(groups[type] ?? []) { issue in
-                    HStack {
-                        Text(issue.identifier).font(.caption.monospaced()).foregroundStyle(.secondary)
-                        Link(issue.title, destination: URL(string: issue.url)!).lineLimit(1)
-                        Spacer()
-                        Text(issue.state.name).font(.caption).foregroundStyle(.secondary)
-                        if let a = issue.assignee { Text(a.name).font(.caption) }
+        }
+    }
+
+    // MARK: Slack
+
+    private var slackSection: some View {
+        SectionCard("Slack", symbol: ServiceKind.slack.symbol) {
+            if let url = slackURL { Link("Open in Slack", destination: url).font(.callout) }
+        } content: {
+            if project.slack == nil {
+                EmptySection(title: "No Slack channel", message: "Link a channel to follow its conversation here.")
+                Button("Edit links…", action: edit)
+            } else if let e = errors[.slack] {
+                LoadErrorRow(service: .slack, message: e) { Task { await load() } }
+            } else if messages.isEmpty {
+                if loaded {
+                    EmptySection(title: "No messages yet", message: "Messages posted in #\(project.slack?.name ?? "") appear here.")
+                } else {
+                    ProgressView().controlSize(.small).accessibilityLabel("Loading messages")
+                }
+            } else {
+                VStack(alignment: .leading, spacing: 16) {
+                    ForEach(messages.prefix(20)) { m in
+                        VStack(alignment: .leading, spacing: 4) {
+                            HStack(spacing: 6) {
+                                Text(m.user.flatMap { users[$0] } ?? "Integration").font(.callout.weight(.semibold))
+                                Text(m.date.formatted(.relative(presentation: .named)))
+                                    .font(.caption).foregroundStyle(.secondary)
+                                if let r = m.reply_count, r > 0 {
+                                    Text("· ^[\(r) reply](inflect: true)").font(.caption).foregroundStyle(.secondary)
+                                }
+                            }
+                            Text(m.text ?? "")
+                                .lineLimit(4)
+                                .lineSpacing(2)
+                                .textSelection(.enabled)
+                                .help(m.text ?? "")
+                        }
+                        .accessibilityElement(children: .combine)
                     }
                 }
             }
         }
     }
 
-    private var slackPanel: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            ForEach(messages.prefix(20)) { m in
-                VStack(alignment: .leading, spacing: 2) {
-                    HStack {
-                        Text(m.user.flatMap { users[$0] } ?? m.user ?? "bot").font(.caption.bold())
-                        Text(m.date, style: .relative).font(.caption).foregroundStyle(.secondary)
-                        if let r = m.reply_count { Text("· \(r) replies").font(.caption).foregroundStyle(.secondary) }
-                    }
-                    Text(m.text ?? "").lineLimit(3)
+    // MARK: GitHub
+
+    private var githubSection: some View {
+        SectionCard("GitHub", symbol: ServiceKind.github.symbol) {
+            if let repo = project.githubRepo, let url = URL(string: "https://github.com/\(repo)") {
+                Link("Open on GitHub", destination: url).font(.callout)
+            }
+        } content: {
+            if let e = errors[.github] {
+                LoadErrorRow(service: .github, message: e) { Task { await load() } }
+            } else {
+                ViewThatFits(in: .horizontal) {
+                    HStack(alignment: .top, spacing: 32) { pullList; runList }
+                    VStack(alignment: .leading, spacing: 16) { pullList; runList }
                 }
             }
         }
     }
 
-    private var githubPanel: some View {
-        HStack(alignment: .top, spacing: 24) {
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Open PRs (\(pulls.count))").font(.subheadline.bold())
-                ForEach(pulls) { pr in
-                    HStack {
-                        Link("#\(pr.number) \(pr.title)", destination: URL(string: pr.html_url)!).lineLimit(1)
-                        if pr.draft == true { Text("draft").font(.caption).foregroundStyle(.secondary) }
-                        Spacer()
-                        Text(pr.user.login).font(.caption)
-                    }
-                }
+    private var pullList: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Open pull requests · \(pulls.count)").font(.subheadline.weight(.semibold)).monospacedDigit()
+            if pulls.isEmpty && loaded {
+                Text("No open pull requests.").font(.callout).foregroundStyle(.secondary)
             }
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Pipeline").font(.subheadline.bold())
-                ForEach(runs) { run in
-                    HStack {
-                        Image(systemName: runSymbol(run)).foregroundStyle(runColor(run))
-                        Link("\(run.name ?? "run") · \(run.head_branch ?? "")", destination: URL(string: run.html_url)!)
-                            .lineLimit(1)
+            ForEach(pulls) { pr in
+                HStack(spacing: 8) {
+                    Text("#\(pr.number)").font(.caption.monospaced()).foregroundStyle(.secondary)
+                    if let url = URL(string: pr.html_url) {
+                        Link(pr.title, destination: url).lineLimit(1).help(pr.title)
                     }
+                    if pr.draft == true { Text("Draft").font(.caption).foregroundStyle(.secondary) }
+                    Spacer(minLength: 8)
+                    Text(pr.user.login).font(.caption).foregroundStyle(.secondary)
+                }
+                .accessibilityElement(children: .combine)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var runList: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Recent pipeline runs").font(.subheadline.weight(.semibold))
+            if runs.isEmpty && loaded {
+                Text("No workflow runs yet.").font(.callout).foregroundStyle(.secondary)
+            }
+            ForEach(runs.prefix(8)) { run in
+                HStack(spacing: 8) {
+                    PipelineBadge(state: state(of: run)).font(.caption)
+                    if let url = URL(string: run.html_url) {
+                        Link(run.name ?? "Workflow run", destination: url).lineLimit(1)
+                    }
+                    Text(run.head_branch ?? "").font(.caption).foregroundStyle(.secondary).lineLimit(1)
                 }
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private func runSymbol(_ r: GitHubRun) -> String {
-        if r.status != "completed" { return "clock" }
-        return r.conclusion == "success" ? "checkmark.circle.fill" : "xmark.circle.fill"
+    private func state(of run: GitHubRun) -> ProjectSnapshot.PipelineState {
+        if run.status != "completed" { return .running }
+        return run.conclusion == "success" ? .passing : .failing
     }
 
-    private func runColor(_ r: GitHubRun) -> Color {
-        if r.status != "completed" { return .orange }
-        return r.conclusion == "success" ? .green : .red
-    }
+    // MARK: Loading
 
     private func load() async {
         loading = true
-        defer { loading = false }
+        defer { loading = false; loaded = true }
         errors = [:]
         async let l: Void = loadLinear()
         async let s: Void = loadSlack()
@@ -166,6 +296,7 @@ struct ProjectDetailView: View {
         guard let id = project.slack?.id else { return }
         do {
             messages = try await app.withSlack { try await $0.history(id) }
+                .filter { $0.subtype != "channel_join" && $0.subtype != "channel_leave" }
             if users.isEmpty { users = (try? await app.withSlack { try await $0.userNames() }) ?? [:] }
         } catch { errors[.slack] = error.localizedDescription }
     }

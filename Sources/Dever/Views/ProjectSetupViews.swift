@@ -47,6 +47,7 @@ struct ProjectEditorSheet: View {
     @State private var teamPick: String?
     @State private var saving = false
     @State private var error: String?
+    @State private var nameError: String?
 
     init(project: Project = Project(name: ""), isNew: Bool = true) {
         _project = State(initialValue: project)
@@ -57,7 +58,10 @@ struct ProjectEditorSheet: View {
         VStack(alignment: .leading, spacing: 0) {
             Form {
                 Section {
-                    TextField("Project name", text: $project.name)
+                    TextField("Project name", text: $project.name, prompt: Text("Acme website"))
+                    if let nameError {
+                        ErrorLabel(nameError)
+                    }
                 }
                 slackSection
                 linearSection
@@ -73,27 +77,31 @@ struct ProjectEditorSheet: View {
                 }
                 if !catalog.errors.isEmpty || error != nil {
                     Section {
-                        ForEach(catalog.errors + [error].compactMap { $0 }, id: \.self) {
-                            Text($0).foregroundStyle(.red).font(.callout)
-                        }
+                        ForEach(catalog.errors + [error].compactMap { $0 }, id: \.self) { ErrorLabel($0) }
                     }
                 }
             }
             .formStyle(.grouped)
-            HStack {
-                if catalog.loading || saving { ProgressView().controlSize(.small) }
+            HStack(spacing: 12) {
+                if catalog.loading || saving {
+                    ProgressView().controlSize(.small).accessibilityLabel(saving ? "Saving" : "Loading")
+                }
+                Text(consequence).font(.callout).foregroundStyle(.secondary).lineLimit(2)
                 Spacer()
-                Button("Cancel") { dismiss() }
-                Button(isNew ? "Create project" : "Save") { Task { await save() } }
+                Button("Cancel", role: .cancel) { dismiss() }.keyboardShortcut(.cancelAction)
+                Button(isNew ? "Create project" : "Save changes") { Task { await save() } }
                     .buttonStyle(.borderedProminent)
-                    .disabled(project.name.trimmingCharacters(in: .whitespaces).isEmpty || saving)
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(saving)
             }
-            .padding()
+            .padding(16)
         }
-        .frame(width: 560, height: 620)
+        .frame(width: 580, height: 640)
         .task {
-            slackMode = project.slack != nil ? .existing : (app.slack == nil ? .none : .create)
-            linearMode = project.linear != nil ? .existing : (app.linear == nil ? .none : .create)
+            // New projects default to creating what's missing; edits never create anything implicitly.
+            let defaultMode: SlackMode = isNew ? .create : .none
+            slackMode = project.slack != nil ? .existing : (app.slack == nil ? .none : defaultMode)
+            linearMode = project.linear != nil ? .existing : (app.linear == nil ? .none : (isNew ? .create : .none))
             slackPick = project.slack?.id
             linearPick = project.linear?.id
             await catalog.load(app)
@@ -108,7 +116,7 @@ struct ProjectEditorSheet: View {
             if app.slack == nil {
                 Text("Slack not connected").foregroundStyle(.secondary)
             } else {
-                Picker("", selection: $slackMode) {
+                Picker("Slack channel", selection: $slackMode) {
                     Text("Create").tag(SlackMode.create)
                     Text("Existing").tag(SlackMode.existing)
                     Text("Later").tag(SlackMode.none)
@@ -135,7 +143,7 @@ struct ProjectEditorSheet: View {
             if app.linear == nil {
                 Text("Linear not connected").foregroundStyle(.secondary)
             } else {
-                Picker("", selection: $linearMode) {
+                Picker("Linear project", selection: $linearMode) {
                     Text("Create").tag(LinearMode.create)
                     Text("Existing").tag(LinearMode.existing)
                     Text("Later").tag(LinearMode.none)
@@ -179,10 +187,37 @@ struct ProjectEditorSheet: View {
         }
     }
 
+    /// What saving will do outside Dever, stated before the user commits.
+    private var consequence: String {
+        var parts: [String] = []
+        if slackMode == .create {
+            let name = newChannelName.isEmpty ? Naming.channelName(for: project.name, prefix: channelPrefix) : newChannelName
+            parts.append("creates #\(name) in Slack")
+        }
+        if linearMode == .create, let team = catalog.teams.first(where: { $0.id == teamPick }) {
+            parts.append("creates a Linear project in \(team.name)")
+        }
+        guard !parts.isEmpty else { return "" }
+        return (isNew ? "Creating " : "Saving ") + parts.joined(separator: " and ") + "."
+    }
+
     private func save() async {
+        error = nil
+        nameError = nil
+        guard !project.name.trimmingCharacters(in: .whitespaces).isEmpty else {
+            nameError = "Enter a project name."
+            return
+        }
+        if slackMode == .existing && slackPick == nil {
+            error = "Pick a Slack channel, or choose Later."
+            return
+        }
+        if linearMode == .existing && linearPick == nil {
+            error = "Pick a Linear project, or choose Later."
+            return
+        }
         saving = true
         defer { saving = false }
-        error = nil
         do {
             var p = project
             p.name = p.name.trimmingCharacters(in: .whitespaces)
@@ -268,30 +303,62 @@ struct ImportSheet: View {
             Text(source == .slack ? "Import from Slack channels" : "Import from Linear projects")
                 .font(.title2.bold())
             HStack {
-                TextField("Search", text: $search).textFieldStyle(.roundedBorder)
+                TextField(source == .slack ? "Search channels" : "Search projects", text: $search)
+                .textFieldStyle(.roundedBorder)
                 if source == .slack {
                     Toggle("Only \"\(channelPrefix)…\"", isOn: $onlyConvention)
                 }
             }
-            if catalog.loading { ProgressView() }
-            ForEach(catalog.errors, id: \.self) { Text($0).foregroundStyle(.red).font(.callout) }
+            if catalog.loading { ProgressView().controlSize(.small).accessibilityLabel("Loading") }
+            ForEach(catalog.errors, id: \.self) { ErrorLabel($0) }
             Table(candidates, selection: $selection) {
                 TableColumn(source == .slack ? "Channel" : "Linear project", value: \.title)
                 TableColumn("Dever project name", value: \.projectName)
                 TableColumn(source == .slack ? "Matching Linear project" : "Matching Slack channel") {
-                    Text($0.match ?? "— to link").foregroundStyle($0.match == nil ? .secondary : .primary)
+                    Text($0.match ?? "None found").foregroundStyle($0.match == nil ? .secondary : .primary)
+                }
+            }
+            .overlay {
+                if candidates.isEmpty && !catalog.loading {
+                    ContentUnavailableView {
+                        Label(emptyTitle, systemImage: "tray")
+                    } description: {
+                        Text(emptyMessage)
+                    } actions: {
+                        if source == .slack && onlyConvention && search.isEmpty {
+                            Button("Show all channels") { onlyConvention = false }
+                        } else if !search.isEmpty {
+                            Button("Clear search") { search = "" }
+                        }
+                    }
                 }
             }
             HStack {
-                Text("\(selection.count) selected").foregroundStyle(.secondary)
+                Text("\(selection.count) selected").foregroundStyle(.secondary).monospacedDigit()
                 Spacer()
-                Button("Cancel") { dismiss() }
-                Button("Import") { importSelected() }.buttonStyle(.borderedProminent).disabled(selection.isEmpty)
+                Button("Cancel", role: .cancel) { dismiss() }.keyboardShortcut(.cancelAction)
+                Button("Import ^[\(selection.count) project](inflect: true)") { importSelected() }
+                    .buttonStyle(.borderedProminent)
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(selection.isEmpty)
             }
         }
         .padding(20)
         .frame(width: 760, height: 560)
         .task { await catalog.load(app) }
+    }
+
+    private var emptyTitle: String {
+        if !search.isEmpty { return "No results for \u{201C}\(search)\u{201D}" }
+        return source == .slack ? "No channels to import" : "No projects to import"
+    }
+
+    private var emptyMessage: String {
+        if !search.isEmpty { return "Check the spelling or clear the search." }
+        if source == .slack && onlyConvention {
+            return "No unlinked channel starts with \u{201C}\(channelPrefix)\u{201D}. Change the prefix in Accounts, or show all channels."
+        }
+        return "Everything is already linked to a Dever project."
     }
 
     private func linearMatch(for name: String) -> LinearProject? {
