@@ -9,7 +9,9 @@ enum Soot {
     static let ground = Color(red: 0.059, green: 0.059, blue: 0.059)     // #0f0f0f
     static let surface = Color(red: 0.102, green: 0.102, blue: 0.102)    // #1a1a1a
     static let ink = Color.white
-    static let muted = Color(red: 0.56, green: 0.56, blue: 0.56)         // #8f8f8f
+    static let muted = Color(red: 0.56, green: 0.56, blue: 0.56)         // #8f8f8f · 5.9:1 on ground, 5.4:1 on surface
+    /// Control edges: 3.9:1 on ground, 3.5:1 on surface (WCAG 1.4.11 asks 3:1).
+    static let edge = Color(red: 0.44, green: 0.44, blue: 0.44)          // #707070
     static let lime = Color(red: 0.855, green: 0.98, blue: 0.612)        // #dafa9c
     static let limeInk = ground
     static let radius: CGFloat = 8
@@ -38,6 +40,7 @@ struct LimeButton: ButtonStyle {
             .frame(height: 40)
             .background(Soot.lime.opacity(isEnabled ? (configuration.isPressed ? 0.8 : 1) : 0.3),
                         in: RoundedRectangle(cornerRadius: Soot.radius))
+            .modifier(FocusOutline(radius: Soot.radius))
     }
 }
 
@@ -50,6 +53,8 @@ struct QuietButton: ButtonStyle {
             .frame(height: 40)
             .background(Soot.surface.opacity(configuration.isPressed ? 0.7 : 1),
                         in: RoundedRectangle(cornerRadius: Soot.radius))
+            .overlay(RoundedRectangle(cornerRadius: Soot.radius).strokeBorder(Soot.edge))
+            .modifier(FocusOutline(radius: Soot.radius))
     }
 }
 
@@ -108,7 +113,7 @@ struct UnderlineField: View {
             .foregroundStyle(Soot.ink)
             .padding(.bottom, 8)
             .overlay(alignment: .bottom) {
-                Rectangle().fill(focused ? Soot.ink : Soot.muted.opacity(0.5)).frame(height: 1)
+                Rectangle().fill(focused ? Soot.ink : Soot.muted).frame(height: focused ? 2 : 1)
             }
             .focused($focused)
             .onSubmit(onSubmit)
@@ -131,6 +136,7 @@ struct ChipPicker<Value: Hashable>: View {
                     .padding(.horizontal, 12)
                     .frame(height: 28)
                     .background(on ? Soot.lime : Soot.surface, in: Capsule())
+                    .overlay(Capsule().strokeBorder(on ? Color.clear : Soot.edge))
                     .accessibilityAddTraits(on ? .isSelected : [])
             }
         }
@@ -142,7 +148,7 @@ struct CheckCircle: View {
     let on: Bool
     var body: some View {
         ZStack {
-            Circle().strokeBorder(on ? Soot.lime : Soot.muted.opacity(0.6), lineWidth: 1.5)
+            Circle().strokeBorder(on ? Soot.lime : Soot.muted, lineWidth: 1.5)
             if on {
                 Circle().fill(Soot.lime)
                 Image(systemName: "checkmark").font(.system(size: 9, weight: .bold)).foregroundStyle(Soot.limeInk)
@@ -192,5 +198,63 @@ struct SheetTitle<Mark: View>: View {
             .keyboardShortcut(.cancelAction)
             .accessibilityLabel("Close")
         }
+    }
+}
+
+/// A visible keyboard-focus ring for custom controls (WCAG 2.4.7): white, 2px, 3px outside.
+struct FocusOutline: ViewModifier {
+    var radius: CGFloat
+    @Environment(\.isFocused) private var isFocused
+
+    func body(content: Content) -> some View {
+        content.overlay(
+            RoundedRectangle(cornerRadius: radius + 3)
+                .strokeBorder(Soot.ink, lineWidth: 2)
+                .padding(-3)
+                .opacity(isFocused ? 1 : 0)
+        )
+    }
+}
+
+/// One option of a radio group: a ring with a dot when chosen, a label, one short line.
+struct RadioRow: View {
+    let title: String
+    var detail: String? = nil
+    let selected: Bool
+    let select: () -> Void
+
+    var body: some View {
+        Button(action: select) {
+            HStack(alignment: .top, spacing: 12) {
+                ZStack {
+                    Circle().strokeBorder(selected ? Soot.lime : Soot.muted, lineWidth: 1.5)
+                    if selected { Circle().fill(Soot.lime).padding(5) }
+                }
+                .frame(width: 18, height: 18)
+                .padding(.top, 1)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title).font(.system(size: 15, weight: .medium)).foregroundStyle(Soot.ink)
+                    if let detail {
+                        Text(detail).font(.system(size: 13)).foregroundStyle(Soot.muted)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(.vertical, 6)
+            .contentShape(Rectangle())
+            .modifier(FocusOutline(radius: 6))
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(selected ? [.isSelected] : [])
+        .accessibilityHint(detail ?? "")
+    }
+}
+
+/// A label above a control, so no input relies on its placeholder (WCAG 3.3.2).
+struct FieldLabel: View {
+    let text: String
+    var body: some View {
+        Text(text).font(.system(size: 13, weight: .semibold)).foregroundStyle(Soot.muted)
     }
 }

@@ -300,6 +300,7 @@ private struct ChannelNamingControls: View {
                            detail: "Dever finds your project channels by it") { usesPrefix = true }
                     if usesPrefix {
                         VStack(alignment: .leading, spacing: 6) {
+                            FieldLabel(text: "Prefix")
                             UnderlineField(placeholder: "proj-", text: $prefix, size: 17)
                                 .frame(maxWidth: 200)
                                 .accessibilityLabel("Channel prefix")
