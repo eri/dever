@@ -25,6 +25,8 @@ struct ProjectSnapshot {
         var branch: String?
         /// True when PRs and pipeline are limited to the project's Linear issues.
         var scoped = false
+        /// Open Linear issues whose pull request is already merged (ticket left behind).
+        var mergedButOpen: [String] = []
     }
 
     enum PipelineState { case passing, failing, running, unknown }
@@ -72,6 +74,9 @@ extension Project {
            Date().timeIntervalSince(last) > Double(Self.quietAfterDays) * 86_400 {
             out.append("No Slack activity for \(Int(Date().timeIntervalSince(last) / 86_400)) days")
         }
+        if let stale = s.github?.mergedButOpen, !stale.isEmpty {
+            out.append(Plural.text("^[\(stale.count) issue](inflect: true) merged but not done"))
+        }
         out += s.errors.keys.sorted { $0.rawValue < $1.rawValue }.map { "Couldn't load \($0.label) data" }
         return out
     }
@@ -83,6 +88,7 @@ extension Project {
            let l = s.linear, l.done < l.total {
             return .needsAttention
         }
+        if s.github?.mergedButOpen.isEmpty == false { return .needsAttention }
         if !isComplete { return .incomplete }
         if let last = s.slack?.lastActivity,
            Date().timeIntervalSince(last) > Double(Self.quietAfterDays) * 86_400 {
@@ -104,33 +110,50 @@ final class OverviewStore: ObservableObject {
 
     var isStale: Bool { lastRefresh.map { Date().timeIntervalSince($0) > Self.staleAfter } ?? true }
 
+    private var autoRefresh: Task<Void, Never>?
+
+    /// Keeps snapshots fresh (and notifications flowing) for as long as the app runs,
+    /// even with its window closed.
+    func startAutoRefresh(_ app: AppState) {
+        guard autoRefresh == nil else { return }
+        autoRefresh = Task { [weak self] in
+            while !Task.isCancelled {
+                guard let self else { return }
+                if self.isStale { await self.refresh(app) }
+                try? await Task.sleep(nanoseconds: 60 * 1_000_000_000)
+            }
+        }
+    }
+
     func refresh(_ app: AppState) async {
         guard !isRefreshing else { return }
         isRefreshing = true
         defer { isRefreshing = false; lastRefresh = Date() }
 
         let projects = app.projects
+        let repos = (try? app.githubClient()).map(RepoCache.init)
         // A few projects at a time keeps us well under the Slack/GitHub rate limits.
         await withTaskGroup(of: (UUID, ProjectSnapshot).self) { group in
             var pending = projects.makeIterator()
             for _ in 0..<4 {
                 guard let p = pending.next() else { break }
-                group.addTask { await (p.id, Self.load(p, app)) }
+                group.addTask { await (p.id, Self.load(p, app, repos)) }
             }
             for await (id, snapshot) in group {
                 snapshots[id] = snapshot
-                if let p = pending.next() { group.addTask { await (p.id, Self.load(p, app)) } }
+                if let p = pending.next() { group.addTask { await (p.id, Self.load(p, app, repos)) } }
             }
         }
         let ids = Set(projects.map(\.id))
         snapshots = snapshots.filter { ids.contains($0.key) }
+        Notifier.shared.process(projects: projects, snapshots: snapshots)
     }
 
-    private static func load(_ p: Project, _ app: AppState) async -> ProjectSnapshot {
+    private static func load(_ p: Project, _ app: AppState, _ repos: RepoCache?) async -> ProjectSnapshot {
         var s = ProjectSnapshot()
         async let slack = loadSlack(p, app)
         // GitHub waits for Linear: the project's issues decide which PRs belong to it.
-        var issues: [IssueReference]?
+        var issues: [LinearClient.ProjectSummary.Issue]?
         switch await loadLinear(p, app) {
         case .success(let v):
             s.linear = v?.stats
@@ -139,7 +162,7 @@ final class OverviewStore: ObservableObject {
             s.errors[.linear] = e.localizedDescription
         }
         let projectIssues = issues
-        async let github = loadGitHub(p, app, issues: projectIssues)
+        async let github = loadGitHub(p, repos, issues: projectIssues)
         switch await slack {
         case .success(let v): s.slack = v
         case .failure(let e): s.errors[.slack] = e.localizedDescription
@@ -152,7 +175,7 @@ final class OverviewStore: ObservableObject {
     }
 
     private static func loadLinear(_ p: Project, _ app: AppState)
-        async -> Result<(stats: ProjectSnapshot.LinearStats, issues: [IssueReference])?, Error> {
+        async -> Result<(stats: ProjectSnapshot.LinearStats, issues: [LinearClient.ProjectSummary.Issue])?, Error> {
         guard let id = p.linear?.id, app.linear != nil else { return .success(nil) }
         do {
             let summary = try await app.withLinear { try await $0.projectSummary(id: id) }
@@ -190,20 +213,24 @@ final class OverviewStore: ObservableObject {
         }
     }
 
-    private static func loadGitHub(_ p: Project, _ app: AppState, issues: [IssueReference]?)
+    private static func loadGitHub(_ p: Project, _ repos: RepoCache?, issues: [LinearClient.ProjectSummary.Issue]?)
         async -> Result<ProjectSnapshot.GitHubStats?, Error> {
-        guard let repo = p.githubRepo, app.github != nil else { return .success(nil) }
+        guard let repo = p.githubRepo, let repos else { return .success(nil) }
         do {
-            let client = try app.githubClient()
-            let prs = ProjectPullRequests(pulls: try await client.pulls(repo), issues: issues,
+            let prs = ProjectPullRequests(pulls: try await repos.openPulls(repo), issues: issues,
                                           wholeRepository: p.showsWholeRepository)
-            if prs.scoped {
-                let pipeline = prs.pipeline(from: try await client.runs(repo))
-                return .success(.init(openPRs: prs.matches.count, pipeline: pipeline.state, scoped: true))
+            if prs.scoped, let issues {
+                let pipeline = prs.pipeline(from: try await repos.runs(repo))
+                // Issues still open in Linear although one of their PRs is merged.
+                let open = Set(issues.filter { !["completed", "canceled"].contains($0.state.type) }.map(\.identifier))
+                let merged = ProjectPullRequests(pulls: try await repos.mergedPulls(repo), issues: issues, wholeRepository: false)
+                let stale = Set(merged.matches.compactMap(\.issue)).intersection(open).sorted()
+                return .success(.init(openPRs: prs.matches.count, pipeline: pipeline.state, scoped: true,
+                                      mergedButOpen: stale))
             }
             // Unscoped: the health of the default branch, not of whichever branch ran last.
-            let branch = try await client.defaultBranch(repo)
-            let run = try await client.runs(repo, branch: branch).first
+            let branch = try await repos.defaultBranch(repo)
+            let run = try await repos.runs(repo, branch: branch).first
             return .success(.init(openPRs: prs.matches.count,
                                   pipeline: run.map(ProjectSnapshot.PipelineState.init(run:)) ?? .unknown,
                                   branch: branch))
@@ -218,4 +245,43 @@ final class OverviewStore: ObservableObject {
         f.dateFormat = "yyyy-MM-dd"
         return f
     }()
+}
+
+/// Memoizes GitHub requests during one refresh, so projects sharing a repository
+/// (a monorepo) fetch its pull requests and runs only once.
+actor RepoCache {
+    private let client: GitHubClient
+    private var tasks: [String: Task<Any, Error>] = [:]
+
+    init(client: GitHubClient) { self.client = client }
+
+    private func value<T>(_ key: String, _ fetch: @escaping @Sendable () async throws -> T) async throws -> T {
+        if let task = tasks[key] { return try await task.value as! T }
+        let task = Task<Any, Error> { try await fetch() }
+        tasks[key] = task
+        return try await task.value as! T
+    }
+
+    func openPulls(_ repo: String) async throws -> [GitHubPull] {
+        try await value("open:\(repo)") { [client] in try await client.pulls(repo) }
+    }
+
+    func mergedPulls(_ repo: String) async throws -> [GitHubPull] {
+        try await value("merged:\(repo)") { [client] in try await client.mergedPulls(repo) }
+    }
+
+    func runs(_ repo: String, branch: String? = nil) async throws -> [GitHubRun] {
+        try await value("runs:\(repo):\(branch ?? "*")") { [client] in try await client.runs(repo, branch: branch) }
+    }
+
+    func defaultBranch(_ repo: String) async throws -> String {
+        try await value("branch:\(repo)") { [client] in try await client.defaultBranch(repo) }
+    }
+}
+
+/// Plural-aware strings outside of SwiftUI `Text` (which inflects on its own).
+enum Plural {
+    static func text(_ key: String.LocalizationValue) -> String {
+        String(AttributedString(localized: key).characters)
+    }
 }

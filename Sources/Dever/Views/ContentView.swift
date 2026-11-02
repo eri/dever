@@ -76,6 +76,18 @@ struct ContentView: View {
             }
             .environment(\.openAccounts, { selection = .accounts })
         }
+        .task {
+            store.startAutoRefresh(app)
+            // Ask once, when there is something to be notified about.
+            if !app.projects.isEmpty, await Notifier.shared.authorizationStatus() == .notDetermined {
+                _ = await Notifier.shared.requestAuthorization()
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .openProject)) { note in
+            if let id = note.object as? UUID, app.projects.contains(where: { $0.id == id }) {
+                selection = .project(id)
+            }
+        }
         .sheet(isPresented: $showNew) { ProjectEditorSheet() }
         .sheet(item: $importSource) { ImportSheet(source: $0) }
         .sheet(item: $editing) { ProjectEditorSheet(project: $0, isNew: false) }

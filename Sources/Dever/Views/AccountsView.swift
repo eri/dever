@@ -1,4 +1,5 @@
 import SwiftUI
+import UserNotifications
 
 struct AccountsView: View {
     @EnvironmentObject var app: AppState
@@ -12,6 +13,7 @@ struct AccountsView: View {
                     AccountRow(service: s, connect: { loginSheet = s })
                 }
             }
+            NotificationSettings()
             Section {
                 TextField("Project channel prefix", text: $channelPrefix)
                 Text("Example: \(Naming.channelName(for: "Acme Corp", prefix: channelPrefix))")
@@ -219,5 +221,58 @@ private struct GitHubLoginSheet: View {
         Task {
             do { try await finish(token: try GitHubAuth.tokenFromGhCLI()) } catch { self.error = error.localizedDescription }
         }
+    }
+}
+
+// MARK: - Notifications
+
+private struct NotificationSettings: View {
+    @State private var status: UNAuthorizationStatus = .notDetermined
+
+    var body: some View {
+        Section {
+            switch status {
+            case .denied:
+                HStack {
+                    Label {
+                        Text("Notifications are off for Dever in System Settings.")
+                    } icon: {
+                        Image(systemName: "bell.slash").foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Button("Open System Settings") {
+                        if let url = URL(string: "x-apple.systempreferences:com.apple.Notifications-Settings.extension") {
+                            NSWorkspace.shared.open(url)
+                        }
+                    }
+                }
+            case .notDetermined:
+                HStack {
+                    Label("Dever can alert you when a project needs action.", systemImage: "bell")
+                    Spacer()
+                    Button("Turn on notifications") {
+                        Task { _ = await Notifier.shared.requestAuthorization(); await refresh() }
+                    }
+                    .buttonStyle(.borderedProminent)
+                }
+            default:
+                ForEach(AlertKind.allCases) { kind in
+                    Toggle(kind.settingLabel, isOn: Binding(
+                        get: { kind.isEnabled },
+                        set: { UserDefaults.standard.set($0, forKey: kind.settingKey) }
+                    ))
+                }
+            }
+        } header: {
+            Text("Notifications")
+        } footer: {
+            Text("Dever checks your projects every 5 minutes while it's running, even with its window closed. Each situation is notified once.")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+        .task { await refresh() }
+    }
+
+    private func refresh() async {
+        status = await Notifier.shared.authorizationStatus()
     }
 }

@@ -82,13 +82,7 @@ struct OverviewView: View {
             .keyboardShortcut("r")
             .disabled(store.isRefreshing)
         }
-        .task {
-            // Refresh on appear when stale, then every few minutes while the overview is visible.
-            while !Task.isCancelled {
-                if store.isStale { await store.refresh(app) }
-                try? await Task.sleep(nanoseconds: UInt64(OverviewStore.staleAfter * 1_000_000_000))
-            }
-        }
+        .task { if store.isStale { await store.refresh(app) } }
     }
 
     private var subtitle: String {
