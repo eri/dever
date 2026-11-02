@@ -55,6 +55,7 @@ struct AccountsView: View {
         }
         .sheetBackground()
         .navigationTitle("Accounts")
+        .windowTitleHidden()
         .sheet(item: $loginSheet) { s in
             switch s {
             case .github: GitHubLoginSheet()
@@ -104,36 +105,37 @@ private struct AccountRow: View {
     }
 
     var body: some View {
-        HStack {
-            Label(service.label, systemImage: service.symbol)
-                .font(Theme.bodyStrong).foregroundStyle(Theme.text)
-                .frame(width: 100, alignment: .leading)
-            VStack(alignment: .leading, spacing: 2) {
-                if let detail {
-                    Label {
-                        Text(detail).lineLimit(1).help(detail)
-                    } icon: {
-                        Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 4) {
+                Label(service.label, systemImage: service.symbol)
+                    .font(Theme.bodyStrong).foregroundStyle(Theme.text)
+                Group {
+                    if let detail {
+                        Label {
+                            Text(detail).foregroundStyle(Theme.muted).lineLimit(1).help(detail)
+                        } icon: {
+                            Image(systemName: "checkmark.circle.fill").foregroundStyle(Theme.positive)
+                        }
+                        .accessibilityLabel("Connected: \(detail)")
+                    } else {
+                        Label {
+                            Text("Not connected").foregroundStyle(Theme.muted)
+                        } icon: {
+                            Image(systemName: "circle.dashed").foregroundStyle(Theme.muted)
+                        }
                     }
-                    .accessibilityLabel("Connected: \(detail)")
-                } else {
-                    Label {
-                        Text("Not connected").foregroundStyle(.secondary)
-                    } icon: {
-                        Image(systemName: "circle.dashed").foregroundStyle(.secondary)
+                    if let status {
+                        Label {
+                            Text(status).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
+                        } icon: {
+                            Image(systemName: statusIsError ? "exclamationmark.triangle.fill" : "checkmark")
+                                .foregroundStyle(statusIsError ? Theme.negative : Theme.positive)
+                        }
                     }
                 }
-                if let status {
-                    Label {
-                        Text(status).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                    } icon: {
-                        Image(systemName: statusIsError ? "exclamationmark.triangle.fill" : "checkmark")
-                            .foregroundStyle(statusIsError ? Color.orange : Color.green)
-                    }
-                    .font(.caption)
-                }
+                .font(Theme.small)
             }
-            Spacer()
+            Spacer(minLength: 12)
             if app.isConnected(service) {
                 if checking {
                     ProgressView().controlSize(.small).accessibilityLabel("Checking connection")
@@ -312,12 +314,9 @@ private struct SettingsSection<Content: View>: View {
     }
 
     var body: some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(alignment: .top, spacing: 32) {
-                label.frame(width: 280, alignment: .leading)
-                panel.frame(minWidth: 480)
-            }
-            VStack(alignment: .leading, spacing: 12) { label; panel }
+        HStack(alignment: .top, spacing: 32) {
+            label.frame(width: 240, alignment: .leading)
+            panel
         }
     }
 

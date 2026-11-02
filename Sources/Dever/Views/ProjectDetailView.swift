@@ -54,6 +54,7 @@ struct ProjectDetailView: View {
         }
         .sheetBackground()
         .navigationTitle(project.name)
+        .windowTitleHidden()
         .task { await load() }
     }
 

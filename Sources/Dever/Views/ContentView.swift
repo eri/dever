@@ -49,6 +49,12 @@ struct ContentView: View {
                 _ = await Notifier.shared.requestAuthorization()
             }
         }
+        .task {
+            if let dir = Snapshotter.directory { await Snapshotter.run(in: dir, projects: app.projects) }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .showScreen)) { note in
+            if let item = note.object as? SidebarItem { selection = item }
+        }
         .onReceive(NotificationCenter.default.publisher(for: .openProject)) { note in
             if let id = note.object as? UUID, app.projects.contains(where: { $0.id == id }) {
                 selection = .project(id)

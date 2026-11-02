@@ -26,3 +26,13 @@ Tokens are stored in the macOS Keychain (`io.github.eri.dever`), projects in `~/
 - **Import from Slack**: lists channels following the naming convention and suggests the matching Linear project.
 - **Import from Linear**: lists projects and suggests the matching channel.
 - A project without both a Slack channel **and** a Linear project is flagged ⚠️ incomplete.
+
+## Screenshots for development
+
+Dever can photograph its own window, without screen-recording permission:
+
+```bash
+DEVER_SNAPSHOT_DIR=/tmp/dever-shots ./build/Dever.app/Contents/MacOS/Dever
+```
+
+It opens Overview, the first project and Accounts in dark then light mode, saves one PNG per screen, and quits.

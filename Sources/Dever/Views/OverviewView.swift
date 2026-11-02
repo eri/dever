@@ -10,7 +10,7 @@ struct OverviewView: View {
     let importFrom: (ImportSheet.Source) -> Void
 
     enum Filter: String, CaseIterable, Identifiable {
-        case all = "All projects", attention = "Need attention", incomplete = "Incomplete", onTrack = "On track"
+        case all = "All projects", attention = "Needs attention", incomplete = "Incomplete", onTrack = "On track"
         var id: String { rawValue }
     }
 
@@ -56,6 +56,7 @@ struct OverviewView: View {
         }
         .sheetBackground()
         .navigationTitle("Overview")
+        .windowTitleHidden()
         .task { if store.isStale { await store.refresh(app) } }
     }
 
@@ -83,9 +84,12 @@ struct OverviewView: View {
         }) else {
             return store.snapshots.isEmpty ? "Loading your projects…" : "Every project is on track."
         }
-        let summary = Plural.text("^[\(attention.count) of \(app.projects.count) project](inflect: true) need attention.")
-        guard let signal = lead.signals(store.snapshots[lead.id]).first else { return summary }
-        return "\(summary) \(lead.name): \(signal.prefix(1).lowercased() + signal.dropFirst())."
+        let reason = lead.signals(store.snapshots[lead.id]).first
+            .map { ": " + $0.prefix(1).lowercased() + $0.dropFirst() } ?? ""
+        if attention.count == 1 {
+            return "\(lead.name) needs attention\(reason)."
+        }
+        return "\(attention.count) of \(app.projects.count) projects need attention. \(lead.name)\(reason)."
     }
 
     private var freshness: some View {
@@ -288,10 +292,11 @@ private struct ProjectRow: View {
 
     private func deliveryCaption(_ d: Delivery) -> some View {
         HStack(spacing: 4) {
-            Text("\(d.shipped) of ^[\(d.total) issue](inflect: true) shipped")
+            Text("\(d.shipped)/\(d.total) shipped")
                 .foregroundStyle(Theme.text).monospacedDigit()
             if d.merged > 0 {
-                Text("· \(d.merged) to close in Linear").foregroundStyle(Theme.chart3).monospacedDigit()
+                Text("· \(d.merged) to close").foregroundStyle(Theme.chart3).monospacedDigit()
+                    .help("Merged in GitHub but still open in Linear")
             } else if let target = snapshot?.linear?.targetDate {
                 Text("· due \(target.formatted(.dateTime.day().month(.abbreviated)))").foregroundStyle(Theme.muted)
             }

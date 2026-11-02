@@ -49,11 +49,11 @@ struct PipelineBadge: View {
         case .passing: ("Passing", Theme.positive, "checkmark.circle.fill")
         case .failing: ("Failing", Theme.negative, "xmark.circle.fill")
         case .running: ("Running", Theme.chart2, "clock")
-        case .unknown: ("No runs", Theme.muted, "minus")
+        case .unknown: ("No runs", Theme.muted, "")
         }
         HStack(spacing: 4) {
-            Image(systemName: symbol).foregroundStyle(color).imageScale(.small)
-            Text(text).foregroundStyle(state == .failing ? Theme.negative : Theme.text)
+            if !symbol.isEmpty { Image(systemName: symbol).foregroundStyle(color).imageScale(.small) }
+            Text(text).foregroundStyle(state == .failing ? Theme.negative : state == .unknown ? Theme.muted : Theme.text)
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Pipeline: \(text)")

@@ -180,3 +180,15 @@ struct SecondaryButtonStyle: ButtonStyle {
             .overlay(RoundedRectangle(cornerRadius: Theme.radiusControl).strokeBorder(Theme.control))
     }
 }
+
+extension View {
+    /// The page's own h1 names the screen; the window title would only repeat it (macOS 15+).
+    @ViewBuilder
+    func windowTitleHidden() -> some View {
+        if #available(macOS 15.0, *) {
+            self.toolbar(removing: .title)
+        } else {
+            self
+        }
+    }
+}
