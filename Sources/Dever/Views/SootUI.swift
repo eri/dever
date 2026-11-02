@@ -433,3 +433,12 @@ struct ActionIcon: View {
             .accessibilityHidden(true)
     }
 }
+
+extension View {
+    /// A block on a soot page: one tone step up from the ground, no border.
+    func sootPanel() -> some View {
+        self.padding(20)
+            .frame(maxWidth: .infinity, alignment: .topLeading)
+            .background(Soot.surface, in: RoundedRectangle(cornerRadius: 12))
+    }
+}

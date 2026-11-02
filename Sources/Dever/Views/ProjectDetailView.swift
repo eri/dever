@@ -39,25 +39,33 @@ struct ProjectDetailView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: Theme.gap) {
+            VStack(alignment: .leading, spacing: 28) {
                 titleRow
-                if project.linear != nil { deliveryPanel }
+                // The work on the left; the conversation alongside it, like a right rail.
                 ViewThatFits(in: .horizontal) {
-                    HStack(alignment: .top, spacing: Theme.gap) {
-                        issuesPanel.frame(minWidth: 380)
-                        slackPanel.frame(minWidth: 320)
+                    HStack(alignment: .top, spacing: 20) {
+                        workColumn.frame(minWidth: 520)
+                        slackPanel.frame(width: 440)
                     }
-                    VStack(spacing: Theme.gap) { issuesPanel; slackPanel }
+                    VStack(spacing: 20) { workColumn; slackPanel }
                 }
-                if project.githubRepo != nil { githubPanel }
             }
-            .padding(Theme.pad)
+            .padding(32)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .sheetBackground()
+        .background(Soot.ground)
+        .environment(\.colorScheme, .dark)
         .navigationTitle(project.name)
         .windowTitleHidden()
         .task { await load() }
+    }
+
+    private var workColumn: some View {
+        VStack(spacing: 20) {
+            if project.linear != nil { deliveryPanel }
+            issuesPanel
+            if project.githubRepo != nil { githubPanel }
+        }
     }
 
     // MARK: Title row
@@ -66,12 +74,13 @@ struct ProjectDetailView: View {
         HStack(alignment: .top, spacing: 12) {
             VStack(alignment: .leading, spacing: 6) {
                 HStack(alignment: .firstTextBaseline, spacing: 10) {
-                    Text(project.name).font(Theme.title).foregroundStyle(Theme.text)
+                    Text(project.name).font(.system(size: 32, weight: .semibold)).tracking(-0.8)
+                        .foregroundStyle(Soot.ink)
                         .accessibilityAddTraits(.isHeader)
                     if status == .loading { Skeleton(width: 72, height: 20, radius: 4) } else { StatusBadge(status: status) }
                 }
                 if loaded || !project.isComplete {
-                    Text(finding).font(Theme.body).foregroundStyle(Theme.muted)
+                    Text(finding).font(.system(size: 15)).foregroundStyle(Soot.muted)
                         .fixedSize(horizontal: false, vertical: true)
                 } else {
                     Skeleton(width: 280, height: 14).padding(.vertical, 2)
@@ -88,10 +97,10 @@ struct ProjectDetailView: View {
                 .accessibilityLabel("Refresh this project")
                 .keyboardShortcut("r")
                 .disabled(loading)
-                Button("Edit links…", action: edit).buttonStyle(SecondaryButtonStyle())
+                Button("Edit links…", action: edit).buttonStyle(QuietButton())
                 if !toClose.isEmpty, let url = project.linear.flatMap({ URL(string: $0.url) }) {
                     Link(destination: url) { Text("Update \(toClose.count) in Linear") }
-                        .buttonStyle(PrimaryButtonStyle())
+                        .buttonStyle(LimeButton())
                         .help("Open the project in Linear to move these merged issues forward")
                 }
             }
@@ -151,7 +160,7 @@ struct ProjectDetailView: View {
                 if !toClose.isEmpty { toCloseList }
             }
         }
-        .panel()
+        .sootPanel()
     }
 
     private var toCloseList: some View {
@@ -214,7 +223,7 @@ struct ProjectDetailView: View {
                 }
             }
         }
-        .panel()
+        .sootPanel()
     }
 
     @ViewBuilder
@@ -262,8 +271,19 @@ struct ProjectDetailView: View {
 
     private var slackPanel: some View {
         VStack(alignment: .leading, spacing: 16) {
-            SectionHeader("Slack", subtitle: project.slack.map { "#\($0.name)" }) {
-                if let url = slackURL { Link("Open in Slack", destination: url).font(Theme.small) }
+            HStack(spacing: 10) {
+                BrandLogo(service: .slack, size: 18)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(project.slack.map { "#\($0.name)" } ?? "Slack").font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(Soot.ink).accessibilityAddTraits(.isHeader)
+                    Text("Latest messages").font(.system(size: 12)).foregroundStyle(Soot.muted)
+                }
+                Spacer()
+                if let url = slackURL {
+                    Link(destination: url) { HStack(spacing: 4) { Text("Open"); Image(systemName: "arrow.up.right") } }
+                        .font(.system(size: 13, weight: .semibold)).foregroundStyle(Soot.lime)
+                        .help("Open the channel in Slack")
+                }
             }
             if project.slack == nil {
                 EmptySection(title: "No Slack channel", message: "Link a channel to follow its conversation here.")
@@ -284,15 +304,11 @@ struct ProjectDetailView: View {
             } else if messages.isEmpty {
                 EmptySection(title: "No messages yet", message: "Messages posted in #\(project.slack?.name ?? "") appear here.")
             } else {
-                VStack(alignment: .leading, spacing: 0) {
-                    ForEach(Array(messages.prefix(6).enumerated()), id: \.element.id) { index, m in
-                        if index > 0 { Rectangle().fill(Theme.rule).frame(height: 1) }
-                        message(m).padding(.vertical, 10)
-                    }
-                }
+                SlackThreadView(messages: messages, users: users, domain: app.slack?.domain,
+                                channelID: project.slack?.id, limit: 6)
             }
         }
-        .panel()
+        .sootPanel()
     }
 
     private func message(_ m: SlackMessage) -> some View {
@@ -335,7 +351,7 @@ struct ProjectDetailView: View {
                 mergedPulls
             }
         }
-        .panel()
+        .sootPanel()
     }
 
     private var openPulls: some View {

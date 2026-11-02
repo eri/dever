@@ -186,34 +186,54 @@ struct GitHubLoginSheet: View {
     @State private var code: GitHubAuth.DeviceCode?
     @State private var error: String?
     @State private var task: Task<Void, Never>?
+    @State private var copied = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 24) {
-            SheetTitle(title: "Connect GitHub", mark: {
-                ActionIcon(symbol: "link")
-            }, close: { task?.cancel(); dismiss() })
+        VStack(alignment: .leading, spacing: 28) {
+            SheetTitle(title: "Connect GitHub", mark: { ActionIcon(symbol: "link") },
+                       close: { task?.cancel(); dismiss() })
             if let code {
-                VStack(alignment: .leading, spacing: 12) {
-                    Text("Enter this code on GitHub").font(.system(size: 14)).foregroundStyle(Soot.muted)
-                    HStack(spacing: 16) {
-                        Text(code.user_code)
-                            .font(.system(size: 34, weight: .semibold, design: .monospaced))
-                            .foregroundStyle(Soot.lime)
-                            .textSelection(.enabled)
-                        Button("Copy") {
-                            NSPasteboard.general.clearContents()
-                            NSPasteboard.general.setString(code.user_code, forType: .string)
+                VStack(alignment: .leading, spacing: 20) {
+                    VStack(alignment: .leading, spacing: 10) {
+                        FieldLabel(text: "Your code")
+                        HStack(spacing: 14) {
+                            Text(code.user_code)
+                                .font(.system(size: 36, weight: .semibold, design: .monospaced))
+                                .tracking(2)
+                                .foregroundStyle(Soot.lime)
+                                .textSelection(.enabled)
+                            Button {
+                                NSPasteboard.general.clearContents()
+                                NSPasteboard.general.setString(code.user_code, forType: .string)
+                                copied = true
+                            } label: {
+                                Label(copied ? "Copied" : "Copy", systemImage: copied ? "checkmark" : "doc.on.doc")
+                            }
+                            .buttonStyle(QuietButton())
                         }
-                        .buttonStyle(QuietButton())
                     }
-                    HStack(spacing: 12) {
-                        Link(destination: URL(string: code.verification_uri)!) {
-                            Text("Open github.com/login/device")
+                    // Waiting: a light travelling along the bottom edge, like the onboarding rows.
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack(spacing: 10) {
+                            BrandLogo(service: .github, size: 18).foregroundStyle(Soot.ink)
+                            Text("Waiting for you to approve on GitHub").font(.system(size: 14)).foregroundStyle(Soot.ink)
+                            Spacer()
                         }
-                        .buttonStyle(LimeButton())
-                        Text("Waiting for approval…").font(.system(size: 13)).foregroundStyle(Soot.muted)
+                        .padding(.horizontal, 16)
+                        .frame(height: 52)
+                        .background(Soot.surface, in: RoundedRectangle(cornerRadius: Soot.radius))
+                        .overlay(alignment: .bottom) { WaitingLine() }
+                        .clipShape(RoundedRectangle(cornerRadius: Soot.radius))
+                        .accessibilityElement(children: .combine)
+                        Text("Dever connects as soon as you approve.").font(.system(size: 12)).foregroundStyle(Soot.muted)
                     }
                 }
+                HStack {
+                    Spacer()
+                    Link(destination: URL(string: code.verification_uri)!) { Text("Link this device on GitHub") }
+                        .buttonStyle(LimeButton())
+                }
+                .padding(.top, 8)
             } else {
                 VStack(spacing: 8) {
                     OptionRow(icon: AnyView(BrandLogo(service: .github, size: 20).foregroundStyle(Soot.ink)),
@@ -226,7 +246,15 @@ struct GitHubLoginSheet: View {
             }
             if let error { ErrorLabel(error) }
         }
-        .sootSheet(width: 460)
+        .padding(8)
+        .sootSheet(width: 500)
+        .onAppear {
+            // Snapshots: DEVER_SNAPSHOT_GITHUB_CODE shows the waiting state with a sample code.
+            if let sample = ProcessInfo.processInfo.environment["DEVER_SNAPSHOT_GITHUB_CODE"] {
+                code = .init(device_code: "", user_code: sample, verification_uri: "https://github.com/login/device",
+                             interval: 5, expires_in: 900)
+            }
+        }
     }
 
     private func finish(token: String) async throws {
@@ -240,7 +268,6 @@ struct GitHubLoginSheet: View {
             do {
                 let c = try await GitHubAuth.startDeviceFlow()
                 code = c
-                NSWorkspace.shared.open(URL(string: c.verification_uri)!)
                 try await finish(token: try await GitHubAuth.pollToken(c))
             } catch is CancellationError {
             } catch {
@@ -341,5 +368,27 @@ private struct SettingsSection<Content: View>: View {
             .padding(.vertical, 4)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(Theme.raised, in: RoundedRectangle(cornerRadius: Theme.radiusSheet))
+    }
+}
+
+/// Indeterminate progress as light travelling along an edge, not a spinner (still under Reduce Motion).
+struct WaitingLine: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        GeometryReader { geo in
+            let w = geo.size.width
+            TimelineView(.animation(minimumInterval: 1.0 / 60, paused: reduceMotion)) { context in
+                let t = context.date.timeIntervalSinceReferenceDate
+                let phase = reduceMotion ? 0.5 : (t.truncatingRemainder(dividingBy: 1.4)) / 1.4
+                Rectangle()
+                    .fill(LinearGradient(colors: [Soot.lime.opacity(0), Soot.lime, Soot.lime.opacity(0)],
+                                         startPoint: .leading, endPoint: .trailing))
+                    .frame(width: w * 0.35, height: 2)
+                    .offset(x: -w * 0.35 + CGFloat(phase) * w * 1.35)
+            }
+        }
+        .frame(height: 2)
+        .accessibilityHidden(true)
     }
 }
