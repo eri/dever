@@ -12,11 +12,15 @@ enum Keychain {
             kSecAttrService as String: service,
             kSecAttrAccount as String: key,
         ]
-        SecItemDelete(query as CFDictionary)
-        var attrs = query
-        attrs[kSecValueData as String] = data
-        attrs[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
-        let status = SecItemAdd(attrs as CFDictionary, nil)
+        // Update in place when the item exists: deleting and re-adding would reset
+        // its access list and bring the Keychain prompt back.
+        var status = SecItemUpdate(query as CFDictionary, [kSecValueData as String: data] as CFDictionary)
+        if status == errSecItemNotFound {
+            var attrs = query
+            attrs[kSecValueData as String] = data
+            attrs[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
+            status = SecItemAdd(attrs as CFDictionary, nil)
+        }
         guard status == errSecSuccess else {
             throw NSError(domain: NSOSStatusErrorDomain, code: Int(status))
         }

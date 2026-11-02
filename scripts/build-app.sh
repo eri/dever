@@ -38,7 +38,19 @@ else
   echo "⚠️  config/dever.json missing: Slack and Linear won't be able to connect (see docs/SETUP.md)" >&2
 fi
 
-codesign --force --deep --sign - "$APP"
+# A stable signing identity keeps the same code identity across builds, so the
+# Keychain "Always Allow" sticks. Ad-hoc signatures change on every build, which
+# makes macOS ask for the Keychain password again after each update.
+# Override with DEVER_SIGN_IDENTITY="<name or SHA-1>"; defaults to the first valid
+# code-signing identity (e.g. a free "Apple Development" certificate from Xcode).
+IDENTITY=${DEVER_SIGN_IDENTITY:-$(security find-identity -v -p codesigning 2>/dev/null | awk 'NR==1 && $2 ~ /^[0-9A-F]{40}$/ {print $2}')}
+if [[ -n "$IDENTITY" ]]; then
+  codesign --force --deep --options runtime --sign "$IDENTITY" "$APP"
+  echo "Signed with $(security find-identity -v -p codesigning | grep "$IDENTITY" | sed 's/.*"\(.*\)"/\1/' || echo "$IDENTITY")"
+else
+  echo "⚠️  No code-signing identity found: ad-hoc signing. macOS will ask for Keychain access after each rebuild (see docs/SETUP.md)." >&2
+  codesign --force --deep --sign - "$APP"
+fi
 echo "→ $APP"
 
 if [[ "${DMG:-0}" == "1" ]]; then

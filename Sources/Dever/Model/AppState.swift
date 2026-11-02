@@ -75,9 +75,9 @@ enum Naming {
 
 @MainActor
 final class AppState: ObservableObject {
-    @Published var github: GitHubCredentials? { didSet { persist(github, "github") } }
-    @Published var slack: SlackCredentials? { didSet { persist(slack, "slack.oauth") } }
-    @Published var linear: LinearCredentials? { didSet { persist(linear, "linear.oauth") } }
+    @Published var github: GitHubCredentials? { didSet { saveCredentials() } }
+    @Published var slack: SlackCredentials? { didSet { saveCredentials() } }
+    @Published var linear: LinearCredentials? { didSet { saveCredentials() } }
     @Published var projects: [Project] = [] { didSet { saveProjects() } }
     @Published var lastError: String?
 
@@ -89,12 +89,18 @@ final class AppState: ObservableObject {
     }()
 
     init() {
-        github = Keychain.load(GitHubCredentials.self, for: "github")
-        slack = Keychain.load(SlackCredentials.self, for: "slack.oauth")
-        linear = Keychain.load(LinearCredentials.self, for: "linear.oauth")
-        // Legacy web-session entries (before the switch to OAuth).
-        Keychain.delete("slack")
-        Keychain.delete("linear")
+        if let stored = Keychain.load(StoredCredentials.self, for: Self.credentialsKey) {
+            github = stored.github
+            slack = stored.slack
+            linear = stored.linear
+        } else {
+            // One-time migration from the former one-item-per-service layout.
+            github = Keychain.load(GitHubCredentials.self, for: "github")
+            slack = Keychain.load(SlackCredentials.self, for: "slack.oauth")
+            linear = Keychain.load(LinearCredentials.self, for: "linear.oauth")
+            saveCredentials()
+            ["github", "slack.oauth", "linear.oauth", "slack", "linear"].forEach(Keychain.delete)
+        }
         if let data = try? Data(contentsOf: projectsURL),
            let list = try? JSONDecoder().decode([Project].self, from: data) {
             projects = list
@@ -184,8 +190,17 @@ final class AppState: ObservableObject {
 
     // MARK: Persistence
 
-    private func persist<T: Encodable>(_ value: T?, _ key: String) {
-        if let value { try? Keychain.save(value, for: key) } else { Keychain.delete(key) }
+    /// All tokens live in a single Keychain item, so macOS asks for access at most once.
+    private struct StoredCredentials: Codable {
+        var github: GitHubCredentials?
+        var slack: SlackCredentials?
+        var linear: LinearCredentials?
+    }
+
+    private static let credentialsKey = "credentials"
+
+    private func saveCredentials() {
+        try? Keychain.save(StoredCredentials(github: github, slack: slack, linear: linear), for: Self.credentialsKey)
     }
 
     private func saveProjects() {

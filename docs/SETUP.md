@@ -56,7 +56,19 @@ By default Dever uses GitHub CLI's public OAuth client (sign-in with a code).
 If the GitHub organization restricts OAuth apps, create an *OAuth App* (Settings →
 Developer settings), tick **Enable Device Flow**, and put its Client ID in `github.clientID`.
 
-## 5. Build and share
+## 5. Code signing (avoids repeated Keychain prompts)
+
+macOS remembers "Always Allow" for the Keychain per *code identity*. An ad-hoc signature
+changes on every build, so the prompt would come back after each update. `build-app.sh`
+therefore signs with the first valid code-signing identity it finds. A free
+**Apple Development** certificate is enough: Xcode → Settings → Accounts → add your Apple ID →
+Manage Certificates → **+** → Apple Development. To pick a specific one:
+`DEVER_SIGN_IDENTITY="Apple Development: …" ./scripts/build-app.sh`.
+
+Always build the DMGs you share with the same identity, so teammates keep their Keychain
+approval across updates.
+
+## 6. Build and share
 
 ```bash
 DMG=1 ./scripts/build-app.sh
