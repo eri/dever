@@ -9,7 +9,8 @@ struct ProjectDetailView: View {
     @State private var issues: [LinearIssue] = []
     @State private var messages: [SlackMessage] = []
     @State private var users: [String: String] = [:]
-    @State private var pulls: [GitHubPull] = []
+    @State private var pulls: [ProjectPullRequests.Match] = []
+    @State private var pullsScoped = false
     @State private var runs: [GitHubRun] = []
     @State private var errors: [ServiceKind: String] = [:]
     @State private var loading = false
@@ -231,12 +232,28 @@ struct ProjectDetailView: View {
 
     private var pullList: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Open pull requests · \(pulls.count)").font(.subheadline.weight(.semibold)).monospacedDigit()
-            if pulls.isEmpty && loaded {
-                Text("No open pull requests.").font(.callout).foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Open pull requests · \(pulls.count)").font(.subheadline.weight(.semibold)).monospacedDigit()
+                Text(pullsScoped ? "Linked to this project's Linear issues" : "Whole repository")
+                    .font(.caption).foregroundStyle(.secondary)
             }
-            ForEach(pulls) { pr in
+            if pulls.isEmpty && loaded {
+                Text(pullsScoped
+                     ? "No open pull request mentions this project's issues. Name branches after the Linear issue (e.g. its suggested branch) to link them."
+                     : "No open pull requests.")
+                    .font(.callout).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            ForEach(pulls) { match in
+                let pr = match.pull
                 HStack(spacing: 8) {
+                    if let issue = match.issue {
+                        if let url = issues.first(where: { $0.identifier == issue }).flatMap({ URL(string: $0.url) }) {
+                            Link(issue, destination: url).font(.caption.monospaced()).help("Open \(issue) in Linear")
+                        } else {
+                            Text(issue).font(.caption.monospaced()).foregroundStyle(.secondary)
+                        }
+                    }
                     Text("#\(pr.number)").font(.caption.monospaced()).foregroundStyle(.secondary)
                     if let url = URL(string: pr.html_url) {
                         Link(pr.title, destination: url).lineLimit(1).help(pr.title)
@@ -253,13 +270,17 @@ struct ProjectDetailView: View {
 
     private var runList: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Recent pipeline runs").font(.subheadline.weight(.semibold))
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Pipeline").font(.subheadline.weight(.semibold))
+                Text(pullsScoped ? "Latest run of each pull request branch" : "Recent runs, all branches")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
             if runs.isEmpty && loaded {
                 Text("No workflow runs yet.").font(.callout).foregroundStyle(.secondary)
             }
             ForEach(runs.prefix(8)) { run in
                 HStack(spacing: 8) {
-                    PipelineBadge(state: state(of: run)).font(.caption)
+                    PipelineBadge(state: .init(run: run)).font(.caption)
                     if let url = URL(string: run.html_url) {
                         Link(run.name ?? "Workflow run", destination: url).lineLimit(1)
                     }
@@ -270,21 +291,17 @@ struct ProjectDetailView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private func state(of run: GitHubRun) -> ProjectSnapshot.PipelineState {
-        if run.status != "completed" { return .running }
-        return run.conclusion == "success" ? .passing : .failing
-    }
-
     // MARK: Loading
 
     private func load() async {
         loading = true
         defer { loading = false; loaded = true }
         errors = [:]
-        async let l: Void = loadLinear()
         async let s: Void = loadSlack()
-        async let g: Void = loadGitHub()
-        _ = await (l, s, g)
+        // GitHub needs the Linear issues to tell which pull requests belong to the project.
+        await loadLinear()
+        await loadGitHub()
+        await s
     }
 
     private func loadLinear() async {
@@ -305,9 +322,13 @@ struct ProjectDetailView: View {
         guard let repo = project.githubRepo else { return }
         do {
             let client = try app.githubClient()
-            async let p = client.pulls(repo)
-            async let r = client.runs(repo)
-            (pulls, runs) = try await (p, r)
+            async let allRuns = client.runs(repo)
+            let prs = ProjectPullRequests(pulls: try await client.pulls(repo),
+                                          issues: project.linear == nil || errors[.linear] != nil ? nil : issues,
+                                          wholeRepository: project.showsWholeRepository)
+            pulls = prs.matches
+            pullsScoped = prs.scoped
+            runs = prs.scoped ? prs.pipeline(from: try await allRuns).latest : try await allRuns
         } catch { errors[.github] = error.localizedDescription }
     }
 }

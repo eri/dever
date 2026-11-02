@@ -41,7 +41,25 @@ struct LinearIssue: Codable, Identifiable {
     var updatedAt: String
     var state: State
     var assignee: Person?
+    var branchName: String?
+    var attachments: Attachments?
 }
+
+/// Links attached to a Linear issue (GitHub PRs, among others).
+struct Attachments: Codable, Hashable {
+    struct Node: Codable, Hashable { var url: String }
+    var nodes: [Node]
+}
+
+/// What ties a pull request to a Linear issue: its identifier, its suggested
+/// branch name and the PR links Linear's GitHub integration attached to it.
+protocol IssueReference {
+    var identifier: String { get }
+    var branchName: String? { get }
+    var attachments: Attachments? { get }
+}
+
+extension LinearIssue: IssueReference {}
 
 /// Linear: OAuth 2 with PKCE (no embedded secret) through the workspace's "Dever"
 /// OAuth app. The browser handles sign-in; the app receives the code on
@@ -194,26 +212,33 @@ struct LinearClient {
             var project: P
         }
         return try await query("""
-        query($id: String!) { project(id: $id) { issues(first: 100, orderBy: updatedAt) { nodes {
-          id identifier title url updatedAt state { name type } assignee { name } } } } }
+        query($id: String!) { project(id: $id) { issues(first: 250, orderBy: updatedAt) { nodes {
+          id identifier title url updatedAt state { name type } assignee { name }
+          branchName attachments { nodes { url } } } } } }
         """, variables: ["id": projectID], as: R.self).project.issues.nodes
     }
 
     struct ProjectSummary: Decodable {
         struct Person: Decodable { var name: String }
-        struct Issue: Decodable { struct State: Decodable { var type: String }; var state: State }
+        struct Issue: Decodable, IssueReference {
+            struct State: Decodable { var type: String }
+            var state: State
+            var identifier: String
+            var branchName: String?
+            var attachments: Attachments?
+        }
         struct Issues: Decodable { var nodes: [Issue] }
         var targetDate: String?
         var lead: Person?
         var issues: Issues
     }
 
-    /// Lightweight project data for the overview: lead, target date and issue states.
+    /// Lightweight project data for the overview: lead, target date, issue states and PR links.
     func projectSummary(id: String) async throws -> ProjectSummary {
         struct R: Decodable { var project: ProjectSummary }
         return try await query("""
         query($id: String!) { project(id: $id) { targetDate lead { name }
-          issues(first: 250) { nodes { state { type } } } } }
+          issues(first: 250) { nodes { state { type } identifier branchName attachments { nodes { url } } } } } }
         """, variables: ["id": id], as: R.self).project
     }
 

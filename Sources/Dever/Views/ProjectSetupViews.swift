@@ -69,9 +69,16 @@ struct ProjectEditorSheet: View {
                     if app.github == nil {
                         Text("GitHub not connected").foregroundStyle(.secondary)
                     } else {
-                        Picker("Repo", selection: $project.githubRepo) {
+                        Picker("Repository", selection: $project.githubRepo) {
                             Text("None").tag(String?.none)
                             ForEach(catalog.repos) { Text($0.full_name).tag(Optional($0.full_name)) }
+                        }
+                        if project.githubRepo != nil {
+                            Toggle(isOn: Binding(get: { project.githubWholeRepo == true },
+                                                 set: { project.githubWholeRepo = $0 })) {
+                                Text("Show every pull request in the repository")
+                                Text("When off, only pull requests linked to this project's Linear issues count. Keep it off for repositories shared by several projects.")
+                            }
                         }
                     }
                 }

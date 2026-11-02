@@ -15,6 +15,7 @@ struct GitHubRepo: Codable, Identifiable, Hashable {
 
 struct GitHubPull: Codable, Identifiable {
     struct User: Codable { var login: String }
+    struct Head: Codable { var ref: String }
     var id: Int
     var number: Int
     var title: String
@@ -22,6 +23,7 @@ struct GitHubPull: Codable, Identifiable {
     var draft: Bool?
     var user: User
     var updated_at: String
+    var head: Head
 }
 
 struct GitHubRun: Codable, Identifiable {
@@ -147,13 +149,21 @@ struct GitHubClient {
         return all
     }
 
+    /// Open pull requests, most recently updated first (up to 300).
     func pulls(_ repo: String) async throws -> [GitHubPull] {
-        try await get("/repos/\(repo)/pulls?state=open&per_page=30")
+        var all: [GitHubPull] = []
+        for page in 1...3 {
+            let batch: [GitHubPull] = try await get(
+                "/repos/\(repo)/pulls?state=open&sort=updated&direction=desc&per_page=100&page=\(page)")
+            all += batch
+            if batch.count < 100 { break }
+        }
+        return all
     }
 
     func runs(_ repo: String, branch: String? = nil) async throws -> [GitHubRun] {
         struct R: Decodable { var workflow_runs: [GitHubRun] }
-        var path = "/repos/\(repo)/actions/runs?per_page=15"
+        var path = "/repos/\(repo)/actions/runs?per_page=100"
         if let branch, let encoded = branch.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) {
             path += "&branch=\(encoded)"
         }

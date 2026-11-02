@@ -20,13 +20,11 @@ struct ProjectSnapshot {
 
     struct GitHubStats {
         var openPRs = 0
-        var lastRun: GitHubRun?
-
-        var pipeline: PipelineState {
-            guard let run = lastRun else { return .unknown }
-            if run.status != "completed" { return .running }
-            return run.conclusion == "success" ? .passing : .failing
-        }
+        var pipeline: PipelineState = .unknown
+        /// Default branch when unscoped; nil when the pipeline aggregates the project's PR branches.
+        var branch: String?
+        /// True when PRs and pipeline are limited to the project's Linear issues.
+        var scoped = false
     }
 
     enum PipelineState { case passing, failing, running, unknown }
@@ -130,13 +128,17 @@ final class OverviewStore: ObservableObject {
 
     private static func load(_ p: Project, _ app: AppState) async -> ProjectSnapshot {
         var s = ProjectSnapshot()
-        async let linear = loadLinear(p, app)
         async let slack = loadSlack(p, app)
-        async let github = loadGitHub(p, app)
-        switch await linear {
-        case .success(let v): s.linear = v
-        case .failure(let e): s.errors[.linear] = e.localizedDescription
+        // GitHub waits for Linear: the project's issues decide which PRs belong to it.
+        var issues: [IssueReference]?
+        switch await loadLinear(p, app) {
+        case .success(let v):
+            s.linear = v?.stats
+            issues = v?.issues
+        case .failure(let e):
+            s.errors[.linear] = e.localizedDescription
         }
+        async let github = loadGitHub(p, app, issues: issues)
         switch await slack {
         case .success(let v): s.slack = v
         case .failure(let e): s.errors[.slack] = e.localizedDescription
@@ -148,7 +150,8 @@ final class OverviewStore: ObservableObject {
         return s
     }
 
-    private static func loadLinear(_ p: Project, _ app: AppState) async -> Result<ProjectSnapshot.LinearStats?, Error> {
+    private static func loadLinear(_ p: Project, _ app: AppState)
+        async -> Result<(stats: ProjectSnapshot.LinearStats, issues: [IssueReference])?, Error> {
         guard let id = p.linear?.id, app.linear != nil else { return .success(nil) }
         do {
             let summary = try await app.withLinear { try await $0.projectSummary(id: id) }
@@ -164,7 +167,7 @@ final class OverviewStore: ObservableObject {
             }
             stats.lead = summary.lead?.name
             stats.targetDate = summary.targetDate.flatMap(dayFormatter.date(from:))
-            return .success(stats)
+            return .success((stats, summary.issues.nodes))
         } catch {
             return .failure(error)
         }
@@ -186,15 +189,23 @@ final class OverviewStore: ObservableObject {
         }
     }
 
-    private static func loadGitHub(_ p: Project, _ app: AppState) async -> Result<ProjectSnapshot.GitHubStats?, Error> {
+    private static func loadGitHub(_ p: Project, _ app: AppState, issues: [IssueReference]?)
+        async -> Result<ProjectSnapshot.GitHubStats?, Error> {
         guard let repo = p.githubRepo, app.github != nil else { return .success(nil) }
         do {
             let client = try app.githubClient()
-            // The card shows the health of the default branch, not of whichever branch ran last.
-            async let pulls = client.pulls(repo)
+            let prs = ProjectPullRequests(pulls: try await client.pulls(repo), issues: issues,
+                                          wholeRepository: p.showsWholeRepository)
+            if prs.scoped {
+                let pipeline = prs.pipeline(from: try await client.runs(repo))
+                return .success(.init(openPRs: prs.matches.count, pipeline: pipeline.state, scoped: true))
+            }
+            // Unscoped: the health of the default branch, not of whichever branch ran last.
             let branch = try await client.defaultBranch(repo)
-            let runs = try await client.runs(repo, branch: branch)
-            return .success(ProjectSnapshot.GitHubStats(openPRs: try await pulls.count, lastRun: runs.first))
+            let run = try await client.runs(repo, branch: branch).first
+            return .success(.init(openPRs: prs.matches.count,
+                                  pipeline: run.map(ProjectSnapshot.PipelineState.init(run:)) ?? .unknown,
+                                  branch: branch))
         } catch {
             return .failure(error)
         }

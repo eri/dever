@@ -43,7 +43,12 @@ struct Project: Codable, Identifiable, Hashable {
     var slack: SlackLink?
     var linear: LinearLink?
     var githubRepo: String?
+    /// nil/false: only PRs linked to the project's Linear issues (shared repositories).
+    var githubWholeRepo: Bool?
     var createdAt = Date()
+
+    /// Whether to show every PR of the repository rather than those of the project's issues.
+    var showsWholeRepository: Bool { githubWholeRepo == true || linear == nil }
 
     /// A project is trackable once both Slack and Linear are linked.
     var isComplete: Bool { slack != nil && linear != nil }

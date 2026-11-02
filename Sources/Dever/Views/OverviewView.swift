@@ -265,11 +265,14 @@ private struct ProjectCard: View {
         if let g = snapshot?.github {
             row(ServiceKind.github.symbol) {
                 PipelineBadge(state: g.pipeline)
-                if let branch = g.lastRun?.head_branch {
-                    Text(branch).foregroundStyle(.secondary).lineLimit(1).help(branch)
+                if let branch = g.branch {
+                    Text(branch).foregroundStyle(.secondary).lineLimit(1).help("Default branch")
                 }
                 Text("· ^[\(g.openPRs) open pull request](inflect: true)").foregroundStyle(.secondary).monospacedDigit()
             }
+            .help(g.scoped
+                  ? "Pull requests linked to this project's Linear issues, and the latest run on their branches"
+                  : "All open pull requests in the repository, and the latest run on its default branch")
         }
     }
 
