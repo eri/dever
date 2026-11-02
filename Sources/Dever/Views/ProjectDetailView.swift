@@ -257,7 +257,7 @@ struct ProjectDetailView: View {
                             Text(issue).font(.caption.monospaced()).foregroundStyle(.secondary)
                         }
                     }
-                    Text("#\(pr.number)").font(.caption.monospaced()).foregroundStyle(.secondary)
+                    Text(verbatim: "#\(pr.number)").font(.caption.monospaced()).foregroundStyle(.secondary)
                     if let url = URL(string: pr.html_url) {
                         Link(pr.title, destination: url).lineLimit(1).help(pr.title)
                     }
@@ -318,9 +318,9 @@ struct ProjectDetailView: View {
                             Text(issue).font(.caption.monospaced()).foregroundStyle(.secondary)
                         }
                     }
-                    Text("#\(item.number)").font(.caption.monospaced()).foregroundStyle(.secondary)
+                    Text(verbatim: "#\(item.number)").font(.caption.monospaced()).foregroundStyle(.secondary)
                     if let url = URL(string: item.url) {
-                        Link(item.title ?? "Pull request #\(item.number)", destination: url)
+                        Link(item.title ?? "Pull request #" + String(item.number), destination: url)
                             .lineLimit(1).help(item.title ?? "Linked in Linear; older than the recent history Dever scans on GitHub")
                     }
                     Spacer(minLength: 8)
