@@ -18,6 +18,8 @@ struct ProjectDetailView: View {
     @State private var loading = false
     @State private var loaded = false
     @State private var expanded: Set<String> = []
+    @State private var issueTab: IssueTab = .active
+    @State private var pullTab: PullTab = .merged
 
     private var status: ProjectStatus { project.status(store.snapshots[project.id]) }
 
@@ -144,48 +146,79 @@ struct ProjectDetailView: View {
 
     // MARK: Delivery (the signature block)
 
+    private var linearURL: URL? { project.linear.flatMap { URL(string: $0.url) } }
+
     private var deliveryPanel: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            SectionHeader("Delivery", subtitle: "Linear issues joined with their pull requests")
+        VStack(alignment: .leading, spacing: 20) {
+            PanelHeader(service: .linear, title: "Delivery", subtitle: "Issues joined with their pull requests")
             if let e = errors[.linear] {
                 LoadErrorRow(service: .linear, message: e) { Task { await load() } }
             } else if !loaded {
-                Skeleton(height: 12, radius: 2)
-                HStack(spacing: 16) { Skeleton(width: 110); Skeleton(width: 90); Skeleton(width: 120) }
+                HStack(alignment: .lastTextBaseline, spacing: 10) { Skeleton(width: 90, height: 34); Skeleton(width: 120) }
+                Skeleton(height: 10, radius: 5)
             } else if delivery.total == 0 {
-                EmptySection(title: "No issues yet", message: "Issues added to this project in Linear appear here.")
+                QuietEmpty(symbol: "tray", text: "No issues in this project yet")
             } else {
-                DeliveryStrip(delivery: delivery, height: 12)
-                DeliveryLegend(delivery: delivery)
+                HStack(alignment: .lastTextBaseline, spacing: 10) {
+                    Text(Double(delivery.shipped) / Double(delivery.total), format: .percent.precision(.fractionLength(0)))
+                        .font(.system(size: 38, weight: .semibold)).tracking(-1).foregroundStyle(Soot.ink).monospacedDigit()
+                    Text("\(delivery.shipped) of \(delivery.total) shipped").font(.system(size: 14)).foregroundStyle(Soot.muted)
+                        .monospacedDigit()
+                }
+                deliveryBar
+                HStack(spacing: 28) {
+                    ForEach(Delivery.Stage.allCases.filter { delivery.count($0) > 0 }, id: \.self) { stage in
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("\(delivery.count(stage))").font(.system(size: 20, weight: .semibold))
+                                .foregroundStyle(Soot.ink).monospacedDigit()
+                            HStack(spacing: 6) {
+                                Circle().fill(DeliveryStrip.color(stage)).frame(width: 7, height: 7)
+                                Text(stage.label).font(.system(size: 12)).foregroundStyle(Soot.muted)
+                            }
+                        }
+                        .accessibilityElement(children: .combine)
+                    }
+                }
                 if !toClose.isEmpty { toCloseList }
             }
         }
         .sootPanel()
     }
 
-    private var toCloseList: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Text("Merged, still in progress in Linear").font(Theme.smallStrong).foregroundStyle(Theme.text)
-                .padding(.bottom, 8)
-            ForEach(capped(toClose, key: "close"), id: \.issue.id) { item in
-                Rectangle().fill(Theme.rule).frame(height: 1)
-                HStack(spacing: 12) {
-                    issueID(item.issue)
-                    Text(item.issue.title).foregroundStyle(Theme.text).lineLimit(1).help(item.issue.title)
-                    Spacer(minLength: 12)
-                    if let url = URL(string: item.pull.url) {
-                        Link(destination: url) { Text(verbatim: "#\(item.pull.number)").font(Theme.id) }
-                            .help("Open the merged pull request")
-                    }
-                    Text(item.pull.mergedAt.map { "merged \($0.formatted(.relative(presentation: .named)))" } ?? "merged")
-                        .font(Theme.small).foregroundStyle(Theme.muted)
-                        .frame(width: 130, alignment: .trailing)
+    /// Rounded segments with gaps, one per stage, proportional to its issues.
+    private var deliveryBar: some View {
+        GeometryReader { geo in
+            let stages = Delivery.Stage.allCases.filter { delivery.count($0) > 0 }
+            let gap: CGFloat = 4
+            let usable = geo.size.width - gap * CGFloat(max(stages.count - 1, 0))
+            HStack(spacing: gap) {
+                ForEach(stages, id: \.self) { stage in
+                    Capsule().fill(DeliveryStrip.color(stage))
+                        .frame(width: max(10, usable * CGFloat(delivery.count(stage)) / CGFloat(max(delivery.total, 1))))
                 }
-                .font(Theme.body)
-                .frame(minHeight: 36)
+            }
+        }
+        .frame(height: 10)
+        .accessibilityHidden(true)
+    }
+
+    private var toCloseList: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("Merged, still in progress in Linear").font(.system(size: 13, weight: .semibold)).foregroundStyle(Soot.ink)
+                .padding(.leading, 12)
+            ForEach(capped(toClose, key: "close"), id: \.issue.id) { item in
+                TileRow(url: URL(string: item.issue.url)) {
+                    IDPill(text: item.issue.identifier)
+                    Text(item.issue.title).font(.system(size: 14)).foregroundStyle(Soot.ink).lineLimit(1)
+                    Spacer(minLength: 12)
+                    Text(item.pull.mergedAt.map { "merged \($0.formatted(.relative(presentation: .named)))" } ?? "merged")
+                        .font(.system(size: 12)).foregroundStyle(Soot.muted)
+                }
             }
             showAll(toClose.count, key: "close")
         }
+        .padding(8)
+        .background(Soot.ground.opacity(0.5), in: RoundedRectangle(cornerRadius: 10))
     }
 
     // MARK: Issues
@@ -195,76 +228,69 @@ struct ProjectDetailView: View {
     private var todoIssues: [LinearIssue] { issues.filter { ["unstarted", "backlog", "triage"].contains($0.state.type) } }
     private var doneIssues: [LinearIssue] { issues.filter { $0.state.type == "completed" } }
 
+    private enum IssueTab: Hashable { case active, review, todo, done }
+
+    private var issueTabs: [(label: String, count: Int, tab: IssueTab)] {
+        [("In progress", activeIssues.count, IssueTab.active), ("In review", reviewIssues.count, .review),
+         ("To do", todoIssues.count, .todo), ("Done", doneIssues.count, .done)].filter { $0.1 > 0 }
+    }
+
+    /// The chosen tab, or the first one that has issues.
+    private var currentIssueTab: IssueTab { issueTabs.contains { $0.tab == issueTab } ? issueTab : (issueTabs.first?.tab ?? .active) }
+
+    private func issues(in tab: IssueTab) -> [LinearIssue] {
+        switch tab {
+        case .active: activeIssues
+        case .review: reviewIssues
+        case .todo: todoIssues
+        case .done: doneIssues
+        }
+    }
+
     private var issuesPanel: some View {
         VStack(alignment: .leading, spacing: 16) {
-            SectionHeader("Issues", subtitle: loaded && !issues.isEmpty
-                          ? "\(activeIssues.count) in progress · \(reviewIssues.count) in review · \(todoIssues.count) to do · \(doneIssues.count) done" : nil)
+            PanelHeader(service: .linear, title: "Issues", subtitle: project.linear?.name, link: linearURL)
             if project.linear == nil {
-                EmptySection(title: "No Linear project", message: "Link one to see its issues here.")
+                QuietEmpty(symbol: "link", text: "Link a Linear project to see its issues")
             } else if let e = errors[.linear] {
                 LoadErrorRow(service: .linear, message: e) { Task { await load() } }
             } else if !loaded {
-                VStack(alignment: .leading, spacing: 8) {
-                    Skeleton(width: 110)
-                    SkeletonRows(count: 5, leading: 64, trailing: 80)
+                HStack(spacing: 6) { ForEach(0..<3, id: \.self) { _ in Skeleton(width: 96, height: 30, radius: 15) } }
+                ForEach(0..<5, id: \.self) { i in
+                    HStack(spacing: 12) {
+                        Skeleton(width: 64, height: 20, radius: 5)
+                        Skeleton(width: [280, 220, 320, 250, 200][i], height: 12)
+                        Spacer()
+                        Skeleton(width: 22, height: 22, radius: 11)
+                    }
+                    .padding(.horizontal, 12).frame(height: 46)
                 }
             } else if issues.isEmpty {
-                EmptySection(title: "No issues yet", message: "Issues added to this project in Linear appear here.")
+                QuietEmpty(symbol: "tray", text: "No issues in this project yet")
             } else {
-                issueGroup("In progress", activeIssues, key: "active")
-                issueGroup("In review", reviewIssues, key: "review")
-                issueGroup("To do", todoIssues, key: "todo")
-                if !doneIssues.isEmpty {
-                    DisclosureGroup {
-                        issueRows(doneIssues, key: "done")
-                    } label: {
-                        Text("Done · \(doneIssues.count)").font(Theme.smallStrong).foregroundStyle(Theme.text).monospacedDigit()
+                CountTabs(tabs: issueTabs, selection: Binding(get: { currentIssueTab }, set: { issueTab = $0 }))
+                let list = issues(in: currentIssueTab)
+                VStack(alignment: .leading, spacing: 2) {
+                    ForEach(capped(list, key: "issues")) { issue in
+                        TileRow(url: URL(string: issue.url)) {
+                            IDPill(text: issue.identifier)
+                            Text(issue.title).font(.system(size: 14)).foregroundStyle(Soot.ink).lineLimit(1)
+                                .help(issue.title)
+                            Spacer(minLength: 12)
+                            if let name = issue.assignee?.name {
+                                PersonAvatar(name: name).help(name)
+                            } else {
+                                Image(systemName: "person.crop.circle.badge.questionmark").foregroundStyle(Soot.muted)
+                                    .help("Unassigned")
+                            }
+                        }
+                        .accessibilityElement(children: .combine)
                     }
+                    showAll(list.count, key: "issues")
                 }
             }
         }
         .sootPanel()
-    }
-
-    @ViewBuilder
-    private func issueGroup(_ title: String, _ list: [LinearIssue], key: String) -> some View {
-        if !list.isEmpty {
-            VStack(alignment: .leading, spacing: 0) {
-                Text("\(title) · \(list.count)").font(Theme.smallStrong).foregroundStyle(Theme.text).monospacedDigit()
-                    .padding(.bottom, 8)
-                issueRows(list, key: key)
-            }
-        }
-    }
-
-    private func issueRows(_ list: [LinearIssue], key: String) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            ForEach(capped(list, key: key)) { issue in
-                Rectangle().fill(Theme.rule).frame(height: 1)
-                HStack(spacing: 12) {
-                    issueID(issue)
-                    Text(issue.title).foregroundStyle(Theme.text).lineLimit(1).help(issue.title)
-                    Spacer(minLength: 12)
-                    Text(issue.assignee?.name ?? "Unassigned").font(Theme.small).foregroundStyle(Theme.muted).lineLimit(1)
-                }
-                .font(Theme.body)
-                .frame(minHeight: 36)
-                .accessibilityElement(children: .combine)
-            }
-            showAll(list.count, key: key)
-        }
-    }
-
-    private func issueID(_ issue: LinearIssue) -> some View {
-        Group {
-            if let url = URL(string: issue.url) {
-                Link(destination: url) { Text(issue.identifier) }.help("Open \(issue.identifier) in Linear")
-            } else {
-                Text(issue.identifier)
-            }
-        }
-        .font(Theme.id)
-        .frame(width: 76, alignment: .leading)
     }
 
     // MARK: Slack
@@ -333,112 +359,95 @@ struct ProjectDetailView: View {
 
     // MARK: GitHub
 
+    private enum PullTab: Hashable { case merged, open, pipeline }
+
+    private var pullTabs: [(label: String, count: Int, tab: PullTab)] {
+        [("Merged", merged.count, PullTab.merged), ("Open", pulls.count, .open), ("Pipeline", runs.count, .pipeline)]
+    }
+
     private var githubPanel: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            SectionHeader("GitHub", subtitle: !loaded ? nil
-                          : pullsScoped ? "Pull requests linked to this project's Linear issues" : "Whole repository") {
-                if let repo = project.githubRepo, let url = URL(string: "https://github.com/\(repo)") {
-                    Link("Open on GitHub", destination: url).font(Theme.small)
-                }
-            }
+        VStack(alignment: .leading, spacing: 16) {
+            PanelHeader(service: .github, title: "Pull requests",
+                        subtitle: loaded ? (pullsScoped ? "Linked to this project's issues" : "Whole repository") : nil,
+                        link: project.githubRepo.flatMap { URL(string: "https://github.com/\($0)") })
             if let e = errors[.github] {
                 LoadErrorRow(service: .github, message: e) { Task { await load() } }
-            } else {
-                ViewThatFits(in: .horizontal) {
-                    HStack(alignment: .top, spacing: 32) { openPulls; pipelineRuns }
-                    VStack(alignment: .leading, spacing: 20) { openPulls; pipelineRuns }
+            } else if !loaded {
+                HStack(spacing: 6) { ForEach(0..<3, id: \.self) { _ in Skeleton(width: 90, height: 30, radius: 15) } }
+                ForEach(0..<4, id: \.self) { i in
+                    HStack(spacing: 12) {
+                        Skeleton(width: 18, height: 18, radius: 9)
+                        VStack(alignment: .leading, spacing: 6) {
+                            Skeleton(width: [300, 240, 280, 220][i], height: 12)
+                            Skeleton(width: 140, height: 9)
+                        }
+                        Spacer()
+                    }
+                    .padding(.horizontal, 12).frame(height: 56)
                 }
-                mergedPulls
+            } else {
+                CountTabs(tabs: pullTabs, selection: $pullTab)
+                VStack(alignment: .leading, spacing: 2) {
+                    switch pullTab {
+                    case .merged:
+                        if merged.isEmpty { QuietEmpty(symbol: "arrow.triangle.merge", text: "Nothing merged yet") }
+                        ForEach(capped(merged, key: "merged")) { item in
+                            pullRow(symbol: "arrow.triangle.merge", tint: Soot.lime,
+                                    title: item.title ?? "Pull request #\(item.number)", number: item.number,
+                                    issue: item.issue, url: item.url,
+                                    trailing: item.mergedAt.map { $0.formatted(.relative(presentation: .named)) })
+                        }
+                        showAll(merged.count, key: "merged")
+                    case .open:
+                        if pulls.isEmpty {
+                            QuietEmpty(symbol: "arrow.triangle.pull",
+                                       text: pullsScoped ? "No open pull request on this project's issues" : "No open pull requests")
+                        }
+                        ForEach(capped(pulls, key: "open")) { match in
+                            pullRow(symbol: "arrow.triangle.pull", tint: Theme.chart2, title: match.pull.title,
+                                    number: match.pull.number, issue: match.issue, url: match.pull.html_url,
+                                    trailing: match.pull.draft == true ? "Draft" : match.pull.user.login)
+                        }
+                        showAll(pulls.count, key: "open")
+                    case .pipeline:
+                        if runs.isEmpty { QuietEmpty(symbol: "bolt.horizontal", text: "No runs to show") }
+                        ForEach(runs.prefix(8)) { run in
+                            TileRow(url: URL(string: run.html_url)) {
+                                PipelineBadge(state: .init(run: run)).font(.system(size: 13)).frame(width: 90, alignment: .leading)
+                                Text(run.name ?? "Workflow run").font(.system(size: 14)).foregroundStyle(Soot.ink).lineLimit(1)
+                                Spacer(minLength: 12)
+                                Text(run.head_branch ?? "").font(.system(size: 12)).foregroundStyle(Soot.muted).lineLimit(1)
+                            }
+                        }
+                    }
+                }
             }
         }
         .sootPanel()
     }
 
-    private var openPulls: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Text(loaded ? "Open · \(pulls.count)" : "Open").font(Theme.smallStrong).foregroundStyle(Theme.text).monospacedDigit()
-                .padding(.bottom, 8)
-            if !loaded { SkeletonRows(count: 3, leading: 64, trailing: 56) }
-            if pulls.isEmpty && loaded {
-                Text(pullsScoped ? "No open pull request mentions this project's issues." : "No open pull requests.")
-                    .font(Theme.body).foregroundStyle(Theme.muted)
-            }
-            ForEach(capped(pulls, key: "open")) { match in
-                Rectangle().fill(Theme.rule).frame(height: 1)
-                pullRow(issue: match.issue, number: match.pull.number, title: match.pull.title,
-                        url: match.pull.html_url, trailing: match.pull.draft == true ? "Draft" : match.pull.user.login)
-            }
-            showAll(pulls.count, key: "open")
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    private var pipelineRuns: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Text(pullsScoped ? "Pipeline · latest run per branch" : "Pipeline · recent runs")
-                .font(Theme.smallStrong).foregroundStyle(Theme.text)
-                .padding(.bottom, 8)
-            if !loaded { SkeletonRows(count: 3, leading: 72, trailing: 80) }
-            if runs.isEmpty && loaded {
-                Text(pullsScoped && pulls.isEmpty ? "No open pull requests, so no runs to show." : "No runs yet.")
-                    .font(Theme.body).foregroundStyle(Theme.muted)
-            }
-            ForEach(runs.prefix(6)) { run in
-                Rectangle().fill(Theme.rule).frame(height: 1)
-                HStack(spacing: 12) {
-                    PipelineBadge(state: .init(run: run)).frame(width: 96, alignment: .leading)
-                    if let url = URL(string: run.html_url) {
-                        Link(run.name ?? "Workflow run", destination: url).lineLimit(1)
-                    }
-                    Spacer(minLength: 8)
-                    Text(run.head_branch ?? "").font(Theme.small).foregroundStyle(Theme.muted).lineLimit(1)
-                        .help(run.head_branch ?? "")
+    /// Two lines: what changed, then number, kind and linked issue.
+    private func pullRow(symbol: String, tint: Color, title: String, number: Int, issue: String?,
+                         url: String, trailing: String?) -> some View {
+        let parts = PullTitle.split(title)
+        return TileRow(url: URL(string: url)) {
+            Image(systemName: symbol).font(.system(size: 14, weight: .semibold)).foregroundStyle(tint).frame(width: 18)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(parts.title).font(.system(size: 14)).foregroundStyle(Soot.ink).lineLimit(1).help(title)
+                HStack(spacing: 6) {
+                    Text(verbatim: "#\(number)")
+                    if let kind = parts.kind { Text("·"); Text(kind) }
                 }
-                .font(Theme.body)
-                .frame(minHeight: 36)
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    private var mergedPulls: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Text(loaded ? "Recently merged · \(merged.count)" : "Recently merged").font(Theme.smallStrong).foregroundStyle(Theme.text).monospacedDigit()
-                .padding(.bottom, 8)
-            if !loaded { SkeletonRows(count: 4, leading: 64, trailing: 96) }
-            if merged.isEmpty && loaded {
-                Text(pullsScoped ? "No merged pull request is linked to this project's issues." : "No recently merged pull requests.")
-                    .font(Theme.body).foregroundStyle(Theme.muted)
-            }
-            ForEach(capped(merged, key: "merged")) { item in
-                Rectangle().fill(Theme.rule).frame(height: 1)
-                pullRow(issue: item.issue, number: item.number, title: item.title ?? "Pull request #" + String(item.number),
-                        url: item.url, trailing: item.mergedAt.map { $0.formatted(.relative(presentation: .named)) } ?? "")
-            }
-            showAll(merged.count, key: "merged")
-        }
-    }
-
-    private func pullRow(issue: String?, number: Int, title: String, url: String, trailing: String) -> some View {
-        HStack(spacing: 12) {
-            Group {
-                if let issue, let link = issues.first(where: { $0.identifier == issue }).flatMap({ URL(string: $0.url) }) {
-                    Link(destination: link) { Text(issue) }.help("Open \(issue) in Linear")
-                } else {
-                    Text(issue ?? "").foregroundStyle(Theme.muted)
-                }
-            }
-            .font(Theme.id)
-            .frame(width: 76, alignment: .leading)
-            Text(verbatim: "#\(number)").font(Theme.id).foregroundStyle(Theme.muted).frame(width: 52, alignment: .leading)
-            if let link = URL(string: url) {
-                Link(title, destination: link).foregroundStyle(Theme.text).lineLimit(1).help(title)
+                .font(.system(size: 12)).foregroundStyle(Soot.muted)
             }
             Spacer(minLength: 12)
-            Text(trailing).font(Theme.small).foregroundStyle(Theme.muted).lineLimit(1)
+            if let issue { IDPill(text: issue) }
+            if let trailing {
+                Text(trailing).font(.system(size: 12)).foregroundStyle(Soot.muted).frame(minWidth: 70, alignment: .trailing)
+            }
         }
-        .font(Theme.body)
-        .frame(minHeight: 36)
+        .frame(minHeight: 56)
         .accessibilityElement(children: .combine)
     }
 
@@ -453,12 +462,9 @@ struct ProjectDetailView: View {
     @ViewBuilder
     private func showAll(_ count: Int, key: String) -> some View {
         if count > Self.cap {
-            Button(expanded.contains(key) ? "Show fewer" : "Show all \(count)") {
-                if expanded.contains(key) { expanded.remove(key) } else { expanded.insert(key) }
-            }
-            .buttonStyle(.link)
-            .font(Theme.small)
-            .padding(.top, 8)
+            ShowAllButton(count: count, expanded: Binding(
+                get: { expanded.contains(key) },
+                set: { if $0 { expanded.insert(key) } else { expanded.remove(key) } }))
         }
     }
 

@@ -94,13 +94,6 @@ enum SlackMarkup {
     ]
 }
 
-/// A stable pale tint per person, so each author is recognisable at a glance.
-private func personHue(_ id: String) -> Color {
-    let hues: [Double] = [0.02, 0.10, 0.30, 0.45, 0.55, 0.62, 0.80, 0.92]
-    let index = abs(id.unicodeScalars.reduce(0) { ($0 &* 31) &+ Int($1.value) }) % hues.count
-    return Color(hue: hues[index], saturation: 0.45, brightness: 0.85)
-}
-
 /// The channel's latest messages read like Slack: oldest at the top, newest at the bottom,
 /// consecutive messages from one person grouped under one name and avatar.
 struct SlackThreadView: View {
@@ -154,7 +147,7 @@ private struct MessageRow: View {
                         .font(.system(size: 14, weight: .semibold))
                         .foregroundStyle(Soot.ground)
                         .frame(width: 32, height: 32)
-                        .background(personHue(message.user ?? author), in: RoundedRectangle(cornerRadius: 8))
+                        .background(PersonTint.color(for: author), in: RoundedRectangle(cornerRadius: 8))
                 }
             }
             .frame(width: 32, alignment: .center)
