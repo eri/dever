@@ -58,7 +58,7 @@ struct ProjectEditorSheet: View {
         VStack(alignment: .leading, spacing: 20) {
             VStack(alignment: .leading, spacing: 6) {
                 SheetTitle(title: isNew ? "New project" : "Edit project",
-                           mark: { DeverMark().frame(width: 22, height: 22) }, close: { dismiss() })
+                           mark: { ActionIcon(symbol: isNew ? "plus" : "pencil") }, close: { dismiss() })
                 Text("A Dever project follows one Slack channel and one Linear project.")
                     .font(.system(size: 14)).foregroundStyle(Soot.muted)
             }
@@ -107,6 +107,19 @@ struct ProjectEditorSheet: View {
     }
 
     private static let newItem = "__new__"
+    private static let noneItem = "__none__"
+
+    /// Channels you're in first, then the rest, each with its member count.
+    private var channelItems: [PickerItem] {
+        availableChannels
+            .sorted { ($0.is_member == true ? 0 : 1, $0.name) < ($1.is_member == true ? 0 : 1, $1.name) }
+            .map { ch in
+                let members = ch.num_members.map { Plural.text("^[\($0) member](inflect: true)") }
+                let subtitle = [ch.is_member == true ? "You're in it" : nil, members].compactMap { $0 }.joined(separator: " · ")
+                return PickerItem(id: ch.id, title: "#\(ch.name)", subtitle: subtitle.isEmpty ? nil : subtitle,
+                                  symbol: ch.is_private == true ? "lock" : nil)
+            }
+    }
 
     /// A tool's row: logo and name, then its control (or why there is none).
     private func toolRow<Control: View, Extra: View>(_ service: ServiceKind, title: String,
@@ -124,7 +137,16 @@ struct ProjectEditorSheet: View {
                         control().labelsHidden().frame(maxWidth: .infinity, alignment: .leading)
                     }
                 } else {
-                    Text("Connect \(service.label) in Accounts").font(.system(size: 13)).foregroundStyle(Soot.muted)
+                    Button {
+                        dismiss()
+                        NotificationCenter.default.post(name: .showScreen, object: SidebarItem.accounts)
+                    } label: {
+                        HStack(spacing: 4) { Text("Connect \(service.label)"); Image(systemName: "arrow.up.right") }
+                    }
+                    .buttonStyle(.plain)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(Soot.lime)
+                    .help("Opens Accounts, where you can connect \(service.label)")
                 }
                 Spacer(minLength: 0)
             }
@@ -137,20 +159,19 @@ struct ProjectEditorSheet: View {
 
     private var slackRow: some View {
         toolRow(.slack, title: "Slack channel") {
-            Picker("Slack channel", selection: Binding<String?>(
-                get: { slackMode == .create ? Self.newItem : slackMode == .existing ? slackPick : nil },
-                set: { v in
-                    switch v {
-                    case nil: slackMode = .none
-                    case Self.newItem?: slackMode = .create
-                    case let id?: slackMode = .existing; slackPick = id
-                    }
-                })) {
-                Text("Not linked").tag(String?.none)
-                Text("New channel…").tag(Optional(Self.newItem))
-                Divider()
-                ForEach(availableChannels) { Text("#\($0.name)").tag(Optional($0.id)) }
-            }
+            SearchPicker(label: "Slack channel", placeholder: "Not linked",
+                         actions: [PickerItem(id: Self.noneItem, title: "Not linked", symbol: "minus.circle"),
+                                   PickerItem(id: Self.newItem, title: "New channel…", symbol: "plus")],
+                         items: channelItems,
+                         selection: Binding<String?>(
+                            get: { slackMode == .create ? Self.newItem : slackMode == .existing ? slackPick : Self.noneItem },
+                            set: { v in
+                                switch v {
+                                case Self.newItem?: slackMode = .create
+                                case Self.noneItem?, nil: slackMode = .none
+                                case let id?: slackMode = .existing; slackPick = id
+                                }
+                            }))
         } extra: {
             if slackMode == .create && app.slack != nil {
                 HStack(spacing: 10) {
@@ -168,20 +189,22 @@ struct ProjectEditorSheet: View {
 
     private var linearRow: some View {
         toolRow(.linear, title: "Linear project") {
-            Picker("Linear project", selection: Binding<String?>(
-                get: { linearMode == .create ? Self.newItem : linearMode == .existing ? linearPick : nil },
-                set: { v in
-                    switch v {
-                    case nil: linearMode = .none
-                    case Self.newItem?: linearMode = .create
-                    case let id?: linearMode = .existing; linearPick = id
-                    }
-                })) {
-                Text("Not linked").tag(String?.none)
-                Text("New project…").tag(Optional(Self.newItem))
-                Divider()
-                ForEach(availableLinear) { Text($0.name).tag(Optional($0.id)) }
-            }
+            SearchPicker(label: "Linear project", placeholder: "Not linked",
+                         actions: [PickerItem(id: Self.noneItem, title: "Not linked", symbol: "minus.circle"),
+                                   PickerItem(id: Self.newItem, title: "New project…", symbol: "plus")],
+                         items: availableLinear.map {
+                             PickerItem(id: $0.id, title: $0.name,
+                                        subtitle: $0.teams?.nodes.map(\.name).joined(separator: ", "))
+                         },
+                         selection: Binding<String?>(
+                            get: { linearMode == .create ? Self.newItem : linearMode == .existing ? linearPick : Self.noneItem },
+                            set: { v in
+                                switch v {
+                                case Self.newItem?: linearMode = .create
+                                case Self.noneItem?, nil: linearMode = .none
+                                case let id?: linearMode = .existing; linearPick = id
+                                }
+                            }))
         } extra: {
             if linearMode == .create && app.linear != nil && !catalog.loading {
                 HStack(spacing: 10) {
@@ -199,11 +222,14 @@ struct ProjectEditorSheet: View {
 
     private var githubRow: some View {
         toolRow(.github, title: "GitHub repository") {
-            Picker("GitHub repository", selection: $project.githubRepo) {
-                Text("Not linked").tag(String?.none)
-                Divider()
-                ForEach(catalog.repos) { Text($0.full_name).tag(Optional($0.full_name)) }
-            }
+            SearchPicker(label: "GitHub repository", placeholder: "Not linked",
+                         actions: [PickerItem(id: Self.noneItem, title: "Not linked", symbol: "minus.circle")],
+                         items: catalog.repos.map {
+                             PickerItem(id: $0.full_name, title: $0.full_name, subtitle: $0.private ? "Private" : "Public")
+                         },
+                         selection: Binding<String?>(
+                            get: { project.githubRepo ?? Self.noneItem },
+                            set: { project.githubRepo = ($0 == Self.noneItem) ? nil : $0 }))
         } extra: {
             if project.githubRepo != nil && app.github != nil {
                 Toggle(isOn: Binding(get: { project.githubWholeRepo == true },
@@ -359,7 +385,7 @@ struct ImportSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
             SheetTitle(title: source == .slack ? "Import channels" : "Import projects", mark: {
-                BrandLogo(service: source == .slack ? .slack : .linear, size: 24).foregroundStyle(Soot.ink)
+                ActionIcon(symbol: "square.and.arrow.down")
             }, close: { dismiss() })
             HStack(spacing: 16) {
                 HStack(spacing: 8) {

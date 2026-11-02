@@ -258,3 +258,178 @@ struct FieldLabel: View {
         Text(text).font(.system(size: 13, weight: .semibold)).foregroundStyle(Soot.muted)
     }
 }
+
+// MARK: - Search picker
+
+/// One choice in a `SearchPicker`.
+struct PickerItem: Identifiable, Hashable {
+    let id: String
+    let title: String
+    var subtitle: String? = nil
+    var symbol: String? = nil
+}
+
+/// A field that opens a searchable list: type to filter, click or press Return to choose.
+/// Replaces long system menus (hundreds of channels or repositories).
+struct SearchPicker: View {
+    let label: String                // accessible name, e.g. "Slack channel"
+    let placeholder: String          // shown when nothing is chosen
+    /// Short fixed choices shown above the list (Not linked, New channel…).
+    var actions: [PickerItem] = []
+    let items: [PickerItem]
+    @Binding var selection: String?
+    @State private var open = false
+
+    private var current: PickerItem? {
+        (actions + items).first { $0.id == selection }
+    }
+
+    var body: some View {
+        Button { open.toggle() } label: {
+            HStack(spacing: 8) {
+                if let symbol = current?.symbol { Image(systemName: symbol).foregroundStyle(Soot.muted) }
+                Text(current?.title ?? placeholder)
+                    .foregroundStyle(current == nil ? Soot.muted : Soot.ink)
+                    .lineLimit(1)
+                Spacer(minLength: 8)
+                Image(systemName: "chevron.down").font(.system(size: 11, weight: .semibold)).foregroundStyle(Soot.muted)
+            }
+            .font(.system(size: 14))
+            .padding(.horizontal, 12)
+            .frame(height: 34)
+            .background(Soot.ground, in: RoundedRectangle(cornerRadius: Soot.radius))
+            .overlay(RoundedRectangle(cornerRadius: Soot.radius).strokeBorder(open ? Soot.ink : Soot.edge))
+            .contentShape(Rectangle())
+            .modifier(FocusOutline(radius: Soot.radius))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(label)
+        .accessibilityValue(current?.title ?? "None")
+        .onAppear {
+            // Snapshots: DEVER_SNAPSHOT_PICKER=<label> opens that picker.
+            if ProcessInfo.processInfo.environment["DEVER_SNAPSHOT_PICKER"] == label {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 3) { open = true }
+            }
+        }
+        .popover(isPresented: $open, arrowEdge: .bottom) {
+            SearchPickerList(label: label, actions: actions, items: items, selection: $selection, open: $open)
+        }
+    }
+}
+
+private struct SearchPickerList: View {
+    let label: String
+    let actions: [PickerItem]
+    let items: [PickerItem]
+    @Binding var selection: String?
+    @Binding var open: Bool
+    @State private var query = ""
+    @FocusState private var searchFocused: Bool
+
+    private var filtered: [PickerItem] {
+        guard !query.isEmpty else { return items }
+        return items.filter { $0.title.localizedCaseInsensitiveContains(query) }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 8) {
+                Image(systemName: "magnifyingglass").foregroundStyle(Soot.muted).accessibilityHidden(true)
+                TextField("Search", text: $query, prompt: Text("Search").foregroundStyle(Soot.muted))
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 14))
+                    .foregroundStyle(Soot.ink)
+                    .focused($searchFocused)
+                    .onSubmit { if let first = (query.isEmpty ? actions + filtered : filtered).first { choose(first) } }
+                    .accessibilityLabel("Search \(label)")
+            }
+            .padding(.horizontal, 14)
+            .frame(height: 42)
+            Rectangle().fill(Soot.surface).frame(height: 1)
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 2) {
+                    if query.isEmpty && !actions.isEmpty {
+                        ForEach(actions) { row($0) }
+                        Rectangle().fill(Soot.surface).frame(height: 1).padding(.vertical, 4)
+                    }
+                    ForEach(filtered) { row($0) }
+                    if filtered.isEmpty {
+                        Text("No match for \u{201C}\(query)\u{201D}").font(.system(size: 13)).foregroundStyle(Soot.muted)
+                            .padding(12)
+                    }
+                }
+                .padding(6)
+            }
+            .frame(maxHeight: 300)
+        }
+        .frame(width: 340)
+        .background(Soot.ground)
+        .environment(\.colorScheme, .dark)
+        .onAppear { searchFocused = true }
+    }
+
+    private func row(_ item: PickerItem) -> some View {
+        PickerRow(item: item, isAction: actions.contains(item), selected: item.id == selection) { choose(item) }
+    }
+
+    private func choose(_ item: PickerItem) {
+        selection = item.id
+        open = false
+    }
+}
+
+private struct PickerRow: View {
+    let item: PickerItem
+    let isAction: Bool
+    let selected: Bool
+    let action: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 10) {
+                // A fixed icon column keeps every title on one edge.
+                Group {
+                    if let symbol = item.symbol {
+                        Image(systemName: symbol).foregroundStyle(isAction ? Soot.lime : Soot.muted)
+                    } else {
+                        Color.clear
+                    }
+                }
+                .frame(width: 16)
+                .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(item.title).font(.system(size: 14)).foregroundStyle(Soot.ink).lineLimit(1)
+                    if let subtitle = item.subtitle {
+                        Text(subtitle).font(.system(size: 12)).foregroundStyle(Soot.muted).lineLimit(1)
+                    }
+                }
+                Spacer(minLength: 8)
+                if selected {
+                    Image(systemName: "checkmark").font(.system(size: 12, weight: .semibold)).foregroundStyle(Soot.lime)
+                }
+            }
+            .padding(.horizontal, 10)
+            .frame(minHeight: 34)
+            .background(hovering ? Soot.surface : Color.clear, in: RoundedRectangle(cornerRadius: 6))
+            .contentShape(Rectangle())
+            .modifier(FocusOutline(radius: 6))
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+}
+
+/// The sheet's action as one glyph: what the sheet does, not which app it belongs to.
+struct ActionIcon: View {
+    let symbol: String
+    var body: some View {
+        Image(systemName: symbol)
+            .font(.system(size: 15, weight: .semibold))
+            .foregroundStyle(Soot.lime)
+            .frame(width: 34, height: 34)
+            .background(Soot.surface, in: Circle())
+            .accessibilityHidden(true)
+    }
+}

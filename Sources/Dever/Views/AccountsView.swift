@@ -190,7 +190,7 @@ struct GitHubLoginSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 24) {
             SheetTitle(title: "Connect GitHub", mark: {
-                BrandLogo(service: .github, size: 24).foregroundStyle(Soot.ink)
+                ActionIcon(symbol: "link")
             }, close: { task?.cancel(); dismiss() })
             if let code {
                 VStack(alignment: .leading, spacing: 12) {

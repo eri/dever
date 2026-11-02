@@ -224,23 +224,21 @@ struct Skeleton: View {
     var height: CGFloat = 12
     var radius: CGFloat = 3
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var dim = false
 
     var body: some View {
-        RoundedRectangle(cornerRadius: radius)
-            .fill(Theme.empty)
-            .frame(width: width, height: height)
-            .frame(maxWidth: width == nil ? .infinity : nil, alignment: .leading)
-            .opacity(dim ? 0.5 : 1)
-            // Scoped to this view's opacity: a withAnimation here would leak the repeating
-            // animation into whatever else changes in the same transaction.
-            .animation(reduceMotion ? nil : .easeInOut(duration: 0.9).repeatForever(autoreverses: true), value: dim)
-            .onAppear { if !reduceMotion { dim = true } }
-            .accessibilityHidden(true)
+        // The pulse is computed from the clock, not animated: an implicit animation here also
+        // caught the layout of a sheet as it opened and made the bars slide around.
+        TimelineView(.animation(minimumInterval: 1.0 / 30, paused: reduceMotion)) { context in
+            let t = context.date.timeIntervalSinceReferenceDate
+            RoundedRectangle(cornerRadius: radius)
+                .fill(Theme.empty)
+                .opacity(reduceMotion ? 1 : 0.75 + 0.25 * cos(t * .pi / 0.9))
+        }
+        .frame(width: width, height: height)
+        .frame(maxWidth: width == nil ? .infinity : nil, alignment: .leading)
+        .accessibilityHidden(true)
     }
 }
-
-/// Rows of skeleton lines in the shape of a list.
 struct SkeletonRows: View {
     var count = 4
     var leading: CGFloat? = 64

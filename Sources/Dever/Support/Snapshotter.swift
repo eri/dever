@@ -37,6 +37,13 @@ enum Snapshotter {
                 NotificationCenter.default.post(name: .showSheet, object: sheet)
                 try? await Task.sleep(nanoseconds: 6_000_000_000)
                 capture(to: dir.appendingPathComponent("\(name).png"))
+                // An open popover lives in its own window.
+                if let popover = NSApp.windows.first(where: { $0.isVisible && String(describing: type(of: $0)).contains("Popover") }),
+                   let view = popover.contentView?.superview ?? popover.contentView,
+                   let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) {
+                    view.cacheDisplay(in: view.bounds, to: rep)
+                    try? rep.representation(using: .png, properties: [:])?.write(to: dir.appendingPathComponent("\(name)-popover.png"))
+                }
                 NotificationCenter.default.post(name: .showSheet, object: "none")
                 try? await Task.sleep(nanoseconds: 1_000_000_000)
             }
