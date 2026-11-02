@@ -73,6 +73,21 @@ enum Naming {
         return base.split(separator: "-").map { $0.prefix(1).uppercased() + $0.dropFirst() }.joined(separator: " ")
     }
 
+    /// The prefix most channels share (text up to and including the first "-" or "_"),
+    /// when at least 3 channels and a fifth of them use it.
+    static func commonPrefix(in names: [String]) -> (prefix: String, count: Int)? {
+        var counts: [String: Int] = [:]
+        for name in names {
+            guard let cut = name.firstIndex(where: { $0 == "-" || $0 == "_" }) else { continue }
+            let prefix = String(name[...cut])
+            guard (2...13).contains(prefix.count) else { continue }
+            counts[prefix, default: 0] += 1
+        }
+        guard let best = counts.max(by: { $0.value < $1.value }),
+              best.value >= 3, Double(best.value) >= Double(names.count) * 0.2 else { return nil }
+        return (best.key, best.value)
+    }
+
     static func matches(_ a: String, _ b: String) -> Bool {
         slug(a) == slug(b)
     }

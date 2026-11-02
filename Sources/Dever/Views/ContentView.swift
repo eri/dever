@@ -17,6 +17,7 @@ struct ContentView: View {
     @AppStorage("onboardingDone") private var onboardingDone = false
     @AppStorage("displayName") private var displayName = ""
     @State private var showOnboarding = false
+    @State private var githubSheet = false
 
     var body: some View {
         Group {
@@ -83,6 +84,17 @@ struct ContentView: View {
         .task {
             if let dir = Snapshotter.directory { await Snapshotter.run(in: dir, projects: app.projects) }
         }
+        .onReceive(NotificationCenter.default.publisher(for: .showSheet)) { note in
+            importSource = nil; showNew = false; githubSheet = false
+            switch note.object as? String {
+            case "import-slack": importSource = .slack
+            case "import-linear": importSource = .linear
+            case "new-project": showNew = true
+            case "github": githubSheet = true
+            default: break
+            }
+        }
+        .sheet(isPresented: $githubSheet) { GitHubLoginSheet() }
         .onReceive(NotificationCenter.default.publisher(for: .showScreen)) { note in
             if let item = note.object as? SidebarItem { selection = item }
         }

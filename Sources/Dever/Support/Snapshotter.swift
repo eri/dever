@@ -29,6 +29,18 @@ enum Snapshotter {
                 capture(to: dir.appendingPathComponent("\(name)-\(themeName).png"))
             }
         }
+        if ProcessInfo.processInfo.environment["DEVER_SNAPSHOT_SHEETS"] == "1" {
+            NSApp.appearance = NSAppearance(named: .darkAqua)
+            NotificationCenter.default.post(name: .showScreen, object: SidebarItem.overview)
+            for (name, sheet) in [("sheet-import-slack", "import-slack"), ("sheet-import-linear", "import-linear"),
+                                  ("sheet-new-project", "new-project"), ("sheet-github", "github")] {
+                NotificationCenter.default.post(name: .showSheet, object: sheet)
+                try? await Task.sleep(nanoseconds: 6_000_000_000)
+                capture(to: dir.appendingPathComponent("\(name).png"))
+                NotificationCenter.default.post(name: .showSheet, object: "none")
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+            }
+        }
         if ProcessInfo.processInfo.environment["DEVER_SNAPSHOT_ONBOARDING"] == "1" {
             NotificationCenter.default.post(name: .showOnboarding, object: nil)
             for (themeName, appearance) in [("dark", NSAppearance.Name.darkAqua), ("light", .aqua)] {
@@ -44,7 +56,8 @@ enum Snapshotter {
     }
 
     private static func capture(to url: URL) {
-        guard let window = NSApp.windows.first(where: { $0.isVisible && $0.canBecomeMain }),
+        guard let main = NSApp.windows.first(where: { $0.isVisible && $0.canBecomeMain }),
+              case let window = main.attachedSheet ?? main,
               let view = window.contentView?.superview ?? window.contentView,
               let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return }
         view.cacheDisplay(in: view.bounds, to: rep)
@@ -55,6 +68,8 @@ enum Snapshotter {
 extension Notification.Name {
     /// Switches the main window to a screen; `object` is a `SidebarItem`.
     static let showScreen = Notification.Name("dever.showScreen")
+    /// Opens or closes a sheet by name (snapshots): import-slack, import-linear, new-project, github, none.
+    static let showSheet = Notification.Name("dever.showSheet")
     /// Opens the onboarding flow (Help menu, snapshots).
     static let showOnboarding = Notification.Name("dever.showOnboarding")
 }

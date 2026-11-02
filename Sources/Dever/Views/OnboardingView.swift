@@ -10,20 +10,9 @@ import UserNotifications
 /// Where to go when onboarding ends.
 enum OnboardingExit { case overview, newProject, importSlack, importLinear }
 
-/// Soot and lime: black ground, one lime for actions and the stage behind the product.
-private enum Soot {
-    static let ground = Color(red: 0.059, green: 0.059, blue: 0.059)     // #0f0f0f
-    static let surface = Color(red: 0.102, green: 0.102, blue: 0.102)    // #1a1a1a
-    static let ink = Color.white
-    static let muted = Color(red: 0.56, green: 0.56, blue: 0.56)         // #8f8f8f
-    static let lime = Color(red: 0.855, green: 0.98, blue: 0.612)        // #dafa9c
-    static let limeInk = ground
-    static let radius: CGFloat = 8
-    static let margin: CGFloat = 40
-}
 
 struct OnboardingView: View {
-    enum Stage: Int, CaseIterable { case name, connect, project }
+    enum Stage: Int, CaseIterable { case name, connect, channels, project }
 
     @EnvironmentObject var app: AppState
     @State var stage: Stage = .name
@@ -75,7 +64,8 @@ struct OnboardingView: View {
             Group {
                 switch stage {
                 case .name: NameControls(next: { stage = .connect })
-                case .connect: ConnectControls(next: { stage = .project })
+                case .connect: ConnectControls(next: { stage = app.slack == nil ? .project : .channels })
+                case .channels: ChannelNamingControls(next: { stage = .project })
                 case .project: ProjectControls(finish: finish)
                 }
             }
@@ -95,7 +85,7 @@ struct OnboardingView: View {
                 }
                 .buttonStyle(.plain)
                 .disabled(s.rawValue >= stage.rawValue)
-                .accessibilityLabel(["Name", "Connect", "First project"][s.rawValue])
+                .accessibilityLabel(["Name", "Connect", "Channel names", "First project"][s.rawValue])
                 .accessibilityAddTraits(s == stage ? .isSelected : [])
             }
         }
@@ -104,42 +94,8 @@ struct OnboardingView: View {
 
 // MARK: - Shared controls
 
-private struct Headline: View {
-    let text: String
-    var body: some View {
-        Text(text)
-            .font(.system(size: 44, weight: .semibold))
-            .tracking(-1.5)
-            .foregroundStyle(Soot.ink)
-            .fixedSize(horizontal: false, vertical: true)
-            .accessibilityAddTraits(.isHeader)
-    }
-}
 
-private struct LimeButton: ButtonStyle {
-    @Environment(\.isEnabled) private var isEnabled
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .font(.system(size: 15, weight: .semibold))
-            .foregroundStyle(Soot.limeInk)
-            .padding(.horizontal, 18)
-            .frame(height: 40)
-            .background(Soot.lime.opacity(isEnabled ? (configuration.isPressed ? 0.8 : 1) : 0.3),
-                        in: RoundedRectangle(cornerRadius: Soot.radius))
-    }
-}
 
-private struct QuietButton: ButtonStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .font(.system(size: 15, weight: .medium))
-            .foregroundStyle(Soot.ink)
-            .padding(.horizontal, 18)
-            .frame(height: 40)
-            .background(Soot.surface.opacity(configuration.isPressed ? 0.7 : 1),
-                        in: RoundedRectangle(cornerRadius: Soot.radius))
-    }
-}
 
 // MARK: - Name
 
@@ -323,6 +279,103 @@ private struct Breathing: ViewModifier {
     }
 }
 
+// MARK: - Channel names
+
+/// Asks whether project channels share a prefix. With one, Dever recognises project channels
+/// on its own (import, matching, new channels); without, the user picks channels by hand.
+private struct ChannelNamingControls: View {
+    @EnvironmentObject var app: AppState
+    @AppStorage("slackChannelPrefix") private var channelPrefix = "proj-"
+    let next: () -> Void
+    @State private var usesPrefix = true
+    @State private var prefix = "proj-"
+    @State private var detected: (prefix: String, count: Int)?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 28) {
+            Headline(text: "Name your channels")
+            VStack(spacing: 8) {
+                VStack(alignment: .leading, spacing: 0) {
+                    choice(on: usesPrefix, title: "A shared prefix", tag: "Recommended",
+                           detail: "Dever finds your project channels by it") { usesPrefix = true }
+                    if usesPrefix {
+                        VStack(alignment: .leading, spacing: 6) {
+                            UnderlineField(placeholder: "proj-", text: $prefix, size: 17)
+                                .frame(maxWidth: 200)
+                                .accessibilityLabel("Channel prefix")
+                            Text(hint).font(.system(size: 13)).foregroundStyle(Soot.muted)
+                        }
+                        .padding(.leading, 50)
+                        .padding(.bottom, 16)
+                    }
+                }
+                .background(Soot.surface, in: RoundedRectangle(cornerRadius: Soot.radius))
+                .overlay(RoundedRectangle(cornerRadius: Soot.radius).strokeBorder(usesPrefix ? Soot.lime.opacity(0.5) : .clear))
+                choice(on: !usesPrefix, title: "No shared prefix", tag: nil,
+                       detail: "You'll pick channels yourself") { usesPrefix = false }
+                    .background(Soot.surface, in: RoundedRectangle(cornerRadius: Soot.radius))
+                    .overlay(RoundedRectangle(cornerRadius: Soot.radius).strokeBorder(!usesPrefix ? Soot.lime.opacity(0.5) : .clear))
+            }
+            .frame(maxWidth: 400)
+            Button("Continue") {
+                let trimmed = prefix.trimmingCharacters(in: .whitespaces)
+                channelPrefix = usesPrefix ? trimmed : ""
+                next()
+            }
+            .buttonStyle(LimeButton())
+            .keyboardShortcut(.defaultAction)
+            .disabled(usesPrefix && prefix.trimmingCharacters(in: .whitespaces).isEmpty)
+        }
+        .task { await detect() }
+    }
+
+    private var hint: String {
+        let example = Naming.channelName(for: "Checkout", prefix: prefix)
+        if let d = detected, d.prefix == prefix {
+            return Plural.text("Found on ^[\(d.count) channel](inflect: true) you're in · e.g. #\(example)")
+        }
+        return "e.g. #\(example)"
+    }
+
+    private func choice(on: Bool, title: String, tag: String?, detail: String, select: @escaping () -> Void) -> some View {
+        Button(action: select) {
+            HStack(spacing: 12) {
+                CheckCircle(on: on).frame(width: 22)
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 8) {
+                        Text(title).font(.system(size: 16, weight: .medium)).foregroundStyle(Soot.ink)
+                        if let tag {
+                            Text(tag).font(.system(size: 11, weight: .semibold)).foregroundStyle(Soot.lime)
+                        }
+                    }
+                    Text(detail).font(.system(size: 13)).foregroundStyle(Soot.muted)
+                }
+                Spacer()
+            }
+            .padding(.horizontal, 16)
+            .frame(height: 64)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(on ? .isSelected : [])
+    }
+
+    /// Looks at the channels the user is in for a prefix most of them share.
+    private func detect() async {
+        if !channelPrefix.isEmpty { prefix = channelPrefix }
+        guard app.slack != nil,
+              let channels = try? await app.withSlack({ try await $0.channels() }) else { return }
+        let names = channels.filter { $0.is_member == true }.map(\.name)
+        guard let found = Naming.commonPrefix(in: names) else {
+            if channelPrefix == "proj-" { usesPrefix = false }
+            return
+        }
+        detected = found
+        prefix = found.prefix
+        usesPrefix = true
+    }
+}
+
 // MARK: - First project
 
 private struct ProjectControls: View {
@@ -337,7 +390,8 @@ private struct ProjectControls: View {
             VStack(spacing: 8) {
                 OptionRow(icon: AnyView(BrandLogo(service: .slack, size: 20)),
                           title: "Import from Slack",
-                          detail: app.slack == nil ? "Connect Slack first" : "Channels starting with \(channelPrefix)",
+                          detail: app.slack == nil ? "Connect Slack first"
+                              : channelPrefix.isEmpty ? "Pick your project channels" : "Channels starting with \(channelPrefix)",
                           recommended: true, enabled: app.slack != nil) { finish(.importSlack) }
                 OptionRow(icon: AnyView(BrandLogo(service: .linear, size: 20).foregroundStyle(Soot.ink)),
                           title: "Import from Linear",
@@ -356,45 +410,6 @@ private struct ProjectControls: View {
     }
 }
 
-/// A choice that is its own button: icon, title, one short line, and where it leads.
-private struct OptionRow: View {
-    let icon: AnyView
-    let title: String
-    let detail: String
-    let recommended: Bool
-    let enabled: Bool
-    let action: () -> Void
-    @State private var hovering = false
-
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: 12) {
-                icon.frame(width: 22).accessibilityHidden(true)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(title).font(.system(size: 16, weight: .medium)).foregroundStyle(Soot.ink)
-                    Text(detail).font(.system(size: 13)).foregroundStyle(Soot.muted).lineLimit(1)
-                }
-                Spacer()
-                Image(systemName: "arrow.right")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(recommended ? Soot.limeInk : Soot.muted)
-                    .frame(width: 28, height: 28)
-                    .background(recommended ? Soot.lime : Color.clear, in: Circle())
-            }
-            .padding(.horizontal, 16)
-            .frame(height: 64)
-            .background(hovering && enabled ? Soot.surface.opacity(0.7) : Soot.surface,
-                        in: RoundedRectangle(cornerRadius: Soot.radius))
-            .overlay(RoundedRectangle(cornerRadius: Soot.radius)
-                .strokeBorder(recommended && enabled ? Soot.lime.opacity(0.5) : .clear))
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .disabled(!enabled)
-        .opacity(enabled ? 1 : 0.45)
-        .onHover { hovering = $0 }
-    }
-}
 
 /// Alerts, with a control that matches what macOS allows right now.
 private struct AlertsRow: View {

@@ -36,7 +36,7 @@ struct AccountsView: View {
                 }
                 Rectangle().fill(Theme.border).frame(height: 1)
                 SettingsSection("Slack channel naming",
-                                description: "Project channels start with this prefix. Import from Slack uses it to find them and to name the projects.") {
+                                description: "Project channels start with this prefix, so Dever can find them. Leave it empty if they don't share one.") {
                     VStack(alignment: .leading, spacing: 8) {
                         Text("Prefix").font(Theme.bodyStrong).foregroundStyle(Theme.text)
                         TextField("Prefix", text: $channelPrefix, prompt: Text("proj-"))
@@ -188,35 +188,45 @@ struct GitHubLoginSheet: View {
     @State private var task: Task<Void, Never>?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("Connect GitHub").font(.title2.bold())
+        VStack(alignment: .leading, spacing: 24) {
+            SheetTitle(title: "Connect GitHub", mark: {
+                BrandLogo(service: .github, size: 24).foregroundStyle(Soot.ink)
+            }, close: { task?.cancel(); dismiss() })
             if let code {
-                Text("Enter this code on GitHub:")
-                HStack {
-                    Text(code.user_code).font(.system(size: 28, weight: .bold, design: .monospaced)).textSelection(.enabled)
-                    Button("Copy") {
-                        NSPasteboard.general.clearContents()
-                        NSPasteboard.general.setString(code.user_code, forType: .string)
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("Enter this code on GitHub").font(.system(size: 14)).foregroundStyle(Soot.muted)
+                    HStack(spacing: 16) {
+                        Text(code.user_code)
+                            .font(.system(size: 34, weight: .semibold, design: .monospaced))
+                            .foregroundStyle(Soot.lime)
+                            .textSelection(.enabled)
+                        Button("Copy") {
+                            NSPasteboard.general.clearContents()
+                            NSPasteboard.general.setString(code.user_code, forType: .string)
+                        }
+                        .buttonStyle(QuietButton())
+                    }
+                    HStack(spacing: 12) {
+                        Link(destination: URL(string: code.verification_uri)!) {
+                            Text("Open github.com/login/device")
+                        }
+                        .buttonStyle(LimeButton())
+                        Text("Waiting for approval…").font(.system(size: 13)).foregroundStyle(Soot.muted)
                     }
                 }
-                Link("Open \(code.verification_uri)", destination: URL(string: code.verification_uri)!)
-                Text("Waiting for you to approve on GitHub…").font(Theme.body).foregroundStyle(Theme.muted)
             } else {
-                Button("Sign in with GitHub (code)") { startDeviceFlow() }.buttonStyle(PrimaryButtonStyle())
-                Button("Use GitHub CLI session (gh)") { importGh() }
-            }
-            if let error {
-                Label {
-                    Text(error).fixedSize(horizontal: false, vertical: true)
-                } icon: {
-                    Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+                VStack(spacing: 8) {
+                    OptionRow(icon: AnyView(BrandLogo(service: .github, size: 20).foregroundStyle(Soot.ink)),
+                              title: "Sign in with a code", detail: "Approve Dever on github.com",
+                              recommended: true, enabled: true) { startDeviceFlow() }
+                    OptionRow(icon: AnyView(Image(systemName: "terminal").font(.system(size: 16)).foregroundStyle(Soot.ink)),
+                              title: "Use GitHub CLI", detail: "Reuse your gh session",
+                              recommended: false, enabled: true) { importGh() }
                 }
-                .font(.callout)
             }
-            HStack { Spacer(); Button("Close") { task?.cancel(); dismiss() } }
+            if let error { ErrorLabel(error) }
         }
-        .padding(24)
-        .frame(width: 440)
+        .sootSheet(width: 460)
     }
 
     private func finish(token: String) async throws {
