@@ -138,7 +138,8 @@ final class OverviewStore: ObservableObject {
         case .failure(let e):
             s.errors[.linear] = e.localizedDescription
         }
-        async let github = loadGitHub(p, app, issues: issues)
+        let projectIssues = issues
+        async let github = loadGitHub(p, app, issues: projectIssues)
         switch await slack {
         case .success(let v): s.slack = v
         case .failure(let e): s.errors[.slack] = e.localizedDescription
