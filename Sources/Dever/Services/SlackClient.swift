@@ -23,6 +23,7 @@ struct SlackMessage: Codable, Identifiable {
     var user: String?
     var text: String?
     var reply_count: Int?
+    var subtype: String?
     var id: String { ts }
     var date: Date { Date(timeIntervalSince1970: Double(ts) ?? 0) }
 }
@@ -120,8 +121,10 @@ struct SlackClient {
         return all.sorted { $0.name < $1.name }
     }
 
-    func history(_ channelID: String, limit: Int = 30) async throws -> [SlackMessage] {
-        let res = try await call("conversations.history", ["channel": channelID, "limit": "\(limit)"])
+    func history(_ channelID: String, limit: Int = 30, since: Date? = nil) async throws -> [SlackMessage] {
+        var params = ["channel": channelID, "limit": "\(limit)"]
+        if let since { params["oldest"] = String(since.timeIntervalSince1970) }
+        let res = try await call("conversations.history", params)
         return try decode(res["messages"], as: [SlackMessage].self)
     }
 

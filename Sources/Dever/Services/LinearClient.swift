@@ -199,6 +199,24 @@ struct LinearClient {
         """, variables: ["id": projectID], as: R.self).project.issues.nodes
     }
 
+    struct ProjectSummary: Decodable {
+        struct Person: Decodable { var name: String }
+        struct Issue: Decodable { struct State: Decodable { var type: String }; var state: State }
+        struct Issues: Decodable { var nodes: [Issue] }
+        var targetDate: String?
+        var lead: Person?
+        var issues: Issues
+    }
+
+    /// Lightweight project data for the overview: lead, target date and issue states.
+    func projectSummary(id: String) async throws -> ProjectSummary {
+        struct R: Decodable { var project: ProjectSummary }
+        return try await query("""
+        query($id: String!) { project(id: $id) { targetDate lead { name }
+          issues(first: 250) { nodes { state { type } } } } }
+        """, variables: ["id": id], as: R.self).project
+    }
+
     func createProject(name: String, teamIDs: [String]) async throws -> LinearProject {
         struct R: Decodable { struct C: Decodable { var project: LinearProject }; var projectCreate: C }
         return try await query("""

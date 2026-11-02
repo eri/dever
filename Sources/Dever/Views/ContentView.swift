@@ -1,13 +1,15 @@
 import SwiftUI
 
 enum SidebarItem: Hashable {
+    case overview
     case accounts
     case project(UUID)
 }
 
 struct ContentView: View {
     @EnvironmentObject var app: AppState
-    @State private var selection: SidebarItem? = .accounts
+    @EnvironmentObject var store: OverviewStore
+    @State private var selection: SidebarItem? = .overview
     @State private var showNew = false
     @State private var importSource: ImportSheet.Source?
     @State private var editing: Project?
@@ -16,17 +18,14 @@ struct ContentView: View {
         NavigationSplitView {
             List(selection: $selection) {
                 Section {
+                    Label("Overview", systemImage: "square.grid.2x2").tag(SidebarItem.overview)
                     Label("Accounts", systemImage: "person.crop.circle.badge.checkmark").tag(SidebarItem.accounts)
                 }
                 Section("Projects") {
                     ForEach(app.projects) { p in
                         HStack {
+                            Circle().fill(dotColor(p)).frame(width: 7, height: 7)
                             Text(p.name)
-                            Spacer()
-                            if !p.isComplete {
-                                Image(systemName: "exclamationmark.triangle.fill")
-                                    .foregroundStyle(.orange).help("Missing Slack channel or Linear project")
-                            }
                         }
                         .tag(SidebarItem.project(p.id))
                         .contextMenu {
@@ -57,12 +56,20 @@ struct ContentView: View {
                 } else {
                     ContentUnavailableView("Project not found", systemImage: "questionmark.folder")
                 }
-            default:
+            case .accounts:
                 AccountsView()
+            default:
+                OverviewView(open: { selection = .project($0.id) },
+                             newProject: { showNew = true },
+                             importFrom: { importSource = $0 })
             }
         }
         .sheet(isPresented: $showNew) { ProjectEditorSheet() }
         .sheet(item: $importSource) { ImportSheet(source: $0) }
         .sheet(item: $editing) { ProjectEditorSheet(project: $0, isNew: false) }
+    }
+
+    private func dotColor(_ p: Project) -> Color {
+        StatusPill(status: p.status(store.snapshots[p.id])).color
     }
 }
