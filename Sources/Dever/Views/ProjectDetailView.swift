@@ -276,7 +276,9 @@ struct ProjectDetailView: View {
                     .font(.caption).foregroundStyle(.secondary)
             }
             if runs.isEmpty && loaded {
-                Text("No workflow runs yet.").font(.callout).foregroundStyle(.secondary)
+                Text(pullsScoped && pulls.isEmpty ? "No open pull requests, so no runs to show."
+                     : pullsScoped ? "No runs on these branches yet." : "No workflow runs yet.")
+                    .font(.callout).foregroundStyle(.secondary)
             }
             ForEach(runs.prefix(8)) { run in
                 HStack(spacing: 8) {
