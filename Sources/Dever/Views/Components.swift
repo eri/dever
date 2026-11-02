@@ -232,10 +232,10 @@ struct Skeleton: View {
             .frame(width: width, height: height)
             .frame(maxWidth: width == nil ? .infinity : nil, alignment: .leading)
             .opacity(dim ? 0.5 : 1)
-            .onAppear {
-                guard !reduceMotion else { return }
-                withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) { dim = true }
-            }
+            // Scoped to this view's opacity: a withAnimation here would leak the repeating
+            // animation into whatever else changes in the same transaction.
+            .animation(reduceMotion ? nil : .easeInOut(duration: 0.9).repeatForever(autoreverses: true), value: dim)
+            .onAppear { if !reduceMotion { dim = true } }
             .accessibilityHidden(true)
     }
 }

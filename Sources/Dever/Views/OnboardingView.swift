@@ -1,373 +1,257 @@
 import SwiftUI
 
-/// First run. Three stages, shown in order by position rather than by number:
-/// what Dever is (a bento board) and your name, then the accounts, then a first project.
+// First run, after the "product performs" direction: every screen is a short headline and one
+// control on the left; on the right, a crop of Dever's own window on a flat lime stage fills in
+// as you answer. Your name appears in its sidebar, each tool you connect lights its column, and
+// your first projects take their place in the list. Words are kept to a minimum; the "why" of
+// each tool lives in its tooltip.
+
+/// Where to go when onboarding ends.
+enum OnboardingExit { case overview, newProject, importSlack, importLinear }
+
+/// Soot and lime: black ground, one lime for actions and the stage behind the product.
+private enum Soot {
+    static let ground = Color(red: 0.059, green: 0.059, blue: 0.059)     // #0f0f0f
+    static let surface = Color(red: 0.102, green: 0.102, blue: 0.102)    // #1a1a1a
+    static let ink = Color.white
+    static let muted = Color(red: 0.56, green: 0.56, blue: 0.56)         // #8f8f8f
+    static let lime = Color(red: 0.855, green: 0.98, blue: 0.612)        // #dafa9c
+    static let limeInk = ground
+    static let radius: CGFloat = 8
+    static let margin: CGFloat = 40
+}
+
 struct OnboardingView: View {
-    enum Stage: Int, CaseIterable {
-        case welcome, connect, project
-        var label: String {
-            switch self {
-            case .welcome: "Welcome"
-            case .connect: "Connect"
-            case .project: "First project"
-            }
-        }
-    }
+    enum Stage: Int, CaseIterable { case name, connect, project }
 
     @EnvironmentObject var app: AppState
-    @AppStorage("displayName") private var displayName = ""
-    @State var stage: Stage = .welcome
+    @State var stage: Stage = .name
     let finish: (_ then: OnboardingExit) -> Void
 
     var body: some View {
         VStack(spacing: 0) {
-            progress
-                .padding(.horizontal, Onboarding.margin)
-                .padding(.top, 12)
-                .padding(.bottom, 20)
-            Group {
-                switch stage {
-                case .welcome: WelcomeStage(next: { stage = .connect })
-                case .connect: ConnectStage(back: { stage = .welcome }, next: { stage = .project })
-                case .project: FirstProjectStage(back: { stage = .connect }, finish: finish)
+            topBar
+            GeometryReader { geo in
+                HStack(spacing: 48) {
+                    controls
+                        .frame(width: geo.size.width * 5 / 12, alignment: .topLeading)
+                    StageView(stage: stage)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .padding(.horizontal, Soot.margin)
+            .padding(.bottom, Soot.margin)
         }
-        .background(Keynote.board)
+        .background(Soot.ground)
         .environment(\.colorScheme, .dark)
         .onReceive(NotificationCenter.default.publisher(for: .showOnboardingStage)) { note in
             if let raw = note.object as? Int, let s = Stage(rawValue: raw) { stage = s }
         }
     }
 
-    /// Setup progress at its true ratio, with the stages named instead of numbered.
-    private var progress: some View {
-        HStack(spacing: 16) {
+    private var topBar: some View {
+        HStack {
             HStack(spacing: 8) {
                 DeverMark().frame(width: 18, height: 18)
-                Text("Dever").font(Theme.bodyStrong).foregroundStyle(Theme.text)
+                Text("Dever").font(.system(size: 15, weight: .semibold)).foregroundStyle(Soot.ink)
             }
             Spacer()
-            HStack(spacing: 20) {
-                ForEach(Stage.allCases, id: \.self) { s in
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text(s.label)
-                            .font(s == stage ? Theme.smallStrong : Theme.small)
-                            .foregroundStyle(s.rawValue <= stage.rawValue ? Theme.text : Theme.muted)
-                        Capsule()
-                            .fill(s.rawValue <= stage.rawValue ? Theme.text : Theme.empty)
-                            .frame(width: 120, height: 3)
-                    }
-                    .accessibilityElement(children: .combine)
-                    .accessibilityAddTraits(s == stage ? .isSelected : [])
+            Button("Skip") { finish(.overview) }
+                .buttonStyle(.plain)
+                .font(.system(size: 14))
+                .foregroundStyle(Soot.muted)
+                .help("Go straight to Dever; set things up later in Accounts.")
+        }
+        .padding(.horizontal, Soot.margin)
+        .frame(height: 56)
+    }
+
+    // MARK: Left column: headline, one control, progress
+
+    private var controls: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Spacer(minLength: 0)
+            Group {
+                switch stage {
+                case .name: NameControls(next: { stage = .connect })
+                case .connect: ConnectControls(next: { stage = .project })
+                case .project: ProjectControls(finish: finish)
                 }
             }
-            Spacer()
-            Button("Skip setup") { finish(.overview) }
-                .buttonStyle(.link)
-                .font(Theme.small)
-                .help("Go straight to Dever. You can connect accounts later in Accounts.")
+            Spacer(minLength: 0)
+            progress
         }
-        .frame(height: 40)
     }
-}
 
-/// Where to go when onboarding ends.
-enum OnboardingExit { case overview, newProject, importSlack, importLinear }
-
-/// Board geometry and fills, after the bento brief: one gap, one radius, flat tiles,
-/// separation by fill contrast. Colours come from Dever's own palette.
-enum Onboarding {
-    static let gap: CGFloat = 12
-    static let margin: CGFloat = 28
-    static let radius: CGFloat = 22
-    static let pad: CGFloat = 24
-
-    static let board = Color(light: 0xEDEDEA, dark: 0x0A0B0D)
-    static let paper = Color(light: 0xFFFFFF, dark: 0x17191B)
-    static let ink = Color(light: 0x131416, dark: 0xF5F6F7)
-    static let dark = Color(light: 0x16181A, dark: 0x22262A)         // the dark tile in both themes
-    static let onDark = Color(light: 0xF5F6F7, dark: 0xF5F6F7)
-    static let tealTint = Color(light: 0xD9ECEF, dark: 0x13302F)
-    static let blueTint = Color(light: 0xDCE7F7, dark: 0x16253A)
-    static let amberTint = Color(light: 0xF6E7C6, dark: 0x332811)
-    static let teal = Color(light: 0x1B6C80, dark: 0x1B6C80)
-}
-
-// MARK: - Welcome: one centred column — the idea, then your name
-
-/// Keynote palette: black ground, light carried by the one object on screen.
-private enum Keynote {
-    static let board = Color(red: 0, green: 0, blue: 0)
-    static let raised = Color(red: 0.145, green: 0.145, blue: 0.157)      // #252528
-    static let text = Color.white
-    static let muted = Color(white: 0.62)
-    static let slack = Color(red: 0.31, green: 0.69, blue: 0.78)          // teal
-    static let linear = Color(red: 0.42, green: 0.64, blue: 0.90)         // blue
-    static let github = Color(red: 0.85, green: 0.64, blue: 0.25)         // amber
-}
-
-/// Dever's mark inside rings of light, with the three tools in orbit.
-private struct Constellation: View {
-    var diameter: CGFloat = 220
-
-    var body: some View {
-        let d = diameter
-        ZStack {
-            ForEach(0..<3) { i in
-                Circle()
-                    .stroke(AngularGradient(colors: [Keynote.slack, Keynote.linear, Keynote.github, Keynote.slack],
-                                            center: .center), lineWidth: 1.5)
-                    .frame(width: d * (0.62 + CGFloat(i) * 0.19), height: d * (0.62 + CGFloat(i) * 0.19))
-                    .opacity(0.5 - Double(i) * 0.14)
-                    .blur(radius: CGFloat(i) * 0.8)
+    /// Order shown by position: three marks, the current one long.
+    private var progress: some View {
+        HStack(spacing: 6) {
+            ForEach(Stage.allCases, id: \.self) { s in
+                Button { if s.rawValue < stage.rawValue { stage = s } } label: {
+                    Capsule()
+                        .fill(s == stage ? Soot.ink : s.rawValue < stage.rawValue ? Soot.muted : Soot.surface)
+                        .frame(width: s == stage ? 28 : 8, height: 8)
+                }
+                .buttonStyle(.plain)
+                .disabled(s.rawValue >= stage.rawValue)
+                .accessibilityLabel(["Name", "Connect", "First project"][s.rawValue])
+                .accessibilityAddTraits(s == stage ? .isSelected : [])
             }
-            Circle()
-                .fill(RadialGradient(colors: [Keynote.linear.opacity(0.3), .clear], center: .center,
-                                     startRadius: 0, endRadius: d * 0.45))
-                .frame(width: d * 0.9, height: d * 0.9)
-            DeverMark().frame(width: d * 0.24, height: d * 0.24)
-                .shadow(color: Keynote.slack.opacity(0.8), radius: 16)
-            orbit(.slack, color: Keynote.slack, angle: -150)
-            orbit(.linear, color: Keynote.linear, angle: -30)
-            orbit(.github, color: Keynote.github, angle: 90)
         }
-        .frame(width: d, height: d)
-        .accessibilityHidden(true)
-    }
-
-    private func orbit(_ service: ServiceKind, color: Color, angle: Double) -> some View {
-        let r = diameter * 0.405
-        return Image(systemName: service.symbol)
-            .font(.system(size: 13, weight: .semibold))
-            .foregroundStyle(color)
-            .frame(width: 34, height: 34)
-            .background(Keynote.raised, in: Circle())
-            .overlay(Circle().strokeBorder(color.opacity(0.45)))
-            .shadow(color: color.opacity(0.6), radius: 8)
-            .offset(x: r * cos(angle * .pi / 180), y: r * sin(angle * .pi / 180))
     }
 }
 
-private struct WelcomeStage: View {
+// MARK: - Shared controls
+
+private struct Headline: View {
+    let text: String
+    var body: some View {
+        Text(text)
+            .font(.system(size: 44, weight: .semibold))
+            .tracking(-1.5)
+            .foregroundStyle(Soot.ink)
+            .fixedSize(horizontal: false, vertical: true)
+            .accessibilityAddTraits(.isHeader)
+    }
+}
+
+private struct LimeButton: ButtonStyle {
+    @Environment(\.isEnabled) private var isEnabled
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.system(size: 15, weight: .semibold))
+            .foregroundStyle(Soot.limeInk)
+            .padding(.horizontal, 18)
+            .frame(height: 40)
+            .background(Soot.lime.opacity(isEnabled ? (configuration.isPressed ? 0.8 : 1) : 0.3),
+                        in: RoundedRectangle(cornerRadius: Soot.radius))
+    }
+}
+
+private struct QuietButton: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.system(size: 15, weight: .medium))
+            .foregroundStyle(Soot.ink)
+            .padding(.horizontal, 18)
+            .frame(height: 40)
+            .background(Soot.surface.opacity(configuration.isPressed ? 0.7 : 1),
+                        in: RoundedRectangle(cornerRadius: Soot.radius))
+    }
+}
+
+// MARK: - Name
+
+private struct NameControls: View {
     @AppStorage("displayName") private var displayName = ""
-    @FocusState private var nameFocused: Bool
+    @FocusState private var focused: Bool
     let next: () -> Void
 
     var body: some View {
-        VStack(spacing: 0) {
-            Spacer(minLength: 16)
-            Constellation(diameter: 220)
-            Text("Every project, in one place.")
-                .font(.system(size: 40, weight: .semibold))
-                .tracking(-0.8)
-                .foregroundStyle(Keynote.text)
-                .multilineTextAlignment(.center)
-                .padding(.top, 28)
-                .accessibilityAddTraits(.isHeader)
-            Text("Slack, Linear and GitHub, joined project by project.")
-                .font(.system(size: 17))
-                .foregroundStyle(Keynote.muted)
-                .multilineTextAlignment(.center)
-                .padding(.top, 10)
-            VStack(spacing: 12) {
-                Text("What should we call you?").font(.system(size: 13)).foregroundStyle(Keynote.muted)
-                TextField("Your name", text: $displayName,
-                          prompt: Text("Your name").foregroundStyle(Color.white.opacity(0.4)))
-                    .textFieldStyle(.plain)
-                    .font(.system(size: 15))
-                    .foregroundStyle(.white)
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal, 14)
-                    .frame(height: 42)
-                    .background(Keynote.raised, in: RoundedRectangle(cornerRadius: 12))
-                    .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Color.white.opacity(nameFocused ? 0.45 : 0.08)))
-                    .focused($nameFocused)
-                    .onSubmit(continueTapped)
-                    .accessibilityLabel("Your name, shown in Dever's sidebar")
-                Button(action: continueTapped) { Text("Get started").frame(maxWidth: .infinity) }
-                    .buttonStyle(OnDarkPrimaryStyle())
-                    .keyboardShortcut(.defaultAction)
-            }
-            .frame(width: 320)
-            .padding(.top, 40)
-            Spacer(minLength: 16)
+        VStack(alignment: .leading, spacing: 28) {
+            Headline(text: "What's your name?")
+            TextField("Name", text: $displayName, prompt: Text("Your name").foregroundStyle(Soot.muted))
+                .textFieldStyle(.plain)
+                .font(.system(size: 24, weight: .medium))
+                .foregroundStyle(Soot.ink)
+                .padding(.bottom, 10)
+                .overlay(alignment: .bottom) {
+                    Rectangle().fill(focused ? Soot.ink : Soot.muted.opacity(0.5)).frame(height: 1)
+                }
+                .frame(maxWidth: 360)
+                .focused($focused)
+                .onSubmit(go)
+                .accessibilityLabel("Your name")
+            Button("Continue", action: go)
+                .buttonStyle(LimeButton())
+                .keyboardShortcut(.defaultAction)
+                .disabled(displayName.trimmingCharacters(in: .whitespaces).isEmpty)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .padding([.horizontal, .bottom], Onboarding.margin)
         .onAppear {
-            if displayName.isEmpty { displayName = Self.suggestedName }
-            nameFocused = true
+            if displayName.isEmpty {
+                displayName = NSFullUserName().split(separator: " ").first.map(String.init) ?? ""
+            }
+            focused = true
         }
     }
 
-    private func continueTapped() {
-        let trimmed = displayName.trimmingCharacters(in: .whitespaces)
-        displayName = trimmed.isEmpty ? Self.suggestedName : trimmed
+    private func go() {
+        displayName = displayName.trimmingCharacters(in: .whitespaces)
+        guard !displayName.isEmpty else { return }
         next()
     }
-
-    /// The first name from the Mac account, as a starting point.
-    static var suggestedName: String {
-        NSFullUserName().split(separator: " ").first.map(String.init) ?? ""
-    }
 }
 
-private struct OnDarkPrimaryStyle: ButtonStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .font(Theme.bodyStrong)
-            .foregroundStyle(Onboarding.dark)
-            .frame(height: 40)
-            .background(Color.white.opacity(configuration.isPressed ? 0.85 : 1), in: RoundedRectangle(cornerRadius: 10))
-    }
-}
+// MARK: - Connect
 
-// MARK: - Connect: each tool, why Dever needs it, what it reads
-
-private struct ConnectStage: View {
+private struct ConnectControls: View {
     @EnvironmentObject var app: AppState
-    @AppStorage("displayName") private var displayName = ""
-    let back: () -> Void
     let next: () -> Void
     @State private var githubSheet = false
 
-    private var required: [ServiceKind] { [.slack, .linear] }
-    private var ready: Bool { required.allSatisfy(app.isConnected) }
-
     var body: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            VStack(alignment: .leading, spacing: 6) {
-                Text(displayName.isEmpty ? "Connect your tools" : "Connect your tools, \(displayName)")
-                    .font(.system(size: 28, weight: .semibold)).tracking(-0.4).foregroundStyle(Theme.text)
-                    .accessibilityAddTraits(.isHeader)
-                Text("Dever reads them to build each project's view. You approve each one in your browser; there is no API key to create, and you can disconnect at any time in Accounts.")
-                    .font(Theme.body).foregroundStyle(Theme.muted)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .frame(maxWidth: 640, alignment: .leading)
+        VStack(alignment: .leading, spacing: 28) {
+            Headline(text: "Connect your tools")
+            VStack(spacing: 8) {
+                ServiceRow(service: .slack, why: "Each project's channel and its latest messages.", githubSheet: $githubSheet)
+                ServiceRow(service: .linear, why: "Each project's issues, to measure delivery.", githubSheet: $githubSheet)
+                ServiceRow(service: .github, why: "Pull requests and pipeline. Optional.", githubSheet: $githubSheet)
             }
-            HStack(alignment: .top, spacing: Onboarding.gap) {
-                ConnectCard(service: .slack, required: true,
-                            why: "Projects live in Slack channels. Dever finds them by name, shows each channel's latest messages and can create channels for new projects.",
-                            reads: ["Channel list and history", "Member names", "Create channels (only when you ask)"],
-                            githubSheet: $githubSheet)
-                ConnectCard(service: .linear, required: true,
-                            why: "Each project's issues and their states. That is how Dever measures delivery and spots tickets that fell behind the code.",
-                            reads: ["Projects, teams and issues", "Create projects (only when you ask)"],
-                            githubSheet: $githubSheet)
-                ConnectCard(service: .github, required: false,
-                            why: "Pull requests and pipeline runs, matched to Linear issues. Optional: skip it if your team doesn't use GitHub.",
-                            reads: ["Repositories you can access", "Pull requests and workflow runs"],
-                            githubSheet: $githubSheet)
-            }
-            .fixedSize(horizontal: false, vertical: true)
-            privacy
-            Spacer(minLength: 0)
-            HStack(spacing: 12) {
-                Button("Back", action: back).buttonStyle(SecondaryButtonStyle())
-                Spacer()
-                if !ready {
-                    Text("Connect Slack and Linear to continue, or skip for now.")
-                        .font(Theme.small).foregroundStyle(Theme.muted)
-                    Button("Skip for now", action: next).buttonStyle(.link).font(Theme.small)
-                }
+            .frame(maxWidth: 400)
+            HStack(spacing: 16) {
                 Button("Continue", action: next)
-                    .buttonStyle(PrimaryButtonStyle())
+                    .buttonStyle(LimeButton())
                     .keyboardShortcut(.defaultAction)
-                    .disabled(!ready)
+                    .disabled(app.slack == nil || app.linear == nil)
+                Label("Stays on this Mac", systemImage: "lock")
+                    .font(.system(size: 13))
+                    .foregroundStyle(Soot.muted)
+                    .help("No Dever server: tokens stay in your Keychain, and Dever never posts on your behalf.")
             }
         }
-        .padding(32)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(Onboarding.paper, in: RoundedRectangle(cornerRadius: Onboarding.radius))
-        .padding([.horizontal, .bottom], Onboarding.margin)
         .sheet(isPresented: $githubSheet) { GitHubLoginSheet() }
     }
 }
 
-private extension ConnectStage {
-    /// What new users ask before granting access.
-    var privacy: some View {
-        HStack(alignment: .top, spacing: 12) {
-            Image(systemName: "lock").foregroundStyle(Theme.text).accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Your data stays on this Mac").font(Theme.bodyStrong).foregroundStyle(Theme.text)
-                Text("Dever talks to Slack, Linear and GitHub directly; there is no Dever server. Access tokens sit in the macOS Keychain. Dever never posts messages, and only creates a channel or a project when you ask it to.")
-                    .font(Theme.small).foregroundStyle(Theme.muted)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-        }
-        .padding(16)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Theme.raised, in: RoundedRectangle(cornerRadius: 16))
-    }
-}
-
-private struct ConnectCard: View {
+private struct ServiceRow: View {
     @EnvironmentObject var app: AppState
     let service: ServiceKind
-    let required: Bool
     let why: String
-    let reads: [String]
     @Binding var githubSheet: Bool
     @State private var flow: Task<Void, Never>?
     @State private var error: String?
 
-    private var connectedAs: String? {
-        switch service {
-        case .slack: app.slack.map { "\($0.teamName) workspace" }
-        case .linear: app.linear.map { "\($0.account.orgName), as \($0.account.userName)" }
-        case .github: app.github.map { "@\($0.login)" }
-        }
-    }
-
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack(spacing: 10) {
-                Image(systemName: service.symbol).font(.system(size: 18)).foregroundStyle(Theme.text)
-                    .frame(width: 22).accessibilityHidden(true)
-                Text(service.label).font(Theme.section).foregroundStyle(Theme.text)
-                Spacer()
-                Pill(text: required ? "Needed" : "Optional", tone: .neutral)
+        HStack(spacing: 12) {
+            Image(systemName: service.symbol)
+                .font(.system(size: 15, weight: .medium))
+                .foregroundStyle(Soot.ink)
+                .frame(width: 22)
+                .accessibilityHidden(true)
+            Text(service.label).font(.system(size: 16, weight: .medium)).foregroundStyle(Soot.ink)
+            if service == .github {
+                Text("Optional").font(.system(size: 13)).foregroundStyle(Soot.muted)
             }
-            Text(why).font(Theme.body).foregroundStyle(Theme.text)
-                .fixedSize(horizontal: false, vertical: true)
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Dever can").font(Theme.smallStrong).foregroundStyle(Theme.muted)
-                ForEach(reads, id: \.self) { item in
-                    Label {
-                        Text(item).foregroundStyle(Theme.text)
-                    } icon: {
-                        Image(systemName: "checkmark").foregroundStyle(Theme.muted)
-                    }
-                    .font(Theme.small)
-                }
-            }
-            Spacer(minLength: 0)
-            if let error { ErrorLabel(error) }
-            if let connectedAs {
-                Label {
-                    Text("Connected to \(connectedAs)").foregroundStyle(Theme.text)
-                } icon: {
-                    Image(systemName: "checkmark.circle.fill").foregroundStyle(Theme.positive)
-                }
-                .font(Theme.bodyStrong)
-                .frame(height: 32)
+            Spacer()
+            if app.isConnected(service) {
+                Image(systemName: "checkmark.circle.fill").foregroundStyle(Soot.lime)
+                    .font(.system(size: 18))
+                    .accessibilityLabel("\(service.label) connected")
             } else if flow != nil {
-                HStack(spacing: 12) {
-                    Text("Approve in your browser…").font(Theme.body).foregroundStyle(Theme.muted)
-                    Button("Cancel") { flow?.cancel(); flow = nil }.buttonStyle(.link)
-                }
-                .frame(height: 32)
+                Button("Cancel") { flow?.cancel(); flow = nil }
+                    .buttonStyle(.plain).font(.system(size: 14)).foregroundStyle(Soot.muted)
             } else {
-                Button("Connect \(service.label)", action: connect)
-                    .buttonStyle(required ? AnyButtonStyle(PrimaryButtonStyle()) : AnyButtonStyle(SecondaryButtonStyle()))
+                Button("Connect", action: connect).buttonStyle(.plain)
+                    .font(.system(size: 14, weight: .semibold)).foregroundStyle(Soot.lime)
             }
         }
-        .padding(20)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(Theme.raised, in: RoundedRectangle(cornerRadius: 16))
+        .padding(.horizontal, 16)
+        .frame(height: 52)
+        .background(Soot.surface, in: RoundedRectangle(cornerRadius: Soot.radius))
+        .overlay(alignment: .bottomLeading) {
+            if let error { Text(error).font(.system(size: 12)).foregroundStyle(.red).offset(y: 18).lineLimit(1) }
+        }
+        .help(why)
     }
 
     private func connect() {
@@ -389,117 +273,244 @@ private struct ConnectCard: View {
     }
 }
 
-/// Lets one control pick between two button styles.
-private struct AnyButtonStyle: ButtonStyle {
-    private let make: (Configuration) -> AnyView
-    init<S: ButtonStyle>(_ style: S) { make = { AnyView(style.makeBody(configuration: $0)) } }
-    func makeBody(configuration: Configuration) -> some View { make(configuration) }
-}
+// MARK: - First project
 
-// MARK: - First project: naming convention, a way in, notifications
-
-private struct FirstProjectStage: View {
+private struct ProjectControls: View {
     @EnvironmentObject var app: AppState
-    @AppStorage("slackChannelPrefix") private var channelPrefix = "proj-"
-    let back: () -> Void
     let finish: (OnboardingExit) -> Void
-    @State private var notifications: Bool?
+    @State private var notificationsOn = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Add your first project")
-                    .font(.system(size: 28, weight: .semibold)).tracking(-0.4).foregroundStyle(Theme.text)
-                    .accessibilityAddTraits(.isHeader)
-                Text("A project joins a Slack channel and a Linear project. Bring in the ones you already have, or start a new one.")
-                    .font(Theme.body).foregroundStyle(Theme.muted)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            HStack(alignment: .top, spacing: Onboarding.gap) {
-                choice(title: "From Slack channels", symbol: ServiceKind.slack.symbol,
-                       text: "Lists channels named with your prefix and pairs each with its Linear project.",
-                       action: "Import from Slack", exit: .importSlack, enabled: app.slack != nil,
-                       disabledReason: "Connect Slack first.") {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("Channel prefix").font(Theme.smallStrong).foregroundStyle(Theme.muted)
-                        TextField("Prefix", text: $channelPrefix, prompt: Text("proj-"))
-                            .textFieldStyle(.roundedBorder).frame(maxWidth: 180).labelsHidden()
-                        Text("e.g. #\(Naming.channelName(for: "Checkout redesign", prefix: channelPrefix))")
-                            .font(Theme.small).foregroundStyle(Theme.muted)
-                    }
+        VStack(alignment: .leading, spacing: 28) {
+            Headline(text: "Add your projects")
+            VStack(alignment: .leading, spacing: 8) {
+                Button { finish(.importSlack) } label: { Label("Import from Slack", systemImage: ServiceKind.slack.symbol) }
+                    .buttonStyle(LimeButton())
+                    .disabled(app.slack == nil)
+                    .help("Finds channels named with your project prefix and pairs each with its Linear project.")
+                HStack(spacing: 8) {
+                    Button { finish(.importLinear) } label: { Label("From Linear", systemImage: ServiceKind.linear.symbol) }
+                        .buttonStyle(QuietButton())
+                        .disabled(app.linear == nil)
+                    Button { finish(.newProject) } label: { Label("New project", systemImage: "plus") }
+                        .buttonStyle(QuietButton())
                 }
-                choice(title: "From Linear projects", symbol: ServiceKind.linear.symbol,
-                       text: "Lists your Linear projects and finds the matching Slack channel for each.",
-                       action: "Import from Linear", exit: .importLinear, enabled: app.linear != nil,
-                       disabledReason: "Connect Linear first.") { EmptyView() }
-                choice(title: "Start a new one", symbol: "plus",
-                       text: "Creates the Slack channel and the Linear project for you, or links existing ones.",
-                       action: "New project", exit: .newProject, enabled: true, disabledReason: nil) { EmptyView() }
             }
-            .fixedSize(horizontal: false, vertical: true)
-            notificationsRow
-            Spacer(minLength: 0)
-            HStack {
-                Button("Back", action: back).buttonStyle(SecondaryButtonStyle())
-                Spacer()
-                Button("I'll do it later") { finish(.overview) }.buttonStyle(.link).font(Theme.small)
+            Toggle(isOn: Binding(get: { notificationsOn }, set: { on in
+                guard on else { return }
+                Task {
+                    _ = await Notifier.shared.requestAuthorization()
+                    notificationsOn = await Notifier.shared.authorizationStatus() == .authorized
+                }
+            })) {
+                Text("Alert me when a project needs me").font(.system(size: 14)).foregroundStyle(Soot.ink)
+            }
+            .toggleStyle(.switch)
+            .tint(Soot.lime)
+            .disabled(notificationsOn)
+            .help("A failing pipeline, a missed target date, merged work whose ticket didn't move.")
+        }
+        .task { notificationsOn = await Notifier.shared.authorizationStatus() == .authorized }
+    }
+}
+
+// MARK: - The stage: Dever's own window, filling in
+
+private struct StageView: View {
+    @EnvironmentObject var app: AppState
+    @AppStorage("displayName") private var displayName = ""
+    let stage: OnboardingView.Stage
+
+    var body: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: Soot.radius).fill(Soot.lime)
+            GeometryReader { geo in
+                // The crop is drawn at true size, then scaled to fill most of the stage's height.
+                // Fit the height, and the width up to the GitHub column (the right edge may crop).
+                let scale = max(0.7, min(1.5, (geo.size.height - 120) / 380, (geo.size.width - 56) / 640))
+                DeverWindowCrop(name: displayName, stage: stage,
+                                slack: app.slack != nil, linear: app.linear != nil, github: app.github != nil)
+                    .scaleEffect(scale, anchor: .leading)
+                    .frame(width: geo.size.width - 56, height: geo.size.height, alignment: .leading)
+                    .offset(x: 56)
             }
         }
-        .padding(32)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(Onboarding.paper, in: RoundedRectangle(cornerRadius: Onboarding.radius))
-        .padding([.horizontal, .bottom], Onboarding.margin)
-        .task { notifications = await Notifier.shared.authorizationStatus() == .authorized }
+        .clipShape(RoundedRectangle(cornerRadius: Soot.radius))
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Preview of Dever")
+    }
+}
+
+/// A crop of the real interface (sidebar and project list), in Dever's own components,
+/// running off the stage's right edge like a window seen through a frame.
+private struct DeverWindowCrop: View {
+    let name: String
+    let stage: OnboardingView.Stage
+    let slack: Bool
+    let linear: Bool
+    let github: Bool
+
+    private struct Sample {
+        let name: String
+        let channel: String
+        let status: ProjectStatus
+        let delivery: Delivery
+        let pipeline: ProjectSnapshot.PipelineState
+        let messages: Int
     }
 
-    private func choice<Extra: View>(title: String, symbol: String, text: String, action: String,
-                                     exit: OnboardingExit, enabled: Bool, disabledReason: String?,
-                                     @ViewBuilder extra: () -> Extra) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 10) {
-                Image(systemName: symbol).font(.system(size: 16)).foregroundStyle(Theme.text).frame(width: 22)
-                    .accessibilityHidden(true)
-                Text(title).font(Theme.section).foregroundStyle(Theme.text)
-            }
-            Text(text).font(Theme.body).foregroundStyle(Theme.text).fixedSize(horizontal: false, vertical: true)
-            extra()
-            Spacer(minLength: 0)
-            Button(action) { finish(exit) }
-                .buttonStyle(exit == .importSlack ? AnyButtonStyle(PrimaryButtonStyle()) : AnyButtonStyle(SecondaryButtonStyle()))
-                .disabled(!enabled)
-            if !enabled, let disabledReason {
-                Text(disabledReason).font(Theme.small).foregroundStyle(Theme.muted)
-            }
+    private static func delivery(_ done: Int, _ merged: Int, _ review: Int, _ building: Int, _ todo: Int) -> Delivery {
+        var issues: [(identifier: String, stateType: String, stateName: String)] = []
+        func add(_ n: Int, _ type: String, _ name: String) {
+            for _ in 0..<n { issues.append(("X-\(issues.count)", type, name)) }
         }
-        .padding(20)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(Theme.raised, in: RoundedRectangle(cornerRadius: 16))
+        add(done, "completed", "Done"); add(review, "started", "In Review")
+        add(building, "started", "In Progress"); add(todo, "unstarted", "Todo")
+        let mergedIDs = Set((0..<merged).map { "M-\($0)" })
+        for id in mergedIDs { issues.append((id, "started", "In Progress")) }
+        return Delivery(issues: issues, openPR: [], mergedPR: mergedIDs)
     }
 
-    private var notificationsRow: some View {
-        HStack(spacing: 12) {
-            Image(systemName: "bell").foregroundStyle(Theme.text).accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Get told when a project needs you").font(Theme.bodyStrong).foregroundStyle(Theme.text)
-                Text("A failing pipeline, a missed target date, merged work whose ticket didn't move. Once per situation.")
-                    .font(Theme.small).foregroundStyle(Theme.muted)
+    private let samples: [Sample] = [
+        Sample(name: "Checkout redesign", channel: "#proj-checkout", status: .needsAttention,
+               delivery: delivery(9, 1, 3, 2, 3), pipeline: .failing, messages: 42),
+        Sample(name: "Mobile app", channel: "#proj-mobile", status: .onTrack,
+               delivery: delivery(14, 0, 2, 3, 5), pipeline: .passing, messages: 18),
+        Sample(name: "Billing v2", channel: "#proj-billing", status: .onTrack,
+               delivery: delivery(4, 0, 1, 2, 9), pipeline: .passing, messages: 7),
+    ]
+
+    /// Projects show once the user reaches the last screen.
+    private var showsProjects: Bool { stage == .project }
+
+    var body: some View {
+        HStack(spacing: 0) {
+            sidebar.frame(width: 180)
+            Rectangle().fill(Theme.border).frame(width: 1)
+            list.frame(width: 500)
+        }
+        .frame(height: 380)
+        .background(Theme.sheet)
+        .clipShape(UnevenRoundedRectangle(topLeadingRadius: 10, bottomLeadingRadius: 10))
+        .shadow(color: .black.opacity(0.25), radius: 24, y: 12)
+    }
+
+    private var sidebar: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 8) {
+                DeverMark().frame(width: 16, height: 16)
+                Text("Dever").font(Theme.bodyStrong).foregroundStyle(Theme.text)
+            }
+            .padding(.bottom, 14)
+            row(symbol: "square.grid.2x2", text: "Overview", selected: stage != .name)
+            Text("Projects").font(Theme.small).foregroundStyle(Theme.muted).padding(.top, 14).padding(.leading, 8)
+            if showsProjects {
+                ForEach(samples, id: \.name) { s in
+                    HStack(spacing: 8) {
+                        Image(systemName: s.status.symbol).foregroundStyle(s.status.tint).imageScale(.small).frame(width: 14)
+                        Text(s.name).font(Theme.body).foregroundStyle(Theme.text).lineLimit(1)
+                    }
+                    .padding(.horizontal, 8).frame(height: 28)
+                    .transition(.opacity)
+                }
+            } else {
+                ForEach(0..<3, id: \.self) { i in
+                    Skeleton(width: [100, 76, 88][i], height: 10).padding(.horizontal, 8).frame(height: 28)
+                }
             }
             Spacer()
-            if notifications == true {
-                Label("Notifications on", systemImage: "checkmark.circle.fill")
-                    .font(Theme.bodyStrong).foregroundStyle(Theme.positive)
-            } else {
-                Button("Turn on notifications") {
-                    Task {
-                        _ = await Notifier.shared.requestAuthorization()
-                        notifications = await Notifier.shared.authorizationStatus() == .authorized
-                    }
-                }
-                .buttonStyle(SecondaryButtonStyle())
+            HStack(spacing: 8) {
+                Text(String((name.isEmpty ? "?" : name).prefix(1)).uppercased())
+                    .font(.system(size: 11, weight: .semibold)).foregroundStyle(Theme.chart1)
+                    .frame(width: 22, height: 22)
+                    .background(Theme.chart1.opacity(0.15), in: Circle())
+                Text(name.isEmpty ? "Your name" : name)
+                    .font(Theme.body).foregroundStyle(name.isEmpty ? Theme.muted : Theme.text).lineLimit(1)
             }
+            .padding(.horizontal, 8).frame(height: 40)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(stage == .name ? Theme.active : .clear, in: RoundedRectangle(cornerRadius: 8))
+            .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(stage == .name ? Soot.lime : .clear, lineWidth: 1.5))
         }
-        .padding(16)
-        .background(Theme.raised, in: RoundedRectangle(cornerRadius: 16))
+        .padding(14)
+        .frame(maxHeight: .infinity, alignment: .top)
+        .background(Theme.frame)
+    }
+
+    private func row(symbol: String, text: String, selected: Bool) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: symbol).foregroundStyle(Theme.muted).frame(width: 14)
+            Text(text).font(Theme.body).foregroundStyle(Theme.text)
+        }
+        .padding(.horizontal, 8).frame(height: 28)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(selected ? Theme.active : .clear, in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    private var list: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text("Overview").font(Theme.section).foregroundStyle(Theme.text).padding(.bottom, 14)
+            HStack(spacing: 16) {
+                Text("Project").foregroundStyle(Theme.muted).frame(width: 130, alignment: .leading)
+                header("Slack", lit: slack, width: 50)
+                header("Linear", lit: linear, width: 140)
+                header("GitHub", lit: github, width: 80)
+            }
+            .font(Theme.small)
+            .frame(height: 28)
+            ForEach(Array(samples.enumerated()), id: \.offset) { _, s in
+                Rectangle().fill(Theme.rule).frame(height: 1)
+                projectRow(s)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(20)
+    }
+
+    private func header(_ text: String, lit: Bool, width: CGFloat) -> some View {
+        HStack(spacing: 4) {
+            Text(text)
+            if lit { Circle().fill(Theme.positive).frame(width: 5, height: 5) }
+        }
+        .foregroundStyle(lit ? Theme.text : Theme.muted)
+        .frame(width: width, alignment: .leading)
+    }
+
+    private func projectRow(_ s: Sample) -> some View {
+        HStack(spacing: 16) {
+            Group {
+                if showsProjects {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(s.name).font(Theme.bodyStrong).foregroundStyle(Theme.text).lineLimit(1)
+                        Text(s.channel).font(Theme.small).foregroundStyle(Theme.muted).lineLimit(1)
+                    }
+                } else {
+                    VStack(alignment: .leading, spacing: 6) { Skeleton(width: 110, height: 10); Skeleton(width: 70, height: 8) }
+                }
+            }
+            .frame(width: 130, alignment: .leading)
+            cell(lit: slack, width: 50) {
+                Text("\(s.messages)").font(Theme.body).foregroundStyle(Theme.text).monospacedDigit()
+            }
+            cell(lit: linear, width: 140) {
+                VStack(alignment: .leading, spacing: 4) {
+                    DeliveryStrip(delivery: s.delivery, height: 6)
+                    Text("\(s.delivery.shipped)/\(s.delivery.total) shipped").font(Theme.small).foregroundStyle(Theme.muted)
+                        .monospacedDigit()
+                }
+            }
+            cell(lit: github, width: 80) { PipelineBadge(state: s.pipeline).font(Theme.small) }
+        }
+        .frame(height: 58)
+    }
+
+    /// A column shows its data once its tool is connected (from the connect screen on), a skeleton before.
+    @ViewBuilder
+    private func cell<C: View>(lit: Bool, width: CGFloat, @ViewBuilder content: () -> C) -> some View {
+        Group {
+            if lit && stage != .name { content() } else { Skeleton(width: width * 0.6, height: 10) }
+        }
+        .frame(width: width, alignment: .leading)
     }
 }
 
