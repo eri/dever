@@ -62,22 +62,22 @@ struct ProjectEditorSheet: View {
                 Text("A Dever project follows one Slack channel and one Linear project.")
                     .font(.system(size: 14)).foregroundStyle(Soot.muted)
             }
-            ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    VStack(alignment: .leading, spacing: 8) {
-                        FieldLabel(text: "Name in Dever")
-                        UnderlineField(placeholder: "e.g. Checkout redesign", text: $project.name, size: 20)
-                            .accessibilityLabel("Name in Dever")
-                        if let nameError { ErrorLabel(nameError) }
-                    }
-                    .padding(.bottom, 8)
-                    slackSection
-                    linearSection
-                    githubSection
-                    ForEach(catalog.errors + [error].compactMap { $0 }, id: \.self) { ErrorLabel($0) }
-                }
-                .padding(.bottom, 8)
+            VStack(alignment: .leading, spacing: 8) {
+                FieldLabel(text: "Name in Dever")
+                UnderlineField(placeholder: "e.g. Checkout redesign", text: $project.name, size: 20)
+                    .accessibilityLabel("Name in Dever")
+                if let nameError { ErrorLabel(nameError) }
             }
+            // One row per tool: what it is on the left, the one choice on the right.
+            VStack(spacing: 0) {
+                slackRow
+                Rectangle().fill(Soot.ground).frame(height: 1)
+                linearRow
+                Rectangle().fill(Soot.ground).frame(height: 1)
+                githubRow
+            }
+            .background(Soot.surface, in: RoundedRectangle(cornerRadius: Soot.radius))
+            ForEach(catalog.errors + [error].compactMap { $0 }, id: \.self) { ErrorLabel($0) }
             HStack(spacing: 12) {
                 Text(saving ? "Saving…" : consequence)
                     .font(.system(size: 13)).foregroundStyle(Soot.muted).lineLimit(2)
@@ -88,8 +88,10 @@ struct ProjectEditorSheet: View {
                     .keyboardShortcut(.defaultAction)
                     .disabled(saving)
             }
+            .padding(.top, 4)
         }
-        .sootSheet(width: 560, height: 680)
+        .sootSheet(width: 580)
+        .fixedSize(horizontal: false, vertical: true)
         .task {
             // New projects default to creating what's missing; edits never create anything implicitly.
             let defaultMode: SlackMode = isNew ? .create : .none
@@ -104,142 +106,114 @@ struct ProjectEditorSheet: View {
         .onChange(of: project.name) { _, _ in autoMatch() }
     }
 
-    /// One linked tool: what it is, the question, its options, and the field the chosen option needs.
-    private func block<Content: View>(_ service: ServiceKind, title: String, @ViewBuilder content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 10) {
+    private static let newItem = "__new__"
+
+    /// A tool's row: logo and name, then its control (or why there is none).
+    private func toolRow<Control: View, Extra: View>(_ service: ServiceKind, title: String,
+                                                     @ViewBuilder control: () -> Control,
+                                                     @ViewBuilder extra: () -> Extra) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 12) {
                 BrandLogo(service: service, size: 18).foregroundStyle(Soot.ink)
-                Text(title).font(.system(size: 16, weight: .semibold)).foregroundStyle(Soot.ink)
-                    .accessibilityAddTraits(.isHeader)
+                Text(title).font(.system(size: 15, weight: .semibold)).foregroundStyle(Soot.ink)
+                    .frame(width: 150, alignment: .leading)
+                if app.isConnected(service) {
+                    if catalog.loading {
+                        Skeleton(width: 200, height: 14)
+                    } else {
+                        control().labelsHidden().frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                } else {
+                    Text("Connect \(service.label) in Accounts").font(.system(size: 13)).foregroundStyle(Soot.muted)
+                }
+                Spacer(minLength: 0)
             }
-            content()
+            extra()
         }
         .padding(16)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Soot.surface, in: RoundedRectangle(cornerRadius: Soot.radius))
         .accessibilityElement(children: .contain)
         .accessibilityLabel(title)
     }
 
-    private func notConnected(_ service: ServiceKind) -> some View {
-        Text("\(service.label) isn't connected. Connect it in Accounts to link one.")
-            .font(.system(size: 13)).foregroundStyle(Soot.muted)
-    }
-
-    /// The field under a chosen option, aligned with the option's text.
-    private func optionField<Content: View>(_ label: String, @ViewBuilder content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            FieldLabel(text: label)
-            content()
-        }
-        .padding(.leading, 30)
-        .padding(.bottom, 4)
-    }
-
-    private var slackSection: some View {
-        block(.slack, title: "Slack channel") {
-            if app.slack == nil {
-                notConnected(.slack)
-            } else {
-                RadioRow(title: "Use an existing channel", selected: slackMode == .existing) { slackMode = .existing }
-                if slackMode == .existing {
-                    optionField("Channel") {
-                        if catalog.loading {
-                            Skeleton(width: 200, height: 14)
-                        } else {
-                            Picker("Channel", selection: $slackPick) {
-                                Text("Choose a channel").tag(String?.none)
-                                ForEach(availableChannels) { Text("#\($0.name)").tag(Optional($0.id)) }
-                            }
-                            .labelsHidden()
-                            .frame(maxWidth: 300, alignment: .leading)
-                        }
+    private var slackRow: some View {
+        toolRow(.slack, title: "Slack channel") {
+            Picker("Slack channel", selection: Binding<String?>(
+                get: { slackMode == .create ? Self.newItem : slackMode == .existing ? slackPick : nil },
+                set: { v in
+                    switch v {
+                    case nil: slackMode = .none
+                    case Self.newItem?: slackMode = .create
+                    case let id?: slackMode = .existing; slackPick = id
                     }
+                })) {
+                Text("Not linked").tag(String?.none)
+                Text("New channel…").tag(Optional(Self.newItem))
+                Divider()
+                ForEach(availableChannels) { Text("#\($0.name)").tag(Optional($0.id)) }
+            }
+        } extra: {
+            if slackMode == .create && app.slack != nil {
+                HStack(spacing: 10) {
+                    FieldLabel(text: "Name")
+                    UnderlineField(placeholder: Naming.channelName(for: project.name.isEmpty ? "project" : project.name,
+                                                                   prefix: channelPrefix),
+                                   text: $newChannelName, size: 15)
+                        .accessibilityLabel("New channel name")
+                    Toggle("Private", isOn: $privateChannel).toggleStyle(.switch).tint(Soot.lime).fixedSize()
                 }
-                RadioRow(title: "Create a new channel", selected: slackMode == .create) { slackMode = .create }
-                if slackMode == .create {
-                    optionField("Channel name") {
-                        HStack(spacing: 16) {
-                            UnderlineField(placeholder: Naming.channelName(for: project.name.isEmpty ? "project" : project.name,
-                                                                           prefix: channelPrefix),
-                                           text: $newChannelName, size: 15)
-                                .accessibilityLabel("New channel name")
-                            Toggle("Private", isOn: $privateChannel).toggleStyle(.switch).tint(Soot.lime).fixedSize()
-                        }
-                    }
-                }
-                RadioRow(title: "Don't link a channel for now", selected: slackMode == .none) { slackMode = .none }
+                .padding(.leading, 30)
             }
         }
     }
 
-    private var linearSection: some View {
-        block(.linear, title: "Linear project") {
-            if app.linear == nil {
-                notConnected(.linear)
-            } else {
-                RadioRow(title: "Use an existing Linear project", selected: linearMode == .existing) { linearMode = .existing }
-                if linearMode == .existing {
-                    optionField("Project") {
-                        if catalog.loading {
-                            Skeleton(width: 200, height: 14)
-                        } else {
-                            Picker("Project", selection: $linearPick) {
-                                Text("Choose a project").tag(String?.none)
-                                ForEach(availableLinear) { Text($0.name).tag(Optional($0.id)) }
-                            }
-                            .labelsHidden()
-                            .frame(maxWidth: 300, alignment: .leading)
-                        }
+    private var linearRow: some View {
+        toolRow(.linear, title: "Linear project") {
+            Picker("Linear project", selection: Binding<String?>(
+                get: { linearMode == .create ? Self.newItem : linearMode == .existing ? linearPick : nil },
+                set: { v in
+                    switch v {
+                    case nil: linearMode = .none
+                    case Self.newItem?: linearMode = .create
+                    case let id?: linearMode = .existing; linearPick = id
                     }
-                }
-                RadioRow(title: "Create a new Linear project", selected: linearMode == .create) { linearMode = .create }
-                if linearMode == .create {
-                    optionField("In team") {
-                        if catalog.loading {
-                            Skeleton(width: 160, height: 14)
-                        } else {
-                            Picker("Team", selection: $teamPick) {
-                                ForEach(catalog.teams) { Text($0.name).tag(Optional($0.id)) }
-                            }
-                            .labelsHidden()
-                            .frame(maxWidth: 240, alignment: .leading)
-                        }
-                    }
-                }
-                RadioRow(title: "Don't link a project for now", selected: linearMode == .none) { linearMode = .none }
+                })) {
+                Text("Not linked").tag(String?.none)
+                Text("New project…").tag(Optional(Self.newItem))
+                Divider()
+                ForEach(availableLinear) { Text($0.name).tag(Optional($0.id)) }
             }
-        }
-    }
-
-    private var githubSection: some View {
-        block(.github, title: "GitHub repository · optional") {
-            if app.github == nil {
-                notConnected(.github)
-            } else if catalog.loading {
-                Skeleton(width: 220, height: 14)
-            } else {
-                VStack(alignment: .leading, spacing: 6) {
-                    FieldLabel(text: "Repository")
-                    Picker("Repository", selection: $project.githubRepo) {
-                        Text("No repository").tag(String?.none)
-                        ForEach(catalog.repos) { Text($0.full_name).tag(Optional($0.full_name)) }
+        } extra: {
+            if linearMode == .create && app.linear != nil && !catalog.loading {
+                HStack(spacing: 10) {
+                    FieldLabel(text: "In team")
+                    Picker("Team", selection: $teamPick) {
+                        ForEach(catalog.teams) { Text($0.name).tag(Optional($0.id)) }
                     }
                     .labelsHidden()
-                    .frame(maxWidth: 320, alignment: .leading)
+                    .frame(maxWidth: 220, alignment: .leading)
                 }
-                if project.githubRepo != nil {
-                    Toggle(isOn: Binding(get: { project.githubWholeRepo == true },
-                                         set: { project.githubWholeRepo = $0 })) {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Count every pull request").font(.system(size: 14)).foregroundStyle(Soot.ink)
-                            Text("Off: only those linked to this project's Linear issues").font(.system(size: 12))
-                                .foregroundStyle(Soot.muted)
-                        }
-                    }
-                    .toggleStyle(.switch)
-                    .tint(Soot.lime)
+                .padding(.leading, 30)
+            }
+        }
+    }
+
+    private var githubRow: some View {
+        toolRow(.github, title: "GitHub repository") {
+            Picker("GitHub repository", selection: $project.githubRepo) {
+                Text("Not linked").tag(String?.none)
+                Divider()
+                ForEach(catalog.repos) { Text($0.full_name).tag(Optional($0.full_name)) }
+            }
+        } extra: {
+            if project.githubRepo != nil && app.github != nil {
+                Toggle(isOn: Binding(get: { project.githubWholeRepo == true },
+                                     set: { project.githubWholeRepo = $0 })) {
+                    Text("Count every pull request, not only those linked to this project's issues")
+                        .font(.system(size: 13)).foregroundStyle(Soot.ink)
                 }
+                .toggleStyle(.switch)
+                .tint(Soot.lime)
+                .padding(.leading, 30)
             }
         }
     }
