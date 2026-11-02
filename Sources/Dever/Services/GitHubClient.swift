@@ -151,8 +151,17 @@ struct GitHubClient {
         try await get("/repos/\(repo)/pulls?state=open&per_page=30")
     }
 
-    func runs(_ repo: String) async throws -> [GitHubRun] {
+    func runs(_ repo: String, branch: String? = nil) async throws -> [GitHubRun] {
         struct R: Decodable { var workflow_runs: [GitHubRun] }
-        return try await get("/repos/\(repo)/actions/runs?per_page=15", as: R.self).workflow_runs
+        var path = "/repos/\(repo)/actions/runs?per_page=15"
+        if let branch, let encoded = branch.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) {
+            path += "&branch=\(encoded)"
+        }
+        return try await get(path, as: R.self).workflow_runs
+    }
+
+    func defaultBranch(_ repo: String) async throws -> String {
+        struct R: Decodable { var default_branch: String }
+        return try await get("/repos/\(repo)", as: R.self).default_branch
     }
 }

@@ -190,9 +190,11 @@ final class OverviewStore: ObservableObject {
         guard let repo = p.githubRepo, app.github != nil else { return .success(nil) }
         do {
             let client = try app.githubClient()
+            // The card shows the health of the default branch, not of whichever branch ran last.
             async let pulls = client.pulls(repo)
-            async let runs = client.runs(repo)
-            return .success(ProjectSnapshot.GitHubStats(openPRs: try await pulls.count, lastRun: try await runs.first))
+            let branch = try await client.defaultBranch(repo)
+            let runs = try await client.runs(repo, branch: branch)
+            return .success(ProjectSnapshot.GitHubStats(openPRs: try await pulls.count, lastRun: runs.first))
         } catch {
             return .failure(error)
         }

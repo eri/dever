@@ -56,7 +56,7 @@ struct OverviewView: View {
                             if rows.isEmpty {
                                 filteredEmptyState
                             } else {
-                                LazyVGrid(columns: [GridItem(.adaptive(minimum: 300), spacing: 16)], spacing: 16) {
+                                LazyVGrid(columns: [GridItem(.adaptive(minimum: 300, maximum: 460), spacing: 16, alignment: .top)], spacing: 16) {
                                     ForEach(rows, id: \.0.id) { project, status in
                                         Button { open(project) } label: {
                                             ProjectCard(project: project, status: status, snapshot: store.snapshots[project.id])
@@ -268,7 +268,7 @@ private struct ProjectCard: View {
                 if let branch = g.lastRun?.head_branch {
                     Text(branch).foregroundStyle(.secondary).lineLimit(1).help(branch)
                 }
-                Text("· ^[\(g.openPRs) open PR](inflect: true)").foregroundStyle(.secondary).monospacedDigit()
+                Text("· ^[\(g.openPRs) open pull request](inflect: true)").foregroundStyle(.secondary).monospacedDigit()
             }
         }
     }
