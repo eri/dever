@@ -40,20 +40,26 @@ struct ProjectDetailView: View {
     }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 28) {
-                titleRow
-                // The work on the left; the conversation alongside it, like a right rail.
-                ViewThatFits(in: .horizontal) {
-                    HStack(alignment: .top, spacing: 20) {
-                        workColumn.frame(minWidth: 520)
-                        slackPanel.frame(width: 440)
+        GeometryReader { geo in
+            // The same two columns as the skeleton, loaded or not: the work on the left,
+            // the conversation alongside it. Below ~1000px they stack.
+            let twoColumns = geo.size.width >= 1000
+            ScrollView {
+                VStack(alignment: .leading, spacing: 24) {
+                    titleRow
+                    if twoColumns {
+                        HStack(alignment: .top, spacing: 16) {
+                            workColumn.frame(maxWidth: .infinity)
+                            slackPanel.frame(width: min(420, geo.size.width * 0.34))
+                        }
+                    } else {
+                        VStack(spacing: 16) { workColumn; slackPanel }
                     }
-                    VStack(spacing: 20) { workColumn; slackPanel }
                 }
+                .padding(.horizontal, 28)
+                .padding(.vertical, 24)
+                .frame(width: geo.size.width, alignment: .leading)
             }
-            .padding(32)
-            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .background(Soot.ground)
         .navigationTitle(project.name)
@@ -62,7 +68,7 @@ struct ProjectDetailView: View {
     }
 
     private var workColumn: some View {
-        VStack(spacing: 20) {
+        VStack(spacing: 16) {
             if project.linear != nil { deliveryPanel }
             issuesPanel
             if project.githubRepo != nil { githubPanel }
@@ -158,26 +164,26 @@ struct ProjectDetailView: View {
             } else if delivery.total == 0 {
                 QuietEmpty(symbol: "tray", text: "No issues in this project yet")
             } else {
+                // Headline figure and the stage counts on one line, the bar under them.
                 HStack(alignment: .lastTextBaseline, spacing: 10) {
                     Text(Double(delivery.shipped) / Double(delivery.total), format: .percent.precision(.fractionLength(0)))
-                        .font(.system(size: 38, weight: .semibold)).tracking(-1).foregroundStyle(Soot.ink).monospacedDigit()
+                        .font(.system(size: 34, weight: .semibold)).tracking(-1).foregroundStyle(Soot.ink).monospacedDigit()
                     Text("\(delivery.shipped) of \(delivery.total) shipped").font(.system(size: 14)).foregroundStyle(Soot.muted)
                         .monospacedDigit()
-                }
-                deliveryBar
-                HStack(spacing: 28) {
-                    ForEach(Delivery.Stage.allCases.filter { delivery.count($0) > 0 }, id: \.self) { stage in
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("\(delivery.count(stage))").font(.system(size: 20, weight: .semibold))
-                                .foregroundStyle(Soot.ink).monospacedDigit()
+                    Spacer(minLength: 16)
+                    HStack(spacing: 20) {
+                        ForEach(Delivery.Stage.allCases.filter { delivery.count($0) > 0 }, id: \.self) { stage in
                             HStack(spacing: 6) {
                                 Circle().fill(DeliveryStrip.color(stage)).frame(width: 7, height: 7)
+                                Text("\(delivery.count(stage))").font(.system(size: 14, weight: .semibold))
+                                    .foregroundStyle(Soot.ink).monospacedDigit()
                                 Text(stage.label).font(.system(size: 12)).foregroundStyle(Soot.muted)
                             }
+                            .accessibilityElement(children: .combine)
                         }
-                        .accessibilityElement(children: .combine)
                     }
                 }
+                deliveryBar
                 if !toClose.isEmpty { toCloseList }
             }
         }

@@ -52,10 +52,10 @@ struct ContentView: View {
     }
 
     private var main: some View {
-        NavigationSplitView {
-            sidebar
-                .navigationSplitViewColumnWidth(min: 200, ideal: Theme.sidebarWidth, max: 280)
-        } detail: {
+        HStack(spacing: 0) {
+            rail
+            Rectangle().fill(Theme.border).frame(width: 1)
+            NavigationStack {
             Group {
                 switch selection {
                 case .project(let id):
@@ -77,6 +77,7 @@ struct ContentView: View {
             .environment(\.openSettings, { selection = .settings })
             .background(Theme.frame)
             .toolbarBackgroundHiddenIfAvailable()
+            }
         }
         .task {
             store.startAutoRefresh(app)
@@ -125,93 +126,81 @@ struct ContentView: View {
         }
     }
 
-    // MARK: Sidebar
+    // MARK: Rail
 
-    private var sidebar: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            productHeader
-                .padding(.horizontal, 16)
-                .padding(.bottom, 20)
-            ScrollView {
-                VStack(alignment: .leading, spacing: 2) {
-                    navRow("Overview", symbol: "square.grid.2x2", item: .overview)
-                    HStack {
-                        Text("Projects").font(Theme.small).foregroundStyle(Theme.muted)
-                        Spacer()
-                        addMenu
-                    }
-                    .padding(.leading, 8)
-                    .padding(.top, 24)
-                    .padding(.bottom, 6)
-                    ForEach(app.projects) { p in projectRow(p) }
-                    if app.projects.isEmpty {
-                        Text("No projects yet").font(Theme.small).foregroundStyle(Theme.muted).padding(.leading, 8)
-                    }
+    /// A slim rail instead of a sidebar: the projects are a handful of tiles, so they don't
+    /// need 240px. Every icon has a tooltip and an accessible name.
+    private var rail: some View {
+        VStack(spacing: 6) {
+            DeverMark().frame(width: 22, height: 22)
+                .padding(.top, 12)
+                .padding(.bottom, 14)
+                .help("Dever · \(scope)")
+            railButton(symbol: "square.grid.2x2", label: "Overview", item: .overview)
+            Rectangle().fill(Theme.border).frame(width: 28, height: 1).padding(.vertical, 8)
+            ScrollView(showsIndicators: false) {
+                VStack(spacing: 6) {
+                    ForEach(app.projects) { p in projectTile(p) }
+                    addMenu.frame(width: 40, height: 40)
                 }
-                .padding(.horizontal, 8)
             }
             Spacer(minLength: 0)
-            userRow
-                .padding(.horizontal, 8)
-                .padding(.bottom, 12)
+            userTile.padding(.bottom, 14)
         }
+        .frame(width: 64)
         .frame(maxHeight: .infinity, alignment: .top)
         .background(Theme.frame)
-    }
-
-    /// The product's mark and the scope it is looking at.
-    private var productHeader: some View {
-        HStack(spacing: 10) {
-            DeverMark().frame(width: 22, height: 22)
-            VStack(alignment: .leading, spacing: 1) {
-                Text("Dever").font(Theme.bodyStrong).foregroundStyle(Theme.text)
-                Text(scope).font(Theme.small).foregroundStyle(Theme.muted).lineLimit(1)
-            }
-        }
-        .accessibilityElement(children: .combine)
     }
 
     private var scope: String {
         app.linear?.account.orgName ?? app.slack?.teamName ?? "No workspace connected"
     }
 
-    private func navRow(_ title: String, symbol: String, item: SidebarItem, trailing: String? = nil) -> some View {
-        Button { selection = item } label: {
-            HStack(spacing: 10) {
-                Image(systemName: symbol).frame(width: 16).foregroundStyle(Theme.muted)
-                Text(title).foregroundStyle(Theme.text)
-                Spacer(minLength: 4)
-                if let trailing { Text(trailing).font(Theme.small).foregroundStyle(Theme.muted) }
-            }
-            .font(Theme.body)
-            .padding(.horizontal, 8)
-            .frame(height: 32)
-            .background(selection == item ? Theme.active : Color.clear, in: RoundedRectangle(cornerRadius: 8))
-            .contentShape(Rectangle())
+    private func railButton(symbol: String, label: String, item: SidebarItem) -> some View {
+        let on = selection == item
+        return Button { selection = item } label: {
+            Image(systemName: symbol)
+                .font(.system(size: 16))
+                .foregroundStyle(on ? Theme.text : Theme.muted)
+                .frame(width: 40, height: 40)
+                .background(on ? Theme.active : Color.clear, in: RoundedRectangle(cornerRadius: 10))
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .accessibilityAddTraits(selection == item ? .isSelected : [])
+        .modifier(FocusOutline(radius: 10))
+        .help(label)
+        .accessibilityLabel(label)
+        .accessibilityAddTraits(on ? .isSelected : [])
     }
 
-    private func projectRow(_ p: Project) -> some View {
+    /// A project as its initials on its own tint, with a dot when it needs attention.
+    private func projectTile(_ p: Project) -> some View {
         let status = p.status(store.snapshots[p.id])
         let item = SidebarItem.project(p.id)
+        let on = selection == item
+        let initials = p.name.split(separator: " ").prefix(2).compactMap(\.first).map(String.init).joined().uppercased()
         return Button { selection = item } label: {
-            HStack(spacing: 10) {
-                Image(systemName: status.symbol).foregroundStyle(status.tint).frame(width: 16).imageScale(.small)
-                Text(p.name).foregroundStyle(Theme.text).lineLimit(1)
-                Spacer(minLength: 4)
-            }
-            .font(Theme.body)
-            .padding(.horizontal, 8)
-            .frame(height: 32)
-            .background(selection == item ? Theme.active : Color.clear, in: RoundedRectangle(cornerRadius: 8))
-            .contentShape(Rectangle())
+            Text(initials.isEmpty ? "?" : initials)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(Color.black.opacity(0.75))
+                .frame(width: 36, height: 36)
+                .background(PersonTint.color(for: p.name), in: RoundedRectangle(cornerRadius: 10))
+                .overlay(alignment: .topTrailing) {
+                    if status == .needsAttention || status == .quiet {
+                        Circle().fill(status.tint).frame(width: 10, height: 10)
+                            .overlay(Circle().strokeBorder(Theme.frame, lineWidth: 2))
+                            .offset(x: 3, y: -3)
+                    }
+                }
+                .padding(2)
+                .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(on ? Theme.text : .clear, lineWidth: 2))
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .modifier(FocusOutline(radius: 12))
         .help("\(p.name) — \(status.label)")
         .accessibilityLabel("\(p.name), \(status.label)")
-        .accessibilityAddTraits(selection == item ? .isSelected : [])
+        .accessibilityAddTraits(on ? .isSelected : [])
         .contextMenu {
             Button("Edit links…") { editing = p }
             Divider()
@@ -219,32 +208,31 @@ struct ContentView: View {
         }
     }
 
-    /// The person using Dever; opens Settings, where their connections live.
-    private var userRow: some View {
+    /// You, opening Settings; a dot while an account still needs connecting.
+    private var userTile: some View {
+        let on = selection == .settings
         let name = displayName.isEmpty ? "Settings" : displayName
         return Button { selection = .settings } label: {
-            HStack(spacing: 10) {
-                Text(String(name.prefix(1)).uppercased())
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(Theme.chart1)
-                    .frame(width: 22, height: 22)
-                    .background(Theme.chart1.opacity(0.15), in: Circle())
-                    .accessibilityHidden(true)
-                VStack(alignment: .leading, spacing: 0) {
-                    Text(name).font(Theme.body).foregroundStyle(Theme.text).lineLimit(1)
-                    Text(missingAccounts > 0 ? "\(missingAccounts) account\(missingAccounts == 1 ? "" : "s") to connect" : "Settings")
-                        .font(Theme.small).foregroundStyle(missingAccounts > 0 ? Theme.chart3 : Theme.muted)
+            Text(String(name.prefix(1)).uppercased())
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(Theme.chart1)
+                .frame(width: 32, height: 32)
+                .background(Theme.chart1.opacity(0.15), in: Circle())
+                .overlay(alignment: .topTrailing) {
+                    if missingAccounts > 0 {
+                        Circle().fill(Theme.chart3).frame(width: 9, height: 9)
+                            .overlay(Circle().strokeBorder(Theme.frame, lineWidth: 2))
+                    }
                 }
-                Spacer(minLength: 4)
-            }
-            .padding(.horizontal, 8)
-            .frame(height: 44)
-            .background(selection == .settings ? Theme.active : Color.clear, in: RoundedRectangle(cornerRadius: 8))
-            .contentShape(Rectangle())
+                .padding(3)
+                .overlay(Circle().strokeBorder(on ? Theme.text : .clear, lineWidth: 2))
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("\(name), settings")
-        .accessibilityAddTraits(selection == .settings ? .isSelected : [])
+        .modifier(FocusOutline(radius: 20))
+        .help(missingAccounts > 0 ? "Settings — \(missingAccounts) account(s) to connect" : "Settings")
+        .accessibilityLabel(missingAccounts > 0 ? "Settings, \(missingAccounts) accounts to connect" : "Settings")
+        .accessibilityAddTraits(on ? .isSelected : [])
     }
 
     private var addMenu: some View {
