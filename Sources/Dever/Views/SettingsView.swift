@@ -1,7 +1,7 @@
 import SwiftUI
 import UserNotifications
 
-struct AccountsView: View {
+struct SettingsView: View {
     @EnvironmentObject var app: AppState
 
     private var summary: String {
@@ -17,7 +17,7 @@ struct AccountsView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 32) {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("Accounts").font(Theme.title).foregroundStyle(Theme.text).accessibilityAddTraits(.isHeader)
+                    Text("Settings").font(Theme.title).foregroundStyle(Theme.text).accessibilityAddTraits(.isHeader)
                     Text(summary).font(Theme.body).foregroundStyle(Theme.muted)
                 }
                 SettingsSection("Connected services",
@@ -28,6 +28,10 @@ struct AccountsView: View {
                             AccountRow(service: s, connect: { loginSheet = s }).padding(.vertical, 12)
                         }
                     }
+                }
+                Rectangle().fill(Theme.border).frame(height: 1)
+                SettingsSection("Appearance", description: "Auto follows your Mac's light or dark setting.") {
+                    AppearancePicker().padding(.vertical, 12)
                 }
                 Rectangle().fill(Theme.border).frame(height: 1)
                 SettingsSection("Notifications",
@@ -54,7 +58,7 @@ struct AccountsView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .sheetBackground()
-        .navigationTitle("Accounts")
+        .navigationTitle("Settings")
         .windowTitleHidden()
         .sheet(item: $loginSheet) { s in
             switch s {
@@ -390,5 +394,65 @@ struct WaitingLine: View {
         }
         .frame(height: 2)
         .accessibilityHidden(true)
+    }
+}
+
+// MARK: - Appearance
+
+enum Appearance: String, CaseIterable, Identifiable {
+    case system, light, dark
+    static let key = "appearance"
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .system: "Auto"
+        case .light: "Light"
+        case .dark: "Dark"
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .system: "circle.lefthalf.filled"
+        case .light: "sun.max"
+        case .dark: "moon"
+        }
+    }
+
+    /// Applied app-wide, so sheets, menus and popovers follow too.
+    @MainActor func apply() {
+        NSApp.appearance = switch self {
+        case .system: nil
+        case .light: NSAppearance(named: .aqua)
+        case .dark: NSAppearance(named: .darkAqua)
+        }
+    }
+}
+
+private struct AppearancePicker: View {
+    @AppStorage(Appearance.key) private var appearance = Appearance.system.rawValue
+
+    var body: some View {
+        HStack(spacing: 8) {
+            ForEach(Appearance.allCases) { option in
+                let on = appearance == option.rawValue
+                Button { appearance = option.rawValue } label: {
+                    VStack(spacing: 6) {
+                        Image(systemName: option.symbol).font(.system(size: 18))
+                        Text(option.label).font(Theme.bodyStrong)
+                    }
+                    .foregroundStyle(on ? Theme.text : Theme.muted)
+                    .frame(width: 96, height: 64)
+                    .background(on ? Theme.sheet : Color.clear, in: RoundedRectangle(cornerRadius: 10))
+                    .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(on ? Theme.text : Theme.control, lineWidth: on ? 2 : 1))
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .modifier(FocusOutline(radius: 10))
+                .accessibilityLabel("\(option.label) appearance")
+                .accessibilityAddTraits(on ? .isSelected : [])
+            }
+        }
     }
 }

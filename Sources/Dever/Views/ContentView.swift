@@ -2,7 +2,7 @@ import SwiftUI
 
 enum SidebarItem: Hashable {
     case overview
-    case accounts
+    case settings
     case project(UUID)
 }
 
@@ -16,6 +16,7 @@ struct ContentView: View {
     @State private var removing: Project?
     @AppStorage("onboardingDone") private var onboardingDone = false
     @AppStorage("displayName") private var displayName = ""
+    @AppStorage(Appearance.key) private var appearance = Appearance.system.rawValue
     @State private var showOnboarding = false
     @State private var githubSheet = false
 
@@ -26,6 +27,9 @@ struct ContentView: View {
             } else {
                 main
             }
+        }
+        .onChange(of: appearance, initial: true) { _, value in
+            Appearance(rawValue: value)?.apply()
         }
         .onAppear {
             // New users only: anyone who already has projects has been through setup.
@@ -62,15 +66,15 @@ struct ContentView: View {
                                                description: Text("It may have been removed. Pick another project in the sidebar."))
                             .sheetBackground()
                     }
-                case .accounts:
-                    AccountsView()
+                case .settings:
+                    SettingsView()
                 case .overview:
                     OverviewView(open: { selection = .project($0.id) },
                                  newProject: { showNew = true },
                                  importFrom: { importSource = $0 })
                 }
             }
-            .environment(\.openAccounts, { selection = .accounts })
+            .environment(\.openSettings, { selection = .settings })
             .background(Theme.frame)
             .toolbarBackgroundHiddenIfAvailable()
         }
@@ -215,10 +219,10 @@ struct ContentView: View {
         }
     }
 
-    /// The person using Dever; opens Accounts, where their connections live.
+    /// The person using Dever; opens Settings, where their connections live.
     private var userRow: some View {
-        let name = displayName.isEmpty ? "Accounts" : displayName
-        return Button { selection = .accounts } label: {
+        let name = displayName.isEmpty ? "Settings" : displayName
+        return Button { selection = .settings } label: {
             HStack(spacing: 10) {
                 Text(String(name.prefix(1)).uppercased())
                     .font(.system(size: 11, weight: .semibold))
@@ -228,19 +232,19 @@ struct ContentView: View {
                     .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 0) {
                     Text(name).font(Theme.body).foregroundStyle(Theme.text).lineLimit(1)
-                    Text(missingAccounts > 0 ? "\(missingAccounts) account\(missingAccounts == 1 ? "" : "s") to connect" : "Accounts")
+                    Text(missingAccounts > 0 ? "\(missingAccounts) account\(missingAccounts == 1 ? "" : "s") to connect" : "Settings")
                         .font(Theme.small).foregroundStyle(missingAccounts > 0 ? Theme.chart3 : Theme.muted)
                 }
                 Spacer(minLength: 4)
             }
             .padding(.horizontal, 8)
             .frame(height: 44)
-            .background(selection == .accounts ? Theme.active : Color.clear, in: RoundedRectangle(cornerRadius: 8))
+            .background(selection == .settings ? Theme.active : Color.clear, in: RoundedRectangle(cornerRadius: 8))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("\(name), accounts")
-        .accessibilityAddTraits(selection == .accounts ? .isSelected : [])
+        .accessibilityLabel("\(name), settings")
+        .accessibilityAddTraits(selection == .settings ? .isSelected : [])
     }
 
     private var addMenu: some View {

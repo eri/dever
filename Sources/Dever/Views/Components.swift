@@ -138,7 +138,7 @@ struct LoadErrorRow: View {
             }
             HStack(spacing: 12) {
                 if let retry { Button("Retry", action: retry) }
-                OpenAccountsButton(service: service)
+                OpenSettingsButton(service: service)
             }
             .buttonStyle(.link)
         }
@@ -146,25 +146,25 @@ struct LoadErrorRow: View {
     }
 }
 
-struct OpenAccountsButton: View {
+struct OpenSettingsButton: View {
     let service: ServiceKind
-    @Environment(\.openAccounts) private var openAccounts
+    @Environment(\.openSettings) private var openSettings
 
     var body: some View {
-        Button("Open Accounts") { openAccounts() }
+        Button("Open Settings") { openSettings() }
             .help("Check or reconnect \(service.label)")
     }
 }
 
-private struct OpenAccountsKey: EnvironmentKey {
+private struct OpenSettingsKey: EnvironmentKey {
     static let defaultValue: () -> Void = {}
 }
 
 extension EnvironmentValues {
-    /// Navigates to the Accounts screen; provided by ContentView.
-    var openAccounts: () -> Void {
-        get { self[OpenAccountsKey.self] }
-        set { self[OpenAccountsKey.self] = newValue }
+    /// Navigates to the Settings screen; provided by ContentView.
+    var openSettings: () -> Void {
+        get { self[OpenSettingsKey.self] }
+        set { self[OpenSettingsKey.self] = newValue }
     }
 }
 

@@ -18,7 +18,7 @@ struct PersonAvatar: View {
     var body: some View {
         Text(String(name.prefix(1)).uppercased())
             .font(.system(size: size * 0.48, weight: .semibold))
-            .foregroundStyle(Soot.ground)
+            .foregroundStyle(Color.black.opacity(0.75))
             .frame(width: size, height: size)
             .background(PersonTint.color(for: name), in: Circle())
             .accessibilityHidden(true)

@@ -139,14 +139,14 @@ struct ProjectEditorSheet: View {
                 } else {
                     Button {
                         dismiss()
-                        NotificationCenter.default.post(name: .showScreen, object: SidebarItem.accounts)
+                        NotificationCenter.default.post(name: .showScreen, object: SidebarItem.settings)
                     } label: {
                         HStack(spacing: 4) { Text("Connect \(service.label)"); Image(systemName: "arrow.up.right") }
                     }
                     .buttonStyle(.plain)
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(Soot.lime)
-                    .help("Opens Accounts, where you can connect \(service.label)")
+                    .help("Opens Settings, where you can connect \(service.label)")
                 }
                 Spacer(minLength: 0)
             }

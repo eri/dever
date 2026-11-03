@@ -145,7 +145,7 @@ private struct MessageRow: View {
                 } else {
                     Text(String(author.prefix(1)).uppercased())
                         .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(Soot.ground)
+                        .foregroundStyle(Color.black.opacity(0.75))
                         .frame(width: 32, height: 32)
                         .background(PersonTint.color(for: author), in: RoundedRectangle(cornerRadius: 8))
                 }

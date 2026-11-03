@@ -6,14 +6,17 @@ import SwiftUI
 
 /// Soot and lime: black ground, one lime for actions and the stage behind the product.
 enum Soot {
-    static let ground = Color(red: 0.059, green: 0.059, blue: 0.059)     // #0f0f0f
-    static let surface = Color(red: 0.102, green: 0.102, blue: 0.102)    // #1a1a1a
-    static let ink = Color.white
-    static let muted = Color(red: 0.56, green: 0.56, blue: 0.56)         // #8f8f8f · 5.9:1 on ground, 5.4:1 on surface
-    /// Control edges: 3.9:1 on ground, 3.5:1 on surface (WCAG 1.4.11 asks 3:1).
-    static let edge = Color(red: 0.44, green: 0.44, blue: 0.44)          // #707070
-    static let lime = Color(red: 0.855, green: 0.98, blue: 0.612)        // #dafa9c
-    static let limeInk = ground
+    // Dark / light pairs. Every text pair passes 4.5:1, every edge 3:1 (measured).
+    static let ground = Color(light: 0xF4F4F2, dark: 0x0F0F0F)
+    static let surface = Color(light: 0xFFFFFF, dark: 0x1A1A1A)
+    static let ink = Color(light: 0x111111, dark: 0xFFFFFF)
+    /// Secondary text: 5.5 / 6.1:1 light, 5.9 / 5.4:1 dark.
+    static let muted = Color(light: 0x5F6368, dark: 0x8F8F8F)
+    /// Control edges: 3.1 / 3.5:1 light, 3.9 / 3.5:1 dark (WCAG 1.4.11 asks 3:1).
+    static let edge = Color(light: 0x8A8A8A, dark: 0x707070)
+    /// The one action colour: pale lime on dark, deep green on light (7:1 on white).
+    static let lime = Color(light: 0x3F6212, dark: 0xDAFA9C)
+    static let limeInk = Color(light: 0xFFFFFF, dark: 0x0F0F0F)
     static let radius: CGFloat = 8
     static let margin: CGFloat = 40
 }
@@ -168,7 +171,6 @@ struct SootSheet: ViewModifier {
             .padding(32)
             .frame(width: width, height: height, alignment: .topLeading)
             .background(Soot.ground)
-            .environment(\.colorScheme, .dark)
     }
 }
 
@@ -364,7 +366,6 @@ private struct SearchPickerList: View {
         }
         .frame(width: 340)
         .background(Soot.ground)
-        .environment(\.colorScheme, .dark)
         .onAppear { searchFocused = true }
     }
 

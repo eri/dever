@@ -14,7 +14,7 @@ enum Snapshotter {
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         var screens: [(String, SidebarItem)] = [("overview", .overview)]
         if let first = projects.first { screens.append(("project", .project(first.id))) }
-        screens.append(("accounts", .accounts))
+        screens.append(("settings", .settings))
 
         // Let the first refresh land before the first picture; DEVER_SNAPSHOT_WAIT=0 captures
         // the loading state instead.

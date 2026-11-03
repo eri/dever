@@ -204,7 +204,7 @@ struct OverviewView: View {
             }
             .buttonStyle(.link)
             if app.slack == nil || app.linear == nil {
-                Text("Connect Slack and Linear in Accounts to import.").font(Theme.small).foregroundStyle(Theme.muted)
+                Text("Connect Slack and Linear in Settings to import.").font(Theme.small).foregroundStyle(Theme.muted)
             }
         }
     }

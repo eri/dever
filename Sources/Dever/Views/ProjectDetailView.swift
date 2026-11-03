@@ -56,7 +56,6 @@ struct ProjectDetailView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .background(Soot.ground)
-        .environment(\.colorScheme, .dark)
         .navigationTitle(project.name)
         .windowTitleHidden()
         .task { await load() }

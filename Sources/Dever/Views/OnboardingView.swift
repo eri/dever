@@ -50,7 +50,7 @@ struct OnboardingView: View {
                 .buttonStyle(.plain)
                 .font(.system(size: 14))
                 .foregroundStyle(Soot.muted)
-                .help("Go straight to Dever; set things up later in Accounts.")
+                .help("Go straight to Dever; set things up later in Settings.")
         }
         .padding(.horizontal, Soot.margin)
         .frame(height: 56)
