@@ -36,6 +36,7 @@ struct IssueDetailView: View {
                         } else if let detail {
                             signals(detail)
                             if let notice { noticeLine(notice) }
+                            if let pull = mergedPull(detail) { mergedBanner(pull, detail) }
                             if twoColumns {
                                 HStack(alignment: .top, spacing: 20) {
                                     reading(detail).frame(maxWidth: measure)
@@ -90,10 +91,12 @@ struct IssueDetailView: View {
             .accessibilityLabel("Back to the project")
             Spacer()
             if let url = URL(string: route.url) {
-                Link(destination: url) { HStack(spacing: 4) { Text("Open in Linear"); Image(systemName: "arrow.up.right") } }
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(Soot.lime)
-                    .help("Open \(route.identifier) in Linear")
+                HoverLink(destination: url, hoverTint: Soot.surface) {
+                    HStack(spacing: 4) { Text("Open in Linear"); Image(systemName: "arrow.up.right") }
+                        .font(.system(size: 13, weight: .semibold)).foregroundStyle(Soot.lime)
+                }
+                .padding(.trailing, -8)
+                .help("Open \(route.identifier) in Linear")
             }
         }
     }
@@ -151,7 +154,50 @@ struct IssueDetailView: View {
                        text: "#\(pull.number) \(pull.state.label.lowercased())",
                        tint: pull.state == .merged ? Soot.lime : Theme.chart2, label: "Pull request \(pull.number), \(pull.state.label)")
             }
+            if let branch = d.branchName ?? current.branchName, !branch.isEmpty {
+                CopyChip(value: branch, what: "branch name")
+            }
         }
+    }
+
+    // MARK: Merged banner
+
+    /// The merged pull request behind one of the attachments, when the project page knows it.
+    private func mergedPull(_ d: LinearIssueDetail) -> (ref: IssueStore.PullRef, url: URL)? {
+        for a in d.attachments?.nodes ?? [] {
+            if let ref = store.pullsByURL[a.url], ref.state == .merged, let url = URL(string: a.url) { return (ref, url) }
+        }
+        return nil
+    }
+
+    private func mergedBanner(_ pull: (ref: IssueStore.PullRef, url: URL), _ d: LinearIssueDetail) -> some View {
+        let done = (row ?? d.asRow).state.type == "completed"
+        return HStack(alignment: .center, spacing: 12) {
+            Image(systemName: "arrow.triangle.merge")
+                .font(.system(size: 14, weight: .bold))
+                .foregroundStyle(Soot.limeInk)
+                .frame(width: 30, height: 30)
+                .background(Soot.lime, in: Circle())
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Merged").font(.system(size: 14, weight: .semibold)).foregroundStyle(Soot.ink)
+                Text(done ? "Shipped with pull request #\(pull.ref.number)."
+                          : "This issue seems to be merged already by the PR #\(pull.ref.number).")
+                    .font(.system(size: 13)).foregroundStyle(Soot.muted)
+            }
+            Spacer(minLength: 12)
+            HoverLink(destination: pull.url) {
+                HStack(spacing: 4) { BrandLogo(service: .github, size: 12); Text("Open on GitHub"); Image(systemName: "arrow.up.right") }
+                    .font(.system(size: 12, weight: .semibold)).foregroundStyle(Soot.ink)
+            }
+            .help("Open pull request #\(pull.ref.number) on GitHub")
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .frame(maxWidth: measure + 20 + aside)
+        .background(Soot.lime.opacity(0.12), in: RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Soot.lime.opacity(0.4)))
+        .accessibilityElement(children: .combine)
     }
 
     /// A read-only fact in the signal strip: glyph, words, optional extra.
@@ -176,8 +222,10 @@ struct IssueDetailView: View {
             card(symbol: "doc.text", title: "Description") {
                 description(d)
             }
-            card(symbol: "bubble.left.and.bubble.right", title: "Comments", count: d.thread.count) {
-                comments(d)
+            linksCard(d)
+            attachmentsCard(d)
+            card(symbol: "bubble.left.and.bubble.right", title: "Activity") {
+                activity(d)
             }
         }
     }
@@ -202,8 +250,6 @@ struct IssueDetailView: View {
                     detailRow(symbol: "clock.arrow.circlepath", label: "Updated", value: LinearDate.relative(current.updatedAt) ?? "")
                 }
             }
-            linksCard(d)
-            attachmentsCard(d)
         }
     }
 
@@ -380,34 +426,36 @@ struct IssueDetailView: View {
         ].filter { !$0.2.isEmpty }
         if !groups.isEmpty {
             card(symbol: "point.3.connected.trianglepath.dotted", title: "Linked issues") {
-                VStack(alignment: .leading, spacing: 14) {
+                VStack(alignment: .leading, spacing: 16) {
                     ForEach(groups, id: \.1) { symbol, title, briefs in
-                        VStack(alignment: .leading, spacing: 4) {
+                        VStack(alignment: .leading, spacing: 2) {
                             HStack(spacing: 6) {
                                 Image(systemName: symbol).font(.system(size: 11, weight: .semibold)).foregroundStyle(Soot.muted)
                                     .frame(width: 14).accessibilityHidden(true)
                                 Text(title).font(.system(size: 12, weight: .semibold)).foregroundStyle(Soot.muted)
                                 if briefs.count > 1 { Text("\(briefs.count)").font(.system(size: 12)).foregroundStyle(Soot.muted).monospacedDigit() }
                             }
+                            .padding(.leading, 12)
                             .padding(.bottom, 4)
                             .accessibilityElement(children: .combine)
                             .accessibilityAddTraits(.isHeader)
                             ForEach(briefs) { b in
                                 TileLink(value: IssueRoute(projectID: route.projectID, brief: b)) {
-                                    StateDot(state: b.state).help(b.state.name)
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        Text(b.title).font(.system(size: 13)).foregroundStyle(Soot.ink).lineLimit(2).help(b.title)
-                                        HStack(spacing: 6) {
-                                            Text(verbatim: b.identifier).font(.system(size: 11, design: .monospaced))
-                                            Text("·")
-                                            Text(b.state.name)
-                                        }
-                                        .font(.system(size: 11)).foregroundStyle(Soot.muted).lineLimit(1)
+                                    PriorityGlyph(priority: b.priority, dimmed: (b.priority ?? 0) == 0).help(LinearPriority.label(b.priority))
+                                    IDPill(text: b.identifier).fixedSize()
+                                    Text(b.title).font(.system(size: 14)).foregroundStyle(Soot.ink).lineLimit(1).help(b.title)
+                                    Spacer(minLength: 12)
+                                    HStack(spacing: 6) {
+                                        StateDot(state: b.state)
+                                        Text(b.state.name).font(.system(size: 12)).foregroundStyle(Soot.muted).lineLimit(1)
                                     }
-                                    Spacer(minLength: 8)
-                                    if let p = b.assignee { LinearAvatar(name: p.name, avatarURL: p.avatarUrl, size: 20).help(p.name) }
+                                    .fixedSize()
+                                    if let p = b.assignee {
+                                        LinearAvatar(name: p.name, avatarURL: p.avatarUrl).help(p.name)
+                                    } else {
+                                        Image(systemName: "person.crop.circle.badge.questionmark").foregroundStyle(Soot.muted).help("Unassigned")
+                                    }
                                 }
-                                .padding(.vertical, 4)
                                 .accessibilityElement(children: .combine)
                                 .accessibilityLabel("\(b.identifier), \(b.title), \(b.state.name)")
                             }
@@ -437,19 +485,19 @@ struct IssueDetailView: View {
                                 .accessibilityHidden(true)
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(pull.map { PullTitle.split($0.title).title } ?? a.title ?? a.url)
-                                    .font(.system(size: 13)).foregroundStyle(Soot.ink).lineLimit(2)
+                                    .font(.system(size: 14)).foregroundStyle(Soot.ink).lineLimit(1)
                                 HStack(spacing: 6) {
                                     if let pull { Text(verbatim: "#\(pull.number)"); Text("·"); Text(pull.state.label) }
                                     else if let s = a.subtitle, !s.isEmpty { Text(s) }
                                     else { Text(URL(string: a.url)?.host ?? "") }
                                 }
-                                .font(.system(size: 11)).foregroundStyle(Soot.muted).lineLimit(1)
+                                .font(.system(size: 12)).foregroundStyle(Soot.muted).lineLimit(1)
                             }
-                            Spacer(minLength: 8)
-                            Image(systemName: "arrow.up.right").font(.system(size: 10, weight: .semibold)).foregroundStyle(Soot.muted)
+                            Spacer(minLength: 12)
+                            Image(systemName: "arrow.up.right").font(.system(size: 11, weight: .semibold)).foregroundStyle(Soot.muted)
                                 .accessibilityHidden(true)
                         }
-                        .frame(minHeight: 48)
+                        .frame(minHeight: 52)
                         .accessibilityElement(children: .combine)
                     }
                 }
@@ -468,27 +516,121 @@ struct IssueDetailView: View {
         }
     }
 
-    // MARK: Comments
+    // MARK: Activity: comments and the issue's history on one thread, oldest first
 
-    @ViewBuilder
-    private func comments(_ d: LinearIssueDetail) -> some View {
-        if d.thread.isEmpty {
-            Text("No comments yet").font(.system(size: 14)).foregroundStyle(Soot.muted)
-        } else {
-            let thread = d.thread
-            VStack(alignment: .leading, spacing: 0) {
-                ForEach(Array(thread.enumerated()), id: \.element.id) { index, c in
-                    let previous = index > 0 ? thread[index - 1] : nil
-                    let grouped = previous.map {
-                        $0.authorName == c.authorName
-                            && (LinearDate.parse(c.createdAt)?.timeIntervalSince(LinearDate.parse($0.createdAt) ?? .distantPast) ?? 1e9) < 600
-                    } ?? false
+    private enum Item: Identifiable {
+        case created(String)
+        case comment(LinearIssueDetail.Comment)
+        case event(LinearIssueDetail.HistoryEvent, [Change])
+        var id: String {
+            switch self { case .created: "created"; case .comment(let c): "c-" + c.id; case .event(let e, _): "h-" + e.id }
+        }
+        var date: String {
+            switch self { case .created(let d): d; case .comment(let c): c.createdAt; case .event(let e, _): e.createdAt }
+        }
+    }
+
+    /// One change inside a history event, as a glyph and words.
+    private struct Change: Identifiable {
+        let symbol: String
+        let text: String
+        var state: LinearIssue.State? = nil
+        var id: String { symbol + text }
+    }
+
+    private func items(_ d: LinearIssueDetail) -> [Item] {
+        let labels = Dictionary(d.labelList.map { ($0.id, $0.name) }, uniquingKeysWith: { a, _ in a })
+        var list: [Item] = [.created(d.createdAt)]
+        list += d.thread.map { .comment($0) }
+        for e in d.history?.nodes ?? [] {
+            let changes = describe(e, labels: labels)
+            if !changes.isEmpty { list.append(.event(e, changes)) }
+        }
+        return list.sorted { $0.date < $1.date }
+    }
+
+    private func describe(_ e: LinearIssueDetail.HistoryEvent, labels: [String: String]) -> [Change] {
+        var out: [Change] = []
+        if let to = e.toState {
+            out.append(Change(symbol: "", text: e.fromState.map { "moved from \($0.name) to \(to.name)" } ?? "set status to \(to.name)", state: to))
+        }
+        if let to = e.toAssignee { out.append(Change(symbol: "person", text: "assigned to \(to.name)")) }
+        else if let from = e.fromAssignee { out.append(Change(symbol: "person.slash", text: "unassigned \(from.name)")) }
+        if let p = e.toPriority { out.append(Change(symbol: "chart.bar", text: "set priority to \(LinearPriority.label(p))")) }
+        if e.toTitle != nil { out.append(Change(symbol: "pencil", text: "renamed the issue")) }
+        if e.updatedDescription == true { out.append(Change(symbol: "doc.text", text: "edited the description")) }
+        if let to = e.toEstimate { out.append(Change(symbol: "scalemass", text: "set the estimate to \(to.formatted())")) }
+        else if e.fromEstimate != nil { out.append(Change(symbol: "scalemass", text: "removed the estimate")) }
+        if let to = e.toDueDate { out.append(Change(symbol: "calendar", text: "set the due date to \(LinearDate.short(to) ?? to)")) }
+        else if e.fromDueDate != nil { out.append(Change(symbol: "calendar", text: "removed the due date")) }
+        for id in e.addedLabelIds ?? [] { out.append(Change(symbol: "tag", text: "added the label \(labels[id] ?? "")".trimmingCharacters(in: .whitespaces))) }
+        for id in e.removedLabelIds ?? [] { out.append(Change(symbol: "tag.slash", text: "removed the label \(labels[id] ?? "")".trimmingCharacters(in: .whitespaces))) }
+        if let to = e.toCycle { out.append(Change(symbol: "arrow.triangle.2.circlepath", text: "moved to \(to.name ?? "cycle \(to.number ?? 0)")")) }
+        else if e.fromCycle != nil { out.append(Change(symbol: "arrow.triangle.2.circlepath", text: "removed from its cycle")) }
+        if let to = e.toParent?.identifier { out.append(Change(symbol: "arrow.turn.left.up", text: "set the parent to \(to)")) }
+        else if e.fromParent != nil { out.append(Change(symbol: "arrow.turn.left.up", text: "removed the parent")) }
+        if e.archived == true { out.append(Change(symbol: "archivebox", text: "archived the issue")) }
+        if e.trashed == true { out.append(Change(symbol: "trash", text: "deleted the issue")) }
+        if e.autoClosed == true { out.append(Change(symbol: "checkmark.circle", text: "closed automatically")) }
+        return out
+    }
+
+    private func activity(_ d: LinearIssueDetail) -> some View {
+        let list = items(d)
+        return VStack(alignment: .leading, spacing: 0) {
+            ForEach(Array(list.enumerated()), id: \.element.id) { index, item in
+                let previous = index > 0 ? list[index - 1] : nil
+                switch item {
+                case .created(let date):
+                    eventRow(name: d.creator?.name, avatar: d.creator?.avatarUrl,
+                             changes: [Change(symbol: "plus.circle", text: "created the issue")], date: date)
+                case .comment(let c):
+                    let grouped: Bool = {
+                        guard case .comment(let p)? = previous else { return false }
+                        return p.authorName == c.authorName
+                            && (LinearDate.parse(c.createdAt)?.timeIntervalSince(LinearDate.parse(p.createdAt) ?? .distantPast) ?? 1e9) < 600
+                    }()
                     CommentRow(comment: c, grouped: grouped, reply: c.parent != nil, measure: measure)
-                        .padding(.top, grouped ? 2 : (index == 0 ? 0 : 16))
+                        .padding(.top, grouped ? 2 : 14)
+                        .padding(.bottom, 6)
+                case .event(let e, let changes):
+                    eventRow(name: e.actorName, avatar: e.actor?.avatarUrl, changes: changes, date: e.createdAt)
                 }
             }
-            .padding(.horizontal, -8)
         }
+        .padding(.horizontal, -8)
+    }
+
+    /// One quiet line of history: who, what, when.
+    private func eventRow(name: String?, avatar: String?, changes: [Change], date: String) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Group {
+                if let name { LinearAvatar(name: name, avatarURL: avatar, size: 20) }
+                else { Image(systemName: "plus.circle").font(.system(size: 13)).foregroundStyle(Soot.muted) }
+            }
+            .frame(width: 28, height: 20, alignment: .center)
+            .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 3) {
+                ForEach(changes) { change in
+                    HStack(spacing: 6) {
+                        if let state = change.state { StateDot(state: state, size: 10).frame(width: 14) }
+                        else if !change.symbol.isEmpty {
+                            Image(systemName: change.symbol).font(.system(size: 11, weight: .medium)).foregroundStyle(Soot.muted).frame(width: 14)
+                        }
+                        (Text(name.map { $0 + " " } ?? "Someone ").fontWeight(.semibold).foregroundColor(Soot.ink)
+                            + Text(change.text).foregroundColor(Soot.muted))
+                            .font(.system(size: 13))
+                            .lineLimit(1)
+                    }
+                }
+            }
+            Spacer(minLength: 12)
+            Text(LinearDate.relative(date) ?? "").font(.system(size: 12)).foregroundStyle(Soot.muted)
+                .help(LinearDate.parse(date)?.formatted(date: .abbreviated, time: .shortened) ?? "")
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 5)
+        .accessibilityElement(children: .combine)
     }
 
     // MARK: Loading
@@ -591,27 +733,38 @@ struct MarkdownView: View {
             ForEach(blocks) { block in
                 switch block.kind {
                 case .heading(let level):
-                    text(block.text, size: [22, 18, 16, 15, 14, 14][min(max(level, 1), 6) - 1], weight: .semibold)
-                        .padding(.top, compact ? 2 : 8)
-                        .accessibilityAddTraits(.isHeader)
+                    VStack(alignment: .leading, spacing: 6) {
+                        text(block.text, size: [22, 18, 16, 15, 14, 14][min(max(level, 1), 6) - 1], weight: .semibold)
+                            .accessibilityAddTraits(.isHeader)
+                        if level <= 2, !compact { Rectangle().fill(Soot.line).frame(height: 1) }
+                    }
+                    .padding(.top, compact ? 2 : 10)
                 case .paragraph:
                     text(block.text, size: bodySize)
                 case .quote:
-                    HStack(alignment: .top, spacing: 10) {
-                        RoundedRectangle(cornerRadius: 1.5).fill(Soot.edge).frame(width: 3)
-                        text(block.text, size: bodySize, color: Soot.ink.opacity(0.85))
+                    HStack(alignment: .top, spacing: 12) {
+                        RoundedRectangle(cornerRadius: 1.5).fill(Soot.lime).frame(width: 3)
+                        text(block.text, size: bodySize, color: Soot.muted).italic()
                     }
+                    .padding(.vertical, 2)
                     .fixedSize(horizontal: false, vertical: true)
-                case .code:
+                case .code(let language):
                     ScrollView(.horizontal, showsIndicators: false) {
                         Text(block.text)
                             .font(.system(size: bodySize - 2, design: .monospaced))
                             .foregroundStyle(Soot.ink)
+                            .lineSpacing(3)
                             .textSelection(.enabled)
                             .padding(12)
                     }
                     .background(Soot.ground, in: RoundedRectangle(cornerRadius: 8))
                     .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Soot.line))
+                    .overlay(alignment: .topTrailing) {
+                        if let language, !language.isEmpty {
+                            Text(language).font(.system(size: 10, weight: .semibold, design: .monospaced)).foregroundStyle(Soot.muted)
+                                .padding(.horizontal, 8).padding(.vertical, 6)
+                        }
+                    }
                 case .listItem(let ordinal, let depth, let checked):
                     HStack(alignment: .firstTextBaseline, spacing: 8) {
                         Group {
@@ -643,7 +796,7 @@ struct MarkdownView: View {
     }
 
     private func text(_ s: AttributedString, size: CGFloat, weight: Font.Weight = .regular, color: Color = Soot.ink) -> some View {
-        Text(s)
+        Text(MarkdownTheme.style(s, size: size))
             .font(.system(size: size, weight: weight))
             .foregroundStyle(color)
             .tint(Soot.lime)

@@ -163,6 +163,14 @@ final class AppState: ObservableObject {
             self.linear = fresh
             return fresh
         } catch AppError.unauthorized(.linear) {
+            // The refresh token rotates: when another Dever process (a second window, a
+            // snapshot run) refreshed first, ours is spent but its copy in the Keychain is
+            // good. Take that before deciding the session is gone.
+            if let stored = Keychain.load(StoredCredentials.self, for: Self.credentialsKey)?.linear,
+               stored.accessToken != linear.accessToken, !stored.needsRefresh {
+                self.linear = stored
+                return stored
+            }
             self.linear = nil
             throw AppError.unauthorized(.linear)
         }

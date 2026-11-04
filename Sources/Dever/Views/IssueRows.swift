@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 // Pieces of a Linear issue drawn in the soot language: state as a dot and a word, priority as
@@ -351,4 +352,81 @@ private struct ChoiceRow<Content: View>: View {
 extension Notification.Name {
     /// Scrolls the issue page to its end (snapshots).
     static let scrollToEnd = Notification.Name("dever.scrollToEnd")
+}
+
+/// A text link with a hover state: a faint pill behind it, no motion. `hoverTint` is the tone
+/// one step from the surface it sits on (ground on a panel, surface on the page).
+struct HoverLink<Label: View>: View {
+    let destination: URL
+    var hoverTint: Color = Soot.ground
+    @ViewBuilder var label: () -> Label
+    @State private var hovering = false
+
+    var body: some View {
+        Link(destination: destination) {
+            label()
+                .padding(.horizontal, 8)
+                .frame(height: 28)
+                .background(hovering ? hoverTint.opacity(0.85) : Color.clear, in: Capsule())
+                .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .modifier(FocusOutline(radius: 14))
+        .onHover { hovering = $0 }
+    }
+}
+
+/// A chip that copies a value (the issue's branch name) and says so for a moment.
+struct CopyChip: View {
+    let value: String
+    let what: String
+    @State private var copied = false
+    @State private var hovering = false
+
+    var body: some View {
+        Button {
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(value, forType: .string)
+            copied = true
+            Task { try? await Task.sleep(nanoseconds: 1_600_000_000); copied = false }
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: copied ? "checkmark" : "arrow.triangle.branch")
+                    .font(.system(size: 12, weight: .semibold)).foregroundStyle(copied ? Soot.lime : Soot.muted)
+                Text(copied ? "Copied" : value)
+                    .font(.system(size: 12, weight: .medium, design: copied ? .default : .monospaced))
+                    .foregroundStyle(Soot.ink).lineLimit(1).truncationMode(.middle).frame(maxWidth: 240)
+                Image(systemName: "doc.on.doc").font(.system(size: 10, weight: .semibold)).foregroundStyle(Soot.muted)
+                    .opacity(hovering && !copied ? 1 : 0)
+            }
+            .padding(.horizontal, 10)
+            .frame(height: 30)
+            .background(Soot.surface, in: RoundedRectangle(cornerRadius: 8))
+            .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(hovering ? Soot.edge : Soot.edge.opacity(0.5)))
+            .contentShape(RoundedRectangle(cornerRadius: 8))
+        }
+        .buttonStyle(.plain)
+        .modifier(FocusOutline(radius: 8))
+        .onHover { hovering = $0 }
+        .help("Copy the \(what): \(value)")
+        .accessibilityLabel(copied ? "\(what) copied" : "Copy the \(what)")
+    }
+}
+
+/// Inline styling of Linear's Markdown: code on a tinted ground in monospace, links in lime.
+enum MarkdownTheme {
+    static func style(_ text: AttributedString, size: CGFloat) -> AttributedString {
+        var out = text
+        for run in out.runs {
+            if let intent = run.inlinePresentationIntent, intent.contains(.code) {
+                out[run.range].font = .system(size: size - 1.5, weight: .medium, design: .monospaced)
+                out[run.range].backgroundColor = Soot.ground
+            }
+            if run.link != nil {
+                out[run.range].foregroundColor = Soot.lime
+                out[run.range].underlineStyle = .single
+            }
+        }
+        return out
+    }
 }

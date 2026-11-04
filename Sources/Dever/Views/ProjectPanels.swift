@@ -48,9 +48,12 @@ struct PanelHeader: View {
             }
             Spacer()
             if let link {
-                Link(destination: link) { HStack(spacing: 4) { Text("Open"); Image(systemName: "arrow.up.right") } }
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(Soot.lime)
+                HoverLink(destination: link) {
+                    HStack(spacing: 4) { Text("Open"); Image(systemName: "arrow.up.right") }
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(Soot.lime)
+                }
+                .padding(.trailing, -8)
             }
         }
     }
@@ -128,9 +131,16 @@ struct ShowAllButton: View {
             .buttonStyle(.plain)
             .font(.system(size: 13, weight: .semibold))
             .foregroundStyle(Soot.lime)
-            .padding(.leading, 12)
-            .padding(.top, 4)
+            .padding(.horizontal, 8)
+            .frame(height: 28)
+            .background(hovering ? Soot.ground.opacity(0.85) : Color.clear, in: Capsule())
+            .contentShape(Capsule())
+            .modifier(FocusOutline(radius: 14))
+            .onHover { hovering = $0 }
+            .padding(.leading, 4)
+            .padding(.top, 2)
     }
+    @State private var hovering = false
 }
 
 /// One line of the empty state inside a panel.

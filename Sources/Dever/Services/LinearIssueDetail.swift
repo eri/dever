@@ -45,6 +45,38 @@ struct LinearIssueDetail: Codable, Hashable, Identifiable {
         var authorName: String { user?.name ?? botActor?.name ?? "Linear" }
     }
     struct Comments: Codable, Hashable { var nodes: [Comment] }
+    /// One change in the issue's history: who did what, when. Only the fields that moved are set.
+    struct HistoryEvent: Codable, Hashable, Identifiable {
+        struct Ref: Codable, Hashable { var name: String?; var identifier: String?; var number: Int?; var color: String?; var type: String? }
+        var id: String
+        var createdAt: String
+        var actor: LinearIssue.Person?
+        var botActor: Comment.Bot?
+        var fromState: LinearIssue.State?
+        var toState: LinearIssue.State?
+        var fromAssignee: LinearIssue.Person?
+        var toAssignee: LinearIssue.Person?
+        var fromPriority: Int?
+        var toPriority: Int?
+        var fromTitle: String?
+        var toTitle: String?
+        var fromEstimate: Double?
+        var toEstimate: Double?
+        var fromDueDate: String?
+        var toDueDate: String?
+        var addedLabelIds: [String]?
+        var removedLabelIds: [String]?
+        var fromCycle: Ref?
+        var toCycle: Ref?
+        var fromParent: Ref?
+        var toParent: Ref?
+        var archived: Bool?
+        var trashed: Bool?
+        var autoClosed: Bool?
+        var updatedDescription: Bool?
+        var actorName: String { actor?.name ?? botActor?.name ?? "Linear" }
+    }
+    struct History: Codable, Hashable { var nodes: [HistoryEvent] }
     struct Cycle: Codable, Hashable { var number: Int; var name: String? }
     struct Milestone: Codable, Hashable { var name: String }
     struct Team: Codable, Hashable { var id: String; var key: String }
@@ -71,7 +103,10 @@ struct LinearIssueDetail: Codable, Hashable, Identifiable {
     var inverseRelations: InverseRelations?
     var attachments: AttachmentList?
     var comments: Comments?
+    var history: History?
+    var creator: LinearIssue.Person?
     var team: Team?
+    var branchName: String?
 
     var labelList: [LinearIssue.Label] { labels?.nodes ?? [] }
     var subIssues: [Brief] { children?.nodes ?? [] }
@@ -89,7 +124,7 @@ struct LinearIssueDetail: Codable, Hashable, Identifiable {
     /// The row-level view of this issue, so a list can be updated from a detail.
     var asRow: LinearIssue {
         LinearIssue(id: id, identifier: identifier, title: title, url: url, updatedAt: updatedAt, state: state,
-                    assignee: assignee, branchName: nil,
+                    assignee: assignee, branchName: branchName,
                     attachments: Attachments(nodes: (attachments?.nodes ?? []).map { .init(url: $0.url) }),
                     priority: priority, dueDate: dueDate, labels: labels, archivedAt: nil)
     }
@@ -145,6 +180,13 @@ extension LinearClient {
           inverseRelations(first: 50) { nodes { type issue { \(brief) } } }
           attachments(first: 50) { nodes { id url title subtitle sourceType } }
           comments(first: 100) { nodes { id body createdAt updatedAt user { id name avatarUrl } botActor { name } parent { id } } }
+          history(first: 100) { nodes { id createdAt actor { id name avatarUrl } botActor { name }
+            fromState { id name type color } toState { id name type color }
+            fromAssignee { id name avatarUrl } toAssignee { id name avatarUrl }
+            fromPriority toPriority fromTitle toTitle fromEstimate toEstimate fromDueDate toDueDate
+            addedLabelIds removedLabelIds fromCycle { number name } toCycle { number name }
+            fromParent { identifier } toParent { identifier } archived trashed autoClosed updatedDescription } }
+          branchName creator { id name avatarUrl }
         } }
         """, variables: ["id": id], as: R.self).issue
     }
