@@ -66,26 +66,38 @@ struct QuietButton: ButtonStyle {
     }
 }
 
-/// A page-toolbar action: a glyph and a verb on a surface tile, 34px, one tone up from the
-/// ground with a 3:1 edge. `busy` runs a lime line along its foot instead of a spinner.
+/// A page-toolbar action: a glyph and a verb on a surface tile, 34px, no edge. Hover lifts
+/// the tile a tone and shows the hand; `busy` runs a lime line along its foot, not a spinner.
 struct ToolbarButton: ButtonStyle {
     var busy = false
-    @Environment(\.isEnabled) private var isEnabled
-
     func makeBody(configuration: Configuration) -> some View {
+        ToolbarButtonBody(configuration: configuration, busy: busy)
+    }
+}
+
+private struct ToolbarButtonBody: View {
+    let configuration: ButtonStyle.Configuration
+    let busy: Bool
+    @Environment(\.isEnabled) private var isEnabled
+    @State private var hovering = false
+
+    var body: some View {
         configuration.label
             .labelStyle(ToolbarLabel())
             .foregroundStyle(Soot.ink.opacity(isEnabled || busy ? 1 : 0.5))
             .padding(.horizontal, 12)
             .frame(height: 34)
-            .background(Soot.surface.opacity(configuration.isPressed ? 0.7 : 1),
-                        in: RoundedRectangle(cornerRadius: Soot.radius))
+            .background(Soot.surface, in: RoundedRectangle(cornerRadius: Soot.radius))
+            .overlay(RoundedRectangle(cornerRadius: Soot.radius)
+                .fill(Soot.ink.opacity(configuration.isPressed ? 0.12 : hovering && isEnabled ? 0.06 : 0)))
             .overlay(alignment: .bottom) {
                 if busy { WaitingLine().padding(.horizontal, 6).padding(.bottom, 1) }
             }
             .clipShape(RoundedRectangle(cornerRadius: Soot.radius))
-            .overlay(RoundedRectangle(cornerRadius: Soot.radius).strokeBorder(Soot.edge))
+            .contentShape(RoundedRectangle(cornerRadius: Soot.radius))
             .modifier(FocusOutline(radius: Soot.radius))
+            .onHover { hovering = $0 }
+            .handCursor()
     }
 }
 
@@ -108,6 +120,7 @@ struct ToolChip: View {
     var body: some View {
         if let url {
             HoverLink(destination: url, hoverTint: Soot.surface) { face }
+                .handCursor()
                 .help("Open \(text) in \(service.label)")
                 .accessibilityLabel("Open \(text) in \(service.label)")
         } else {
