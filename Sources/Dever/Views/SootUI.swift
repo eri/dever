@@ -66,6 +66,65 @@ struct QuietButton: ButtonStyle {
     }
 }
 
+/// A page-toolbar action: a glyph and a verb on a surface tile, 34px, one tone up from the
+/// ground with a 3:1 edge. `busy` runs a lime line along its foot instead of a spinner.
+struct ToolbarButton: ButtonStyle {
+    var busy = false
+    @Environment(\.isEnabled) private var isEnabled
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .labelStyle(ToolbarLabel())
+            .foregroundStyle(Soot.ink.opacity(isEnabled || busy ? 1 : 0.5))
+            .padding(.horizontal, 12)
+            .frame(height: 34)
+            .background(Soot.surface.opacity(configuration.isPressed ? 0.7 : 1),
+                        in: RoundedRectangle(cornerRadius: Soot.radius))
+            .overlay(alignment: .bottom) {
+                if busy { WaitingLine().padding(.horizontal, 6).padding(.bottom, 1) }
+            }
+            .clipShape(RoundedRectangle(cornerRadius: Soot.radius))
+            .overlay(RoundedRectangle(cornerRadius: Soot.radius).strokeBorder(Soot.edge))
+            .modifier(FocusOutline(radius: Soot.radius))
+    }
+}
+
+private struct ToolbarLabel: LabelStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        HStack(spacing: 6) {
+            configuration.icon.font(.system(size: 12, weight: .semibold)).accessibilityHidden(true)
+            configuration.title.font(.system(size: 13, weight: .semibold))
+        }
+    }
+}
+
+/// A linked tool as a chip: its logo and its name; a click opens it in the tool.
+/// Without a URL (the tool is linked but not connected yet) it stays a quiet label.
+struct ToolChip: View {
+    let service: ServiceKind
+    let text: String
+    var url: URL?
+
+    var body: some View {
+        if let url {
+            HoverLink(destination: url, hoverTint: Soot.surface) { face }
+                .help("Open \(text) in \(service.label)")
+                .accessibilityLabel("Open \(text) in \(service.label)")
+        } else {
+            face.padding(.horizontal, 8).frame(height: 28)
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel("\(service.label): \(text), not connected")
+        }
+    }
+
+    private var face: some View {
+        HStack(spacing: 6) {
+            BrandLogo(service: service, size: 12).accessibilityHidden(true)
+            Text(text).font(.system(size: 13, weight: .medium)).foregroundStyle(Soot.muted).lineLimit(1)
+        }
+    }
+}
+
 /// A choice that is its own button: icon, title, one short line, and where it leads.
 struct OptionRow: View {
     let icon: AnyView

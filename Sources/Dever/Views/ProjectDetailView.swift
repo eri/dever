@@ -127,59 +127,43 @@ struct ProjectDetailView: View {
 
     // MARK: Title row
 
+    /// The page's toolbar: name and status, the linked tools as chips, and on the right the
+    /// two actions on the project itself. Its height does not depend on what has loaded.
     private var titleRow: some View {
-        HStack(alignment: .top, spacing: 12) {
-            VStack(alignment: .leading, spacing: 6) {
+        HStack(alignment: .top, spacing: 16) {
+            VStack(alignment: .leading, spacing: 8) {
                 HStack(alignment: .firstTextBaseline, spacing: 10) {
                     Text(project.name).font(.system(size: 32, weight: .semibold)).tracking(-0.8)
                         .foregroundStyle(Soot.ink)
+                        .lineLimit(1)
+                        .help(project.name)
                         .accessibilityAddTraits(.isHeader)
                     if status == .loading { Skeleton(width: 72, height: 20, radius: 4) } else { StatusBadge(status: status) }
-                }
-                if loaded || !project.isComplete {
-                    Text(finding).font(.system(size: 15)).foregroundStyle(Soot.muted)
-                        .fixedSize(horizontal: false, vertical: true)
-                } else {
-                    Skeleton(width: 280, height: 14).padding(.vertical, 2)
                 }
                 linkRow
             }
             Spacer(minLength: 16)
             HStack(spacing: 8) {
                 Button { Task { await load(force: true) } } label: {
-                    Image(systemName: "arrow.clockwise").foregroundStyle(Theme.muted)
+                    Label("Refresh", systemImage: "arrow.clockwise")
                 }
-                .buttonStyle(.borderless)
-                .help("Refresh this project")
-                .accessibilityLabel("Refresh this project")
-                .keyboardShortcut("r")
+                .buttonStyle(ToolbarButton(busy: loading))
                 .disabled(loading)
-                Button("Edit links…", action: edit).buttonStyle(QuietButton())
-                if !toClose.isEmpty, let url = project.linear.flatMap({ URL(string: $0.url) }) {
-                    Link(destination: url) { Text("Update \(toClose.count) in Linear") }
-                        .buttonStyle(LimeButton())
-                        .help("Open the project in Linear to move these merged issues forward")
+                .help("Refresh this project (⌘R)")
+                .accessibilityLabel("Refresh this project")
+                .accessibilityValue(loading ? "Refreshing" : "")
+                .keyboardShortcut("r")
+                Button(action: edit) {
+                    Label("Edit project", systemImage: "slider.horizontal.3")
                 }
+                .buttonStyle(ToolbarButton())
+                .help("Change the name and linked tools (⌘E)")
+                .accessibilityLabel("Edit project")
+                .keyboardShortcut("e")
             }
+            .fixedSize()
+            .padding(.top, 4)
         }
-    }
-
-    private var finding: String {
-        if !project.isComplete { return "Link a Slack channel and a Linear project to start tracking." }
-        if !missing.isEmpty {
-            return "Connect \(ListFormatter.localizedString(byJoining: missing.map(\.label))) to see this project in one place."
-        }
-        let dead = ServiceKind.allCases.filter { states[$0] == .unauthorized }
-        if !dead.isEmpty { return "\(ListFormatter.localizedString(byJoining: dead.map(\.label))) needs reconnecting." }
-        if !toClose.isEmpty {
-            return Plural.text("^[\(toClose.count) issue](inflect: true) merged in code but still marked in progress in Linear.")
-        }
-        if loaded, delivery.total > 0 {
-            let left = delivery.total - delivery.shipped
-            return left == 0 ? "Every issue has shipped."
-                : Plural.text("\(delivery.shipped) of ^[\(delivery.total) issue](inflect: true) shipped, \(left) to go.")
-        }
-        return " "
     }
 
     private var slackURL: URL? {
@@ -187,21 +171,38 @@ struct ProjectDetailView: View {
         return URL(string: "https://\(slack.domain).slack.com/archives/\(channel.id)")
     }
 
+    /// The linked tools, each a chip that opens it. A tool linked but not reachable (no
+    /// Slack domain yet) keeps its chip, so the row reads the same in every state.
     private var linkRow: some View {
-        HStack(spacing: 16) {
-            if let channel = project.slack, let url = slackURL {
-                Link(destination: url) { Label { Text("#\(channel.name)") } icon: { BrandLogo(service: .slack, size: 12) } }
+        HStack(spacing: 4) {
+            if let channel = project.slack {
+                ToolChip(service: .slack, text: "#\(channel.name)", url: slackURL)
             }
-            if let linear = project.linear, let url = URL(string: linear.url) {
-                Link(destination: url) { Label { Text(linear.name) } icon: { BrandLogo(service: .linear, size: 12) } }
+            if let linear = project.linear {
+                ToolChip(service: .linear, text: linear.name, url: URL(string: linear.url))
             }
-            if let repo = project.githubRepo, let url = URL(string: "https://github.com/\(repo)") {
-                Link(destination: url) { Label { Text(repo) } icon: { BrandLogo(service: .github, size: 12) } }
+            if let repo = project.githubRepo {
+                ToolChip(service: .github, text: repo, url: URL(string: "https://github.com/\(repo)"))
+            }
+            if !project.isComplete {
+                Button(action: edit) {
+                    HStack(spacing: 5) {
+                        Image(systemName: "plus").font(.system(size: 11, weight: .semibold))
+                        Text("Link a tool")
+                    }
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(Soot.lime)
+                    .padding(.horizontal, 8)
+                    .frame(height: 28)
+                    .contentShape(Capsule())
+                    .modifier(FocusOutline(radius: 14))
+                }
+                .buttonStyle(.plain)
+                .help("Link a Slack channel, a Linear project or a GitHub repository")
             }
         }
-        .font(Theme.small)
-        .foregroundStyle(Theme.muted)
-        .lineLimit(1)
+        .padding(.leading, -8)
+        .frame(height: 28)
     }
 
     // MARK: Delivery (the signature block)
@@ -270,8 +271,21 @@ struct ProjectDetailView: View {
 
     private var toCloseList: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text("Merged, still in progress in Linear").font(.system(size: 13, weight: .semibold)).foregroundStyle(Soot.ink)
-                .padding(.leading, 12)
+            HStack(alignment: .center, spacing: 12) {
+                Text("Merged, still in progress in Linear").font(.system(size: 13, weight: .semibold)).foregroundStyle(Soot.ink)
+                Spacer(minLength: 12)
+                if let url = linearURL {
+                    HoverLink(destination: url, hoverTint: Soot.surface) {
+                        HStack(spacing: 4) { Text("Update \(toClose.count) in Linear"); Image(systemName: "arrow.up.right") }
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(Soot.lime)
+                    }
+                    .help("Open the project in Linear to move these merged issues forward")
+                    .accessibilityLabel("Update \(toClose.count) issues in Linear")
+                }
+            }
+            .padding(.leading, 12)
+            .padding(.trailing, 4)
             ForEach(capped(toClose, key: "close"), id: \.issue.id) { item in
                 TileRow(url: URL(string: item.issue.url)) {
                     IDPill(text: item.issue.identifier)
