@@ -17,6 +17,10 @@ struct IssueDetailView: View {
     @State private var blocks: [MarkdownBlock]?
     @State private var notice: (text: String, failed: Bool)?
     @State private var noticeTask: Task<Void, Never>?
+    /// Set by the blocked-by chip: scrolls to Linked issues and outlines it for a moment.
+    @State private var linksJump = 0
+    @State private var linksHighlighted = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private let measure: CGFloat = 680   // about 70 characters at 15pt, padding included
     private let aside: CGFloat = 312
@@ -58,6 +62,9 @@ struct IssueDetailView: View {
                     .frame(width: geo.size.width, alignment: twoColumns ? .center : .leading)
                 }
                 .onReceive(NotificationCenter.default.publisher(for: .scrollToEnd)) { _ in proxy.scrollTo("end", anchor: .bottom) }
+                .onChange(of: linksJump) { _, _ in
+                    withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.35)) { proxy.scrollTo("links", anchor: .top) }
+                }
             }
         }
         .background(Soot.ground)
@@ -140,13 +147,16 @@ struct IssueDetailView: View {
                        tint: late ? Theme.negative : nil, label: late ? "Due \(text), overdue" : "Due \(text)")
             }
             if !d.blockedBy.isEmpty {
-                let open = d.blockedBy.filter { $0.state.type != "completed" && $0.state.type != "canceled" }
-                let names = open.map(\.identifier)
-                let text = open.isEmpty ? "Was blocked, now clear"
-                    : names.count <= 2 ? "Blocked by " + names.joined(separator: " and ")
-                    : "Blocked by \(names.count) issues"
-                signal(symbol: "hand.raised.fill", text: text, tint: open.isEmpty ? nil : Theme.chart3,
-                       label: open.isEmpty ? "No open blockers" : "Blocked by " + names.joined(separator: ", "))
+                let open = d.blockedBy.filter { $0.state.type != "completed" && $0.state.type != "canceled" }.count
+                let text = open == 0 ? "Was blocked, now clear"
+                    : "Blocked by \(open) other \(open == 1 ? "issue" : "issues")"
+                Button { jumpToLinks() } label: {
+                    signal(symbol: "hand.raised.fill", text: text, tint: open == 0 ? nil : Theme.chart3, label: text)
+                }
+                .buttonStyle(.plain)
+                .modifier(FocusOutline(radius: 8))
+                .help("Show the blocking issues")
+                .accessibilityHint("Scrolls to the linked issues")
             }
             if !d.subIssues.isEmpty {
                 signal(symbol: done == d.subIssues.count ? "checklist.checked" : "checklist", text: "\(done) of \(d.subIssues.count) sub-issues done",
@@ -185,7 +195,7 @@ struct IssueDetailView: View {
                 .background(Soot.lime, in: Circle())
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 3) {
-                Text(verbatim: done ? "Merged" : "Merged, ticket still open")
+                Text(verbatim: "Merged")
                     .font(.system(size: 15, weight: .semibold)).foregroundStyle(Soot.ink)
                 Text(verbatim: done ? "Shipped with pull request #\(number), \u{201C}\(title)\u{201D}."
                               : "This issue seems to be merged already by the PR #\(number), \u{201C}\(title)\u{201D}.")
@@ -198,16 +208,6 @@ struct IssueDetailView: View {
                     .font(.system(size: 13, weight: .semibold)).foregroundStyle(Soot.ink)
             }
             .help("Open pull request #\(number) on GitHub")
-            if !done, let doneState = team?.orderedStates.first(where: { $0.type == "completed" }) {
-                let current = row ?? d.asRow
-                Button("Mark as \(doneState.name)") {
-                    change(current, note: "Status → \(doneState.name)") { r in
-                        r.state = LinearIssue.State(id: doneState.id, name: doneState.name, type: doneState.type, color: doneState.color)
-                    } request: { .init(stateID: doneState.id) }
-                }
-                .buttonStyle(SmallLimeButton())
-                .help("Move the issue to \(doneState.name) in Linear; the status chip can move it back")
-            }
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 14)
@@ -232,6 +232,17 @@ struct IssueDetailView: View {
         .accessibilityLabel(label)
     }
 
+    private func jumpToLinks() {
+        linksJump += 1
+        withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) { linksHighlighted = true }
+        // Snapshots hold the outline so the capture can show it.
+        let hold: UInt64 = ProcessInfo.processInfo.environment["DEVER_SNAPSHOT_JUMP"] == "1" ? 30 : 0
+        Task {
+            try? await Task.sleep(nanoseconds: hold > 0 ? hold * 1_000_000_000 : 1_800_000_000)
+            withAnimation(reduceMotion ? nil : .easeOut(duration: 0.4)) { linksHighlighted = false }
+        }
+    }
+
     // MARK: Reading column
 
     private func reading(_ d: LinearIssueDetail) -> some View {
@@ -240,6 +251,9 @@ struct IssueDetailView: View {
                 description(d)
             }
             linksCard(d)
+                .id("links")
+                .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Soot.lime, lineWidth: 2).opacity(linksHighlighted ? 1 : 0))
+                .background(Soot.lime.opacity(linksHighlighted ? 0.06 : 0), in: RoundedRectangle(cornerRadius: 12))
             attachmentsCard(d)
             card(symbol: "bubble.left.and.bubble.right", title: "Activity") {
                 activity(d)
@@ -690,6 +704,11 @@ struct IssueDetailView: View {
             detail = d
             if let text = d.description { blocks = await store.blocks(for: text) }
             if let teamID = d.team?.id { team = try? await store.team(teamID, app: app) }
+            // Snapshots: DEVER_SNAPSHOT_JUMP=1 presses the blocked-by chip.
+            if ProcessInfo.processInfo.environment["DEVER_SNAPSHOT_JUMP"] == "1", !d.blockedBy.isEmpty {
+                try? await Task.sleep(nanoseconds: 4_000_000_000)
+                jumpToLinks()
+            }
             // Snapshots: DEVER_SNAPSHOT_TRIAGE=1 writes the current priority back, to show the confirmation.
             if ProcessInfo.processInfo.environment["DEVER_SNAPSHOT_TRIAGE"] == "1", let current = row {
                 change(current, note: "Priority → \(LinearPriority.label(current.priority))") { _ in } request: { .init(priority: current.priority ?? 0) }
@@ -790,7 +809,7 @@ struct MarkdownView: View {
                     .background(Soot.ground, in: RoundedRectangle(cornerRadius: 8))
                     .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Soot.line))
                     .overlay(alignment: .leading) {
-                        RoundedRectangle(cornerRadius: 2).fill(Soot.edge).frame(width: 3).padding(.vertical, 8).padding(.leading, 1)
+                        RoundedRectangle(cornerRadius: 2).fill(MarkdownTheme.code.opacity(0.55)).frame(width: 3).padding(.vertical, 8).padding(.leading, 1)
                     }
                     .overlay(alignment: .topTrailing) {
                         if let language, !language.isEmpty {
@@ -936,19 +955,5 @@ private struct RecentTime: View {
         }
         .help(LinearDate.parse(date)?.formatted(date: .abbreviated, time: .shortened) ?? "")
         .accessibilityLabel((LinearDate.relative(date) ?? "") + (recent ? ", recent" : ""))
-    }
-}
-
-/// The lime action at chip height, for a banner's one call to action.
-struct SmallLimeButton: ButtonStyle {
-    @Environment(\.isEnabled) private var isEnabled
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .font(.system(size: 13, weight: .semibold))
-            .foregroundStyle(Soot.limeInk)
-            .padding(.horizontal, 12)
-            .frame(height: 30)
-            .background(Soot.lime.opacity(isEnabled ? (configuration.isPressed ? 0.8 : 1) : 0.3), in: RoundedRectangle(cornerRadius: 8))
-            .modifier(FocusOutline(radius: 8))
     }
 }
