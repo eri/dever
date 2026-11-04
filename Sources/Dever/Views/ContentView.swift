@@ -226,9 +226,11 @@ struct ContentView: View {
                 .frame(width: 32, height: 32)
                 .background(Theme.chart1.opacity(0.15), in: Circle())
                 .overlay(alignment: .topTrailing) {
-                    if missingAccounts > 0 {
-                        Circle().fill(Theme.chart3).frame(width: 9, height: 9)
+                    // Amber: something to connect. Negative: a token the service rejected.
+                    if missingAccounts > 0 || !app.expired.isEmpty {
+                        Circle().fill(app.expired.isEmpty ? Theme.chart3 : Theme.negative).frame(width: 9, height: 9)
                             .overlay(Circle().strokeBorder(Theme.frame, lineWidth: 2))
+                            .offset(x: 2, y: -2)
                     }
                 }
                 .padding(3)
@@ -237,8 +239,8 @@ struct ContentView: View {
         }
         .buttonStyle(.plain)
         .modifier(FocusOutline(radius: 20))
-        .help(missingAccounts > 0 ? "Settings — \(missingAccounts) account(s) to connect" : "Settings")
-        .accessibilityLabel(missingAccounts > 0 ? "Settings, \(missingAccounts) accounts to connect" : "Settings")
+        .help(accountsHint.map { "Settings — \($0)" } ?? "Settings")
+        .accessibilityLabel(accountsHint.map { "Settings, \($0)" } ?? "Settings")
         .accessibilityAddTraits(on ? .isSelected : [])
     }
 
@@ -260,6 +262,16 @@ struct ContentView: View {
 
     private var missingAccounts: Int {
         [app.slack == nil, app.linear == nil].filter { $0 }.count
+    }
+
+    /// What the dot on the user tile means, in words.
+    private var accountsHint: String? {
+        var parts: [String] = []
+        if !app.expired.isEmpty {
+            parts.append("\(ListFormatter.localizedString(byJoining: app.expired.map(\.label).sorted())) needs reconnecting")
+        }
+        if missingAccounts > 0 { parts.append("\(missingAccounts) account(s) to connect") }
+        return parts.isEmpty ? nil : parts.joined(separator: ", ")
     }
 }
 

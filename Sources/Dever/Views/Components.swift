@@ -8,7 +8,7 @@ extension ProjectStatus {
         case .needsAttention: .negative
         case .quiet: .warning
         case .onTrack: .positive
-        case .incomplete, .loading: .neutral
+        case .incomplete, .notConnected, .loading: .neutral
         }
     }
 
@@ -19,6 +19,7 @@ extension ProjectStatus {
         case .quiet: "moon.fill"
         case .onTrack: "checkmark.circle"
         case .incomplete: "circle.dashed"
+        case .notConnected: "link"
         case .loading: "circle.dotted"
         }
     }
@@ -27,7 +28,7 @@ extension ProjectStatus {
         switch self {
         case .needsAttention: Theme.negative
         case .quiet: Theme.chart3
-        case .onTrack, .incomplete, .loading: Theme.muted
+        case .onTrack, .incomplete, .notConnected, .loading: Theme.muted
         }
     }
 }
@@ -118,31 +119,6 @@ struct DeliveryLegend: View {
         }
         .font(Theme.small)
         .accessibilityElement(children: .combine)
-    }
-}
-
-/// A failed load, inside the block that failed, with a way to recover.
-struct LoadErrorRow: View {
-    let service: ServiceKind
-    let message: String
-    var retry: (() -> Void)?
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Label {
-                Text("Couldn't load \(service.label) data. \(message)")
-                    .foregroundStyle(Theme.text)
-                    .fixedSize(horizontal: false, vertical: true)
-            } icon: {
-                Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(Theme.negative)
-            }
-            HStack(spacing: 12) {
-                if let retry { Button("Retry", action: retry) }
-                OpenSettingsButton(service: service)
-            }
-            .buttonStyle(.link)
-        }
-        .font(Theme.body)
     }
 }
 

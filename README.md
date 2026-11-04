@@ -40,6 +40,10 @@ Add `DEVER_SNAPSHOT_ONBOARDING=1` to capture the onboarding stages too, and `DEV
 `DEVER_SNAPSHOT_ISSUE=1` opens the first project's first issue and saves `issue-{dark,light}.png` plus a `-end` capture
 scrolled to the comments; add `DEVER_SNAPSHOT_CHOICE=Status` (or `Priority`, `Assignee`) to open that chip's list, and
 `DEVER_SNAPSHOT_TRIAGE=1` to write the issue's current priority back and show the confirmation line.
+Connection states, without touching the Keychain: `DEVER_SNAPSHOT_DISCONNECTED=slack,linear,github` runs as if those
+tools had never been connected, `DEVER_SNAPSHOT_UNAUTHORIZED=linear` as if the service rejected the token,
+`DEVER_SNAPSHOT_FAILING=github,slack=offline` as if calls failed (a 503, or no network), and
+`DEVER_SNAPSHOT_CONNECTING=linear` shows that tool mid-connection on the project page.
 
 ## Onboarding
 

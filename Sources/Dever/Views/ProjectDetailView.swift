@@ -21,7 +21,11 @@ struct ProjectDetailView: View {
     @State private var pullsScoped = false
     @State private var runs: [GitHubRun] = []
     @State private var merged: [MergedPull] = []
-    @State private var errors: [ServiceKind: String] = [:]
+    /// Why a panel has nothing: not connected, token rejected, offline, or a failure.
+    @State private var states: [ServiceKind: ServiceState] = [:]
+    /// When each service last loaded on this page, for the failure rows.
+    @State private var lastLoaded: [ServiceKind: Date] = [:]
+    @StateObject private var flow = ConnectFlow()
     @State private var loading = false
     @State private var loaded = false
     @State private var expanded: Set<String> = []
@@ -29,6 +33,16 @@ struct ProjectDetailView: View {
     @State private var pullTab: PullTab = .merged
 
     private var status: ProjectStatus { project.status(store.snapshots[project.id]) }
+
+    /// The linked tools with no token: one missing gets its invitation inside its panel,
+    /// several get one section at the top and quiet placeholders in the panels.
+    private var missing: [ServiceKind] { app.missingServices(for: project) }
+    private var linkedServices: [ServiceKind] {
+        [project.slack != nil ? .slack : nil, project.linear != nil ? .linear : nil, project.githubRepo != nil ? .github : nil]
+            .compactMap { $0 }
+    }
+    /// Reloads when a token arrives, so a panel fills in without leaving the page.
+    private var connectionKey: String { "\(app.slack != nil)-\(app.linear != nil)-\(app.github != nil)" }
 
     private var issues: [LinearIssue] { project.linear.map { issueStore.issues(project: $0.id) } ?? [] }
 
@@ -59,6 +73,9 @@ struct ProjectDetailView: View {
             ScrollView(.vertical) {
                 VStack(alignment: .leading, spacing: 24) {
                     titleRow
+                    if missing.count > 1 {
+                        ConnectSection(project: project, services: linkedServices, flow: flow)
+                    }
                     // The Slack panel keeps one place in the hierarchy whichever layout is on,
                     // so open threads and a half-written reply survive a switch to the wide view.
                     if twoColumns {
@@ -85,6 +102,8 @@ struct ProjectDetailView: View {
         .navigationTitle(project.name)
         .windowTitleHidden()
         .task { await load() }
+        .sheet(isPresented: $flow.githubSheet) { GitHubLoginSheet() }
+        .onChange(of: connectionKey) { _, _ in Task { await load() } }
         .onReceive(NotificationCenter.default.publisher(for: .toggleSlackWide)) { _ in
             slackExpanded.toggle()
             if slackExpanded { shownMessages = max(shownMessages, 30) }
@@ -145,6 +164,11 @@ struct ProjectDetailView: View {
 
     private var finding: String {
         if !project.isComplete { return "Link a Slack channel and a Linear project to start tracking." }
+        if !missing.isEmpty {
+            return "Connect \(ListFormatter.localizedString(byJoining: missing.map(\.label))) to see this project in one place."
+        }
+        let dead = ServiceKind.allCases.filter { states[$0] == .unauthorized }
+        if !dead.isEmpty { return "\(ListFormatter.localizedString(byJoining: dead.map(\.label))) needs reconnecting." }
         if !toClose.isEmpty {
             return Plural.text("^[\(toClose.count) issue](inflect: true) merged in code but still marked in progress in Linear.")
         }
@@ -185,8 +209,14 @@ struct ProjectDetailView: View {
     private var deliveryPanel: some View {
         VStack(alignment: .leading, spacing: 20) {
             PanelHeader(service: .linear, title: "Delivery", subtitle: "Issues joined with their pull requests")
-            if let e = errors[.linear] {
-                LoadErrorRow(service: .linear, message: e) { Task { await load() } }
+            if states[.linear] == .notConnected {
+                if missing.count > 1 {
+                    ConnectPlaceholder(service: .linear, widths: [90, 320])
+                } else {
+                    ConnectPanelBody(service: .linear, project: project, flow: flow)
+                }
+            } else if let state = states[.linear] {
+                failure(.linear, state)
             } else if !loaded {
                 HStack(alignment: .lastTextBaseline, spacing: 10) { Skeleton(width: 90, height: 34); Skeleton(width: 120) }
                 Skeleton(height: 10, radius: 5)
@@ -286,8 +316,11 @@ struct ProjectDetailView: View {
             PanelHeader(service: .linear, title: "Issues", subtitle: project.linear?.name, link: linearURL)
             if project.linear == nil {
                 QuietEmpty(symbol: "link", text: "Link a Linear project to see its issues")
-            } else if let e = errors[.linear] {
-                LoadErrorRow(service: .linear, message: e) { Task { await load() } }
+            } else if states[.linear] == .notConnected {
+                ConnectPlaceholder(service: .linear, widths: [280, 220, 320, 250])
+            } else if let state = states[.linear] {
+                // The Delivery panel above carries the action; this one just says why it is empty.
+                failure(.linear, state, compact: true)
             } else if !loaded {
                 HStack(spacing: 6) { ForEach(0..<3, id: \.self) { _ in Skeleton(width: 96, height: 30, radius: 15) } }
                 ForEach(0..<5, id: \.self) { i in
@@ -361,8 +394,14 @@ struct ProjectDetailView: View {
             }
             if project.slack == nil {
                 EmptySection(title: "No Slack channel", message: "Link a channel to follow its conversation here.")
-            } else if let e = errors[.slack] {
-                LoadErrorRow(service: .slack, message: e) { Task { await load() } }
+            } else if states[.slack] == .notConnected {
+                if missing.count > 1 {
+                    ConnectPlaceholder(service: .slack, widths: [120, 260, 96, 220])
+                } else {
+                    ConnectPanelBody(service: .slack, project: project, flow: flow)
+                }
+            } else if let state = states[.slack] {
+                failure(.slack, state)
             } else if !loaded {
                 VStack(alignment: .leading, spacing: 20) {
                     ForEach(0..<3, id: \.self) { i in
@@ -410,8 +449,14 @@ struct ProjectDetailView: View {
             PanelHeader(service: .github, title: "Pull requests",
                         subtitle: loaded ? (pullsScoped ? "Linked to this project's issues" : "Whole repository") : nil,
                         link: project.githubRepo.flatMap { URL(string: "https://github.com/\($0)") })
-            if let e = errors[.github] {
-                LoadErrorRow(service: .github, message: e) { Task { await load() } }
+            if states[.github] == .notConnected {
+                if missing.count > 1 {
+                    ConnectPlaceholder(service: .github, widths: [300, 240, 280])
+                } else {
+                    ConnectPanelBody(service: .github, project: project, flow: flow)
+                }
+            } else if let state = states[.github] {
+                failure(.github, state)
             } else if !loaded {
                 HStack(spacing: 6) { ForEach(0..<3, id: \.self) { _ in Skeleton(width: 90, height: 30, radius: 15) } }
                 ForEach(0..<4, id: \.self) { i in
@@ -510,10 +555,24 @@ struct ProjectDetailView: View {
 
     // MARK: Loading
 
+    /// The failure row of a panel, with the time of the last good load when there was one.
+    private func failure(_ service: ServiceKind, _ state: ServiceState, compact: Bool = false) -> some View {
+        let snapshot = store.snapshots[project.id]
+        let fromSnapshot: Date? = switch service {
+        case .slack: snapshot?.slack != nil ? snapshot?.updatedAt : nil
+        case .linear: snapshot?.linear != nil ? snapshot?.updatedAt : nil
+        case .github: snapshot?.github != nil ? snapshot?.updatedAt : nil
+        }
+        return ServiceFailureRow(service: service, state: state, lastLoaded: lastLoaded[service] ?? fromSnapshot,
+                                 retry: { Task { await load(force: true) } }, flow: flow, compact: compact)
+    }
+
     private func load(force: Bool = false) async {
         loading = true
         defer { loading = false; loaded = true }
-        errors = [:]
+        states = [:]
+        // A tool without a token is an invitation, not a call that fails.
+        for service in missing { states[service] = .notConnected }
         async let s: Void = loadSlack()
         // GitHub needs the Linear issues to tell which pull requests belong to the project.
         await loadLinear(force: force)
@@ -522,15 +581,19 @@ struct ProjectDetailView: View {
     }
 
     private func loadLinear(force: Bool) async {
-        guard let id = project.linear?.id else { return }
-        do { _ = try await issueStore.load(project: id, force: force, app: app) } catch { errors[.linear] = error.localizedDescription }
+        guard let id = project.linear?.id, states[.linear] == nil else { return }
+        do {
+            _ = try await issueStore.load(project: id, force: force, app: app)
+            lastLoaded[.linear] = Date()
+        } catch { states[.linear] = app.failure(error, .linear) }
     }
 
     private func loadSlack() async {
-        guard let id = project.slack?.id else { return }
+        guard let id = project.slack?.id, states[.slack] == nil else { return }
         do {
             let page = try await app.withSlack { try await $0.historyPage(id, limit: 20) }
             merge(page.messages)
+            lastLoaded[.slack] = Date()
             if messages.count <= 20 { hasEarlier = page.hasMore }
             if let team = app.slack?.teamID {
                 // One users.list per quarter hour across the app, not one per visit.
@@ -541,7 +604,7 @@ struct ProjectDetailView: View {
             if customEmoji.isEmpty, let team = app.slack?.teamID {
                 customEmoji = (try? await app.withSlack { await SlackDirectory.shared.customEmoji(team: team, via: $0) }) ?? [:]
             }
-        } catch { errors[.slack] = error.localizedDescription }
+        } catch { states[.slack] = app.failure(error, .slack) }
     }
 
     /// New messages replace the ones with the same `ts`; the rest stays as loaded, so a
@@ -585,10 +648,10 @@ struct ProjectDetailView: View {
     }
 
     private func loadGitHub() async {
-        guard let repo = project.githubRepo else { return }
+        guard let repo = project.githubRepo, states[.github] == nil else { return }
         do {
             let client = try app.githubClient()
-            let refs: [IssueReference]? = project.linear == nil || errors[.linear] != nil ? nil : issues
+            let refs: [IssueReference]? = project.linear == nil || states[.linear] != nil ? nil : issues
             async let allRuns = client.runs(repo)
             async let recentlyMerged = client.mergedPulls(repo)
             let prs = ProjectPullRequests(pulls: try await client.pulls(repo), issues: refs,
@@ -604,6 +667,8 @@ struct ProjectDetailView: View {
                 issueStore.pullsByURL[p.pull.html_url] = .init(number: p.pull.number, title: p.pull.title,
                                                                state: p.pull.draft == true ? .draft : .open)
             }
-        } catch { errors[.github] = error.localizedDescription }
+            lastLoaded[.github] = Date()
+            app.succeeded(.github)
+        } catch { states[.github] = app.failure(error, .github) }
     }
 }

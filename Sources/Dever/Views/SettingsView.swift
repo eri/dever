@@ -79,6 +79,9 @@ private struct AccountRow: View {
     @State private var confirmDisconnect = false
     @State private var browserFlow: Task<Void, Never>?
 
+    /// Connected, but the service rejected the token the last time Dever used it.
+    private var expired: Bool { app.expired.contains(service) }
+
     /// GitHub opens its sheet (code entry); Slack and Linear go through the browser.
     private func start() {
         guard service != .github else { return connect() }
@@ -114,7 +117,14 @@ private struct AccountRow: View {
                 Label { Text(service.label) } icon: { BrandLogo(service: service, size: 16) }
                     .font(Theme.bodyStrong).foregroundStyle(Theme.text)
                 Group {
-                    if let detail {
+                    if let detail, expired {
+                        Label {
+                            Text("Session expired for \(detail). Reconnect to keep reading \(service.label).")
+                                .foregroundStyle(Theme.text).fixedSize(horizontal: false, vertical: true)
+                        } icon: {
+                            Image(systemName: "exclamationmark.circle.fill").foregroundStyle(Theme.negative)
+                        }
+                    } else if let detail {
                         Label {
                             Text(detail).foregroundStyle(Theme.muted).lineLimit(1).help(detail)
                         } icon: {
@@ -140,10 +150,17 @@ private struct AccountRow: View {
                 .font(Theme.small)
             }
             Spacer(minLength: 12)
-            if app.isConnected(service) {
-                Button(checking ? "Checking…" : "Check connection") { Task { await test() } }
-                    .buttonStyle(SecondaryButtonStyle())
-                    .disabled(checking)
+            if browserFlow != nil {
+                Text("Approve in your browser…").font(.caption).foregroundStyle(.secondary)
+                Button("Cancel") { browserFlow?.cancel(); browserFlow = nil }
+            } else if app.isConnected(service) {
+                if expired {
+                    Button("Reconnect") { start() }.buttonStyle(PrimaryButtonStyle())
+                } else {
+                    Button(checking ? "Checking…" : "Check connection") { Task { await test() } }
+                        .buttonStyle(SecondaryButtonStyle())
+                        .disabled(checking)
+                }
                 Button("Disconnect…") { confirmDisconnect = true }
                     .buttonStyle(SecondaryButtonStyle())
                     .confirmationDialog("Disconnect \(service.label)?", isPresented: $confirmDisconnect) {
@@ -155,15 +172,14 @@ private struct AccountRow: View {
                     } message: {
                         Text("Dever stops showing \(service.label) data until you connect again. Your projects and their links are kept.")
                     }
-            } else if browserFlow != nil {
-                Text("Approve in your browser…").font(.caption).foregroundStyle(.secondary)
-                Button("Cancel") { browserFlow?.cancel(); browserFlow = nil }
             } else {
                 Button("Connect") { start() }.buttonStyle(PrimaryButtonStyle())
             }
         }
     }
 
+    /// The cheapest call that needs the token (auth.test, viewer, /user): tells a rejected
+    /// token from a network that is down.
     private func test() async {
         checking = true
         defer { checking = false }
@@ -173,10 +189,16 @@ private struct AccountRow: View {
             case .slack: try await app.withSlack { try await $0.authTest() }
             case .linear: try await app.withLinear { try await $0.viewer() }.userName
             }
+            app.succeeded(service)
             status = "Working — signed in as \(who)"
             statusIsError = false
         } catch {
-            status = error.localizedDescription
+            status = switch app.failure(error, service) ?? .failed(error.localizedDescription) {
+            case .unauthorized: "\(service.label) rejected the token. Reconnect to continue."
+            case .offline: "You're offline. \(service.label) couldn't be reached; the token is unchanged."
+            case .failed(let message): "\(service.label) answered with an error: \(message)"
+            case .notConnected: "\(service.label) is not connected."
+            }
             statusIsError = true
         }
     }

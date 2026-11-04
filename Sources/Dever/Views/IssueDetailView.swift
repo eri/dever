@@ -12,7 +12,8 @@ struct IssueDetailView: View {
 
     @State private var detail: LinearIssueDetail?
     @State private var team: LinearTeamContext?
-    @State private var error: String?
+    @State private var error: ServiceState?
+    @StateObject private var flow = ConnectFlow()
     @State private var blocks: [MarkdownBlock]?
     @State private var notice: (text: String, failed: Bool)?
     @State private var noticeTask: Task<Void, Never>?
@@ -32,7 +33,7 @@ struct IssueDetailView: View {
                         topBar
                         heading
                         if let error {
-                            LoadErrorRow(service: .linear, message: error) { Task { await load() } }
+                            ServiceFailureRow(service: .linear, state: error, retry: { Task { await load() } }, flow: flow)
                         } else if let detail {
                             signals(detail)
                             if let notice { noticeLine(notice) }
@@ -675,7 +676,7 @@ struct IssueDetailView: View {
                 change(current, note: "Priority → \(LinearPriority.label(current.priority))") { _ in } request: { .init(priority: current.priority ?? 0) }
             }
         } catch {
-            if detail == nil { self.error = error.localizedDescription }
+            if detail == nil { self.error = app.failure(error, .linear) }
         }
     }
 }

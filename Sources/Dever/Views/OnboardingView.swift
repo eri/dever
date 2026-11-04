@@ -265,7 +265,7 @@ private struct SweepLine: View {
 }
 
 /// A slow, small pulse on the logo of the service being connected.
-private struct Breathing: ViewModifier {
+struct Breathing: ViewModifier {
     let active: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var up = false

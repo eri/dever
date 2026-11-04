@@ -34,6 +34,33 @@ enum AppError: LocalizedError {
     }
 }
 
+/// Why a panel or a column has no data. Kept as a type, not a message, so the screen can
+/// tell a tool that was never connected from one that is failing.
+enum ServiceState: Equatable {
+    /// No token: the user never connected the tool (or disconnected it). An invitation, not an error.
+    case notConnected
+    /// There is a token but the service rejects it: the session expired or was revoked.
+    case unauthorized
+    /// No network.
+    case offline
+    /// Anything else: a 5xx, a rate limit, a decoding error. The message is the service's own.
+    case failed(String)
+
+    init(_ error: Error) {
+        switch error {
+        case AppError.notConnected: self = .notConnected
+        case AppError.unauthorized: self = .unauthorized
+        case let e as URLError where [.notConnectedToInternet, .networkConnectionLost, .dataNotAllowed,
+                                      .cannotFindHost, .cannotConnectToHost, .internationalRoamingOff].contains(e.code):
+            self = .offline
+        default: self = .failed(error.localizedDescription)
+        }
+    }
+
+    /// True for the states that are the connection's fault, not the network's or the service's.
+    var needsConnecting: Bool { self == .notConnected || self == .unauthorized }
+}
+
 struct Project: Codable, Identifiable, Hashable {
     struct SlackLink: Codable, Hashable { var id: String; var name: String }
     struct LinearLink: Codable, Hashable { var id: String; var name: String; var url: String }
@@ -95,11 +122,32 @@ enum Naming {
 
 @MainActor
 final class AppState: ObservableObject {
-    @Published var github: GitHubCredentials? { didSet { saveCredentials() } }
-    @Published var slack: SlackCredentials? { didSet { saveCredentials() } }
-    @Published var linear: LinearCredentials? { didSet { saveCredentials() } }
+    @Published var github: GitHubCredentials? { didSet { saveCredentials(); expired.remove(.github) } }
+    @Published var slack: SlackCredentials? { didSet { saveCredentials(); expired.remove(.slack) } }
+    @Published var linear: LinearCredentials? { didSet { saveCredentials(); expired.remove(.linear) } }
     @Published var projects: [Project] = [] { didSet { saveProjects() } }
     @Published var lastError: String?
+    /// Services whose token the service itself rejected since the last successful call.
+    /// Connected but dead: Settings and the rail show "Reconnect" from here.
+    @Published private(set) var expired: Set<ServiceKind> = []
+
+    /// Snapshots: `DEVER_SNAPSHOT_DISCONNECTED=slack,linear` runs as if those services had no
+    /// token (the Keychain is left alone); `DEVER_SNAPSHOT_UNAUTHORIZED=linear` as if the token
+    /// were rejected; `DEVER_SNAPSHOT_FAILING=github,slack=offline` as if calls failed.
+    private static func simulated(_ key: String) -> [String: String] {
+        guard let raw = ProcessInfo.processInfo.environment[key] else { return [:] }
+        var out: [String: String] = [:]
+        for part in raw.split(separator: ",") {
+            let pair = part.split(separator: "=", maxSplits: 1).map { $0.trimmingCharacters(in: .whitespaces) }
+            if let name = pair.first, !name.isEmpty { out[name] = pair.count > 1 ? pair[1] : "" }
+        }
+        return out
+    }
+    private let simulatedMissing = Set(simulated("DEVER_SNAPSHOT_DISCONNECTED").keys.compactMap(ServiceKind.init(rawValue:)))
+    private let simulatedFailing = simulated("DEVER_SNAPSHOT_FAILING")
+    private var isSimulating: Bool {
+        !simulatedMissing.isEmpty || !simulatedFailing.isEmpty || !Self.simulated("DEVER_SNAPSHOT_UNAUTHORIZED").isEmpty
+    }
 
     private let projectsURL: URL = {
         let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
@@ -125,6 +173,44 @@ final class AppState: ObservableObject {
            let list = try? JSONDecoder().decode([Project].self, from: data) {
             projects = list
         }
+        if simulatedMissing.contains(.slack) { slack = nil }
+        if simulatedMissing.contains(.linear) { linear = nil }
+        if simulatedMissing.contains(.github) { github = nil }
+        expired = Set(Self.simulated("DEVER_SNAPSHOT_UNAUTHORIZED").keys.compactMap(ServiceKind.init(rawValue:)))
+    }
+
+    /// Snapshot runs only: throws the failure the environment asks for.
+    private func simulateFailure(_ s: ServiceKind) throws {
+        if expired.contains(s), !Self.simulated("DEVER_SNAPSHOT_UNAUTHORIZED").isEmpty { throw AppError.unauthorized(s) }
+        guard let mode = simulatedFailing[s.rawValue] else { return }
+        switch mode {
+        case "offline": throw URLError(.notConnectedToInternet)
+        default: throw AppError.message("\(s.label) 503: service unavailable")
+        }
+    }
+
+    /// Turns a failed call into a panel state and remembers a rejected token, so Settings
+    /// and the rail can say "Reconnect" before the user opens the project again.
+    /// Nil for a cancelled call (the page went away), which says nothing about the service.
+    func failure(_ error: Error, _ s: ServiceKind) -> ServiceState? {
+        if error is CancellationError || (error as? URLError)?.code == .cancelled { return nil }
+        let state = ServiceState(error)
+        if state == .unauthorized, !expired.contains(s) { expired.insert(s) }
+        return state
+    }
+
+    /// A call that went through proves the token is alive again.
+    func succeeded(_ s: ServiceKind) {
+        if expired.contains(s) { expired.remove(s) }
+    }
+
+    /// The tools this project links that have no token: what the project page invites to connect.
+    func missingServices(for p: Project) -> [ServiceKind] {
+        var out: [ServiceKind] = []
+        if p.slack != nil, slack == nil { out.append(.slack) }
+        if p.linear != nil, linear == nil { out.append(.linear) }
+        if p.githubRepo != nil, github == nil { out.append(.github) }
+        return out
     }
 
     func isConnected(_ s: ServiceKind) -> Bool {
@@ -139,12 +225,16 @@ final class AppState: ObservableObject {
 
     func githubClient() throws -> GitHubClient {
         guard let github else { throw AppError.notConnected(.github) }
+        try simulateFailure(.github)
         return GitHubClient(token: github.token)
     }
 
     func withSlack<T>(_ body: (SlackClient) async throws -> T) async throws -> T {
         guard let slack else { throw AppError.notConnected(.slack) }
-        return try await body(SlackClient(creds: slack))
+        try simulateFailure(.slack)
+        let value = try await body(SlackClient(creds: slack))
+        succeeded(.slack)
+        return value
     }
 
     /// One refresh at a time: Linear rotates the refresh token, so two concurrent
@@ -171,19 +261,25 @@ final class AppState: ObservableObject {
                 self.linear = stored
                 return stored
             }
-            self.linear = nil
+            // The token stays: "connected, but rejected" is a different state from "not
+            // connected", and the Settings row offers Reconnect for it.
             throw AppError.unauthorized(.linear)
         }
     }
 
     func withLinear<T>(_ body: (LinearClient) async throws -> T) async throws -> T {
+        guard linear != nil else { throw AppError.notConnected(.linear) }
+        try simulateFailure(.linear)
         let creds = try await refreshedLinear(force: false)
+        let value: T
         do {
-            return try await body(LinearClient(token: creds.accessToken))
+            value = try await body(LinearClient(token: creds.accessToken))
         } catch AppError.unauthorized(.linear) {
             let fresh = try await refreshedLinear(force: true)
-            return try await body(LinearClient(token: fresh.accessToken))
+            value = try await body(LinearClient(token: fresh.accessToken))
         }
+        succeeded(.linear)
+        return value
     }
 
     func disconnect(_ s: ServiceKind) {
@@ -228,6 +324,8 @@ final class AppState: ObservableObject {
     private static let credentialsKey = "credentials"
 
     private func saveCredentials() {
+        // A snapshot run with simulated connections never writes its pretend state back.
+        guard !isSimulating else { return }
         try? Keychain.save(StoredCredentials(github: github, slack: slack, linear: linear), for: Self.credentialsKey)
     }
 

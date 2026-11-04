@@ -39,13 +39,19 @@ struct ProjectSnapshot {
     var github: GitHubStats?
     /// Issues by delivery stage (Linear joined with GitHub); nil without Linear.
     var delivery: Delivery?
-    var errors: [ServiceKind: String] = [:]
+    /// Why a service has no data: never connected, rejected token, offline or a failure.
+    var errors: [ServiceKind: ServiceState] = [:]
     var updatedAt = Date()
+
+    /// Services the user still has to connect (or reconnect) for this project.
+    var unconnected: [ServiceKind] {
+        errors.filter { $0.value.needsConnecting }.keys.sorted { $0.rawValue < $1.rawValue }
+    }
 }
 
 /// Overall state of a project, derived from its links and its snapshot.
 enum ProjectStatus: Int, Comparable {
-    case needsAttention, incomplete, quiet, onTrack, loading
+    case needsAttention, incomplete, notConnected, quiet, onTrack, loading
 
     static func < (a: Self, b: Self) -> Bool { a.rawValue < b.rawValue }
 
@@ -53,6 +59,7 @@ enum ProjectStatus: Int, Comparable {
         switch self {
         case .needsAttention: "Needs attention"
         case .incomplete: "Incomplete"
+        case .notConnected: "Not connected"
         case .quiet: "Quiet"
         case .onTrack: "On track"
         case .loading: "Loading"
@@ -82,8 +89,21 @@ extension Project {
         if let stale = s.github?.mergedButOpen, !stale.isEmpty {
             out.append(Plural.text("^[\(stale.count) merged issue](inflect: true) still marked in progress"))
         }
-        out += s.errors.keys.sorted { $0.rawValue < $1.rawValue }.map { "Couldn't load \($0.label) data" }
+        for (service, state) in s.errors.sorted(by: { $0.key.rawValue < $1.key.rawValue }) {
+            switch state {
+            case .notConnected: out.append("Connect \(service.label) to see it here")
+            case .unauthorized: out.append("\(service.label) needs reconnecting")
+            case .offline: out.append("Offline: \(service.label) data is from the last load")
+            case .failed: out.append("Couldn't reach \(service.label)")
+            }
+        }
         return out
+    }
+
+    /// True while a tool this project depends on (Slack or Linear) has no working token.
+    func lacksConnection(_ s: ProjectSnapshot) -> Bool {
+        (slack != nil && s.errors[.slack]?.needsConnecting == true)
+            || (linear != nil && s.errors[.linear]?.needsConnecting == true)
     }
 
     func status(_ s: ProjectSnapshot?) -> ProjectStatus {
@@ -95,6 +115,8 @@ extension Project {
         }
         if s.github?.mergedButOpen.isEmpty == false { return .needsAttention }
         if !isComplete { return .incomplete }
+        // Nothing to judge from: say so instead of "On track".
+        if lacksConnection(s) { return .notConnected }
         if let last = s.slack?.lastActivity,
            Date().timeIntervalSince(last) > Double(Self.quietAfterDays) * 86_400 {
             return .quiet
@@ -136,7 +158,7 @@ final class OverviewStore: ObservableObject {
         defer { isRefreshing = false; lastRefresh = Date() }
 
         let projects = app.projects
-        let repos = (try? app.githubClient()).map(RepoCache.init)
+        let repos = Result { RepoCache(client: try app.githubClient()) }
         // A few projects at a time keeps us well under the Slack/GitHub rate limits.
         await withTaskGroup(of: (UUID, ProjectSnapshot).self) { group in
             var pending = projects.makeIterator()
@@ -154,7 +176,7 @@ final class OverviewStore: ObservableObject {
         Notifier.shared.process(projects: projects, snapshots: snapshots)
     }
 
-    private static func load(_ p: Project, _ app: AppState, _ repos: RepoCache?) async -> ProjectSnapshot {
+    private static func load(_ p: Project, _ app: AppState, _ repos: Result<RepoCache, Error>) async -> ProjectSnapshot {
         var s = ProjectSnapshot()
         async let slack = loadSlack(p, app)
         // GitHub waits for Linear: the project's issues decide which PRs belong to it.
@@ -164,17 +186,19 @@ final class OverviewStore: ObservableObject {
             s.linear = v?.stats
             issues = v?.issues
         case .failure(let e):
-            s.errors[.linear] = e.localizedDescription
+            s.errors[.linear] = await app.failure(e, .linear)
         }
         let projectIssues = issues
         async let github = loadGitHub(p, repos, issues: projectIssues)
         switch await slack {
         case .success(let v): s.slack = v
-        case .failure(let e): s.errors[.slack] = e.localizedDescription
+        case .failure(let e): s.errors[.slack] = await app.failure(e, .slack)
         }
         switch await github {
-        case .success(let v): s.github = v
-        case .failure(let e): s.errors[.github] = e.localizedDescription
+        case .success(let v):
+            s.github = v
+            if v != nil { await app.succeeded(.github) }
+        case .failure(let e): s.errors[.github] = await app.failure(e, .github)
         }
         if let issues {
             s.delivery = Delivery(issues: issues.map { ($0.identifier, $0.state.type, $0.state.name) },
@@ -186,7 +210,7 @@ final class OverviewStore: ObservableObject {
 
     private static func loadLinear(_ p: Project, _ app: AppState)
         async -> Result<(stats: ProjectSnapshot.LinearStats, issues: [LinearClient.ProjectSummary.Issue])?, Error> {
-        guard let id = p.linear?.id, app.linear != nil else { return .success(nil) }
+        guard let id = p.linear?.id else { return .success(nil) }
         do {
             let summary = try await app.withLinear { try await $0.projectSummary(id: id) }
             var stats = ProjectSnapshot.LinearStats()
@@ -208,7 +232,7 @@ final class OverviewStore: ObservableObject {
     }
 
     private static func loadSlack(_ p: Project, _ app: AppState) async -> Result<ProjectSnapshot.SlackStats?, Error> {
-        guard let id = p.slack?.id, app.slack != nil else { return .success(nil) }
+        guard let id = p.slack?.id else { return .success(nil) }
         do {
             let weekAgo = Date().addingTimeInterval(-7 * 86_400)
             var recent = try await app.withSlack { try await $0.history(id, limit: 200, since: weekAgo) }
@@ -223,10 +247,11 @@ final class OverviewStore: ObservableObject {
         }
     }
 
-    private static func loadGitHub(_ p: Project, _ repos: RepoCache?, issues: [LinearClient.ProjectSummary.Issue]?)
+    private static func loadGitHub(_ p: Project, _ repos: Result<RepoCache, Error>, issues: [LinearClient.ProjectSummary.Issue]?)
         async -> Result<ProjectSnapshot.GitHubStats?, Error> {
-        guard let repo = p.githubRepo, let repos else { return .success(nil) }
+        guard let repo = p.githubRepo else { return .success(nil) }
         do {
+            let repos = try repos.get()
             let prs = ProjectPullRequests(pulls: try await repos.openPulls(repo), issues: issues,
                                           wholeRepository: p.showsWholeRepository)
             if prs.scoped, let issues {

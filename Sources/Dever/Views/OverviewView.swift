@@ -82,7 +82,12 @@ struct OverviewView: View {
         guard let lead = attention.max(by: { a, b in
             (store.snapshots[a.id]?.github?.mergedButOpen.count ?? 0) < (store.snapshots[b.id]?.github?.mergedButOpen.count ?? 0)
         }) else {
-            return store.snapshots.isEmpty ? "Loading your projects…" : "Every project is on track."
+            if store.snapshots.isEmpty { return "Loading your projects…" }
+            let unconnected = Set(store.snapshots.values.flatMap(\.unconnected)).sorted { $0.rawValue < $1.rawValue }
+            if !unconnected.isEmpty {
+                return "Connect \(ListFormatter.localizedString(byJoining: unconnected.map(\.label))) to see your projects here."
+            }
+            return "Every project is on track."
         }
         let reason = lead.signals(store.snapshots[lead.id]).first
             .map { ": " + $0.prefix(1).lowercased() + $0.dropFirst() } ?? ""
@@ -289,8 +294,8 @@ private struct ProjectRow: View {
             }
         } else if project.linear == nil {
             Text("Link a Linear project to see delivery").font(Theme.small).foregroundStyle(Theme.muted)
-        } else if let e = snapshot?.errors[.linear] {
-            Text("Linear unavailable").font(Theme.small).foregroundStyle(Theme.negative).help(e)
+        } else if let state = snapshot?.errors[.linear] {
+            unavailable(.linear, state)
         } else {
             VStack(alignment: .leading, spacing: 6) {
                 Skeleton(height: 8, radius: 2)
@@ -325,6 +330,9 @@ private struct ProjectRow: View {
             }
         } else if project.githubRepo == nil {
             dash("No repository linked")
+        } else if snapshot?.errors[.github] != nil {
+            // The pipeline column, next to this one, says why.
+            dash("GitHub data unavailable")
         } else {
             VStack(alignment: .trailing, spacing: 4) { Skeleton(width: 20, height: 14); Skeleton(width: 32, height: 10) }
         }
@@ -336,6 +344,8 @@ private struct ProjectRow: View {
             PipelineBadge(state: g.pipeline)
         } else if project.githubRepo == nil {
             dash("No repository linked")
+        } else if let state = snapshot?.errors[.github] {
+            unavailable(.github, state)
         } else {
             Skeleton(width: 72, height: 14)
         }
@@ -351,6 +361,8 @@ private struct ProjectRow: View {
             }
         } else if project.slack == nil {
             dash("No Slack channel linked")
+        } else if let state = snapshot?.errors[.slack] {
+            unavailable(.slack, state)
         } else {
             VStack(alignment: .trailing, spacing: 4) { Skeleton(width: 20, height: 14); Skeleton(width: 96, height: 10) }
         }
@@ -359,5 +371,26 @@ private struct ProjectRow: View {
     /// Missing or not applicable: a grey dash, never a zero.
     private func dash(_ help: String) -> some View {
         Text("—").foregroundStyle(Theme.muted).help(help)
+    }
+
+    /// A tool to connect is a quiet chip; a tool that failed says so, in words, with the
+    /// negative colour on the glyph only.
+    @ViewBuilder
+    private func unavailable(_ service: ServiceKind, _ state: ServiceState) -> some View {
+        switch state {
+        case .notConnected: ConnectChip(service: service)
+        case .unauthorized: ConnectChip(service: service, verb: "Reconnect")
+        case .offline:
+            Label { Text("Offline") } icon: { Image(systemName: "wifi.slash").foregroundStyle(Theme.muted) }
+                .font(Theme.small).foregroundStyle(Theme.muted).lineLimit(1)
+        case .failed(let message):
+            // The column names the tool; the word has to fit it.
+            Label { Text("Unreachable") } icon: {
+                Image(systemName: "exclamationmark.circle.fill").foregroundStyle(Theme.negative)
+            }
+            .font(Theme.small).foregroundStyle(Theme.text).lineLimit(1)
+            .help("Couldn't reach \(service.label): \(message)")
+            .accessibilityLabel("Couldn't reach \(service.label)")
+        }
     }
 }
