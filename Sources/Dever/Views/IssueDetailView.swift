@@ -140,9 +140,13 @@ struct IssueDetailView: View {
                        tint: late ? Theme.negative : nil, label: late ? "Due \(text), overdue" : "Due \(text)")
             }
             if !d.blockedBy.isEmpty {
-                let open = d.blockedBy.filter { $0.state.type != "completed" && $0.state.type != "canceled" }.count
-                signal(symbol: "hand.raised.fill", text: open == 0 ? "Was blocked, now clear" : "Blocked by \(open)",
-                       tint: open == 0 ? nil : Theme.chart3, label: open == 0 ? "No open blockers" : "Blocked by \(open) issues")
+                let open = d.blockedBy.filter { $0.state.type != "completed" && $0.state.type != "canceled" }
+                let names = open.map(\.identifier)
+                let text = open.isEmpty ? "Was blocked, now clear"
+                    : names.count <= 2 ? "Blocked by " + names.joined(separator: " and ")
+                    : "Blocked by \(names.count) issues"
+                signal(symbol: "hand.raised.fill", text: text, tint: open.isEmpty ? nil : Theme.chart3,
+                       label: open.isEmpty ? "No open blockers" : "Blocked by " + names.joined(separator: ", "))
             }
             if !d.subIssues.isEmpty {
                 signal(symbol: done == d.subIssues.count ? "checklist.checked" : "checklist", text: "\(done) of \(d.subIssues.count) sub-issues done",
@@ -194,6 +198,16 @@ struct IssueDetailView: View {
                     .font(.system(size: 13, weight: .semibold)).foregroundStyle(Soot.ink)
             }
             .help("Open pull request #\(number) on GitHub")
+            if !done, let doneState = team?.orderedStates.first(where: { $0.type == "completed" }) {
+                let current = row ?? d.asRow
+                Button("Mark as \(doneState.name)") {
+                    change(current, note: "Status → \(doneState.name)") { r in
+                        r.state = LinearIssue.State(id: doneState.id, name: doneState.name, type: doneState.type, color: doneState.color)
+                    } request: { .init(stateID: doneState.id) }
+                }
+                .buttonStyle(SmallLimeButton())
+                .help("Move the issue to \(doneState.name) in Linear; the status chip can move it back")
+            }
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 14)
@@ -555,7 +569,13 @@ struct IssueDetailView: View {
             let changes = describe(e, labels: labels)
             if !changes.isEmpty { list.append(.event(e, changes)) }
         }
-        return list.sorted { $0.date < $1.date }
+        return list.sorted { $0.date > $1.date }
+    }
+
+    /// Under six hours old: the thread marks it so the newest changes stand out.
+    private func isRecent(_ date: String) -> Bool {
+        guard let d = LinearDate.parse(date) else { return false }
+        return Date().timeIntervalSince(d) < 6 * 3600
     }
 
     private func describe(_ e: LinearIssueDetail.HistoryEvent, labels: [String: String]) -> [Change] {
@@ -597,9 +617,9 @@ struct IssueDetailView: View {
                     let grouped: Bool = {
                         guard case .comment(let p)? = previous else { return false }
                         return p.authorName == c.authorName
-                            && (LinearDate.parse(c.createdAt)?.timeIntervalSince(LinearDate.parse(p.createdAt) ?? .distantPast) ?? 1e9) < 600
+                            && (LinearDate.parse(p.createdAt)?.timeIntervalSince(LinearDate.parse(c.createdAt) ?? .distantPast) ?? 1e9) < 600
                     }()
-                    CommentRow(comment: c, grouped: grouped, reply: c.parent != nil, measure: measure)
+                    CommentRow(comment: c, grouped: grouped, reply: c.parent != nil, measure: measure, recent: isRecent(c.createdAt))
                         .padding(.top, grouped ? 2 : 16)
                         .padding(.bottom, 8)
                 case .event(let e, let changes):
@@ -635,12 +655,11 @@ struct IssueDetailView: View {
                 }
             }
             Spacer(minLength: 12)
-            Text(LinearDate.relative(date) ?? "").font(.system(size: 13)).foregroundStyle(Soot.muted)
-                .frame(minHeight: 26)
-                .help(LinearDate.parse(date)?.formatted(date: .abbreviated, time: .shortened) ?? "")
+            RecentTime(date: date, recent: isRecent(date)).frame(minHeight: 26)
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 4)
+        .background(isRecent(date) ? Soot.lime.opacity(0.06) : Color.clear, in: RoundedRectangle(cornerRadius: 8))
         .accessibilityElement(children: .combine)
     }
 
@@ -689,6 +708,7 @@ private struct CommentRow: View {
     let grouped: Bool
     let reply: Bool
     let measure: CGFloat
+    var recent = false
     @State private var blocks: [MarkdownBlock]?
     @State private var hovering = false
 
@@ -706,8 +726,7 @@ private struct CommentRow: View {
                 if !grouped {
                     HStack(alignment: .firstTextBaseline, spacing: 8) {
                         Text(comment.authorName).font(.system(size: 15, weight: .bold)).foregroundStyle(Soot.ink)
-                        Text(LinearDate.relative(comment.createdAt) ?? "").font(.system(size: 13)).foregroundStyle(Soot.muted)
-                            .help(LinearDate.parse(comment.createdAt)?.formatted(date: .abbreviated, time: .shortened) ?? "")
+                        RecentTime(date: comment.createdAt, recent: recent)
                         if comment.updatedAt != comment.createdAt {
                             Text("edited").font(.system(size: 11)).foregroundStyle(Soot.muted)
                         }
@@ -723,7 +742,7 @@ private struct CommentRow: View {
         .padding(.leading, reply ? 28 : 0)
         .padding(.vertical, 4)
         .padding(.horizontal, 8)
-        .background(hovering ? Soot.ground.opacity(0.6) : Color.clear, in: RoundedRectangle(cornerRadius: 6))
+        .background(hovering ? Soot.ground.opacity(0.6) : recent ? Soot.lime.opacity(0.06) : Color.clear, in: RoundedRectangle(cornerRadius: 8))
         .onHover { hovering = $0 }
         .accessibilityElement(children: .contain)
         .task(id: comment.body) { blocks = await store.blocks(for: comment.body) }
@@ -771,7 +790,7 @@ struct MarkdownView: View {
                     .background(Soot.ground, in: RoundedRectangle(cornerRadius: 8))
                     .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Soot.line))
                     .overlay(alignment: .leading) {
-                        RoundedRectangle(cornerRadius: 2).fill(MarkdownTheme.code).frame(width: 3).padding(.vertical, 8).padding(.leading, 1)
+                        RoundedRectangle(cornerRadius: 2).fill(Soot.edge).frame(width: 3).padding(.vertical, 8).padding(.leading, 1)
                     }
                     .overlay(alignment: .topTrailing) {
                         if let language, !language.isEmpty {
@@ -901,5 +920,35 @@ struct MiniBar: View {
         }
         .frame(width: 48, height: 5)
         .accessibilityHidden(true)
+    }
+}
+
+/// A relative time; under six hours it is lime with a dot and says so to VoiceOver.
+private struct RecentTime: View {
+    let date: String
+    let recent: Bool
+    var body: some View {
+        HStack(spacing: 5) {
+            if recent { Circle().fill(Soot.lime).frame(width: 6, height: 6) }
+            Text(LinearDate.relative(date) ?? "")
+                .font(.system(size: 13, weight: recent ? .semibold : .regular))
+                .foregroundStyle(recent ? Soot.lime : Soot.muted)
+        }
+        .help(LinearDate.parse(date)?.formatted(date: .abbreviated, time: .shortened) ?? "")
+        .accessibilityLabel((LinearDate.relative(date) ?? "") + (recent ? ", recent" : ""))
+    }
+}
+
+/// The lime action at chip height, for a banner's one call to action.
+struct SmallLimeButton: ButtonStyle {
+    @Environment(\.isEnabled) private var isEnabled
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.system(size: 13, weight: .semibold))
+            .foregroundStyle(Soot.limeInk)
+            .padding(.horizontal, 12)
+            .frame(height: 30)
+            .background(Soot.lime.opacity(isEnabled ? (configuration.isPressed ? 0.8 : 1) : 0.3), in: RoundedRectangle(cornerRadius: 8))
+            .modifier(FocusOutline(radius: 8))
     }
 }

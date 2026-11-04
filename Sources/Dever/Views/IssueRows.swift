@@ -414,11 +414,11 @@ struct CopyChip: View {
     }
 }
 
-/// Inline styling of Linear's Markdown: code in teal monospace on the ground tone, links in
-/// lime. Two accents, each with one job, both over 4.5:1 on ground and surface in both modes.
+/// Inline styling of Linear's Markdown: code as ink in monospace on the ground tone, links in
+/// lime and underlined. Only links take a hue, so a colour always means "this opens".
 enum MarkdownTheme {
-    /// Code, inline and in blocks: 8.0:1 on dark ground, 5.9:1 on light ground.
-    static let code = Theme.chart1
+    /// Code, inline and in blocks: ink on the ground tone, in monospace.
+    static let code = Soot.ink
 
     static func style(_ text: AttributedString, size: CGFloat) -> AttributedString {
         var out = text
