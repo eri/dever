@@ -19,6 +19,7 @@
         "team:read",
         "files:read",
         "chat:write",
+        "reactions:read",
         "reactions:write"
       ]
     }
