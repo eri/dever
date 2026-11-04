@@ -40,6 +40,17 @@ enum Snapshotter {
                 NotificationCenter.default.post(name: .toggleSlackWide, object: nil)
                 try? await Task.sleep(nanoseconds: UInt64((wait == 0 ? 0.4 : 6) * 1_000_000_000))
                 capture(to: dir.appendingPathComponent("project-slack-wide-\(themeName).png"))
+                if ProcessInfo.processInfo.environment["DEVER_SNAPSHOT_SLACK_PREVIEW"] == "1" {
+                    NotificationCenter.default.post(name: .previewFirstSlackFile, object: nil)
+                    try? await Task.sleep(nanoseconds: 6_000_000_000)
+                    if let sheet = NSApp.windows.first(where: { $0.isVisible && ($0.isSheet || $0.parent != nil) }), let view = sheet.contentView,
+                       let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) {
+                        view.cacheDisplay(in: view.bounds, to: rep)
+                        try? rep.representation(using: .png, properties: [:])?.write(to: dir.appendingPathComponent("slack-preview-\(themeName).png"))
+                    }
+                    NotificationCenter.default.post(name: .previewSlackFile, object: nil)
+                    try? await Task.sleep(nanoseconds: 1_500_000_000)
+                }
                 NotificationCenter.default.post(name: .toggleSlackWide, object: nil)
                 try? await Task.sleep(nanoseconds: 1_000_000_000)
             }

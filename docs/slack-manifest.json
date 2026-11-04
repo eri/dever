@@ -20,7 +20,8 @@
         "files:read",
         "chat:write",
         "reactions:read",
-        "reactions:write"
+        "reactions:write",
+        "emoji:read"
       ]
     }
   },

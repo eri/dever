@@ -292,6 +292,18 @@ struct SlackClient {
         return try decode(res["messages"], as: [SlackMessage].self).filter { $0.ts != threadTS }
     }
 
+    /// The workspace's custom emoji: name → image URL, aliases resolved.
+    func customEmoji() async throws -> [String: URL] {
+        let res = try await call("emoji.list")
+        let raw = res["emoji"] as? [String: String] ?? [:]
+        var out: [String: URL] = [:]
+        for (name, value) in raw where !value.hasPrefix("alias:") { out[name] = URL(string: value) }
+        for (name, value) in raw where value.hasPrefix("alias:") {
+            if let target = out[String(value.dropFirst(6))] { out[name] = target }
+        }
+        return out
+    }
+
     /// Posts `text` as a reply in the thread of `threadTS`, as the signed-in user.
     func reply(_ channelID: String, threadTS: String, text: String) async throws {
         _ = try await call("chat.postMessage", ["channel": channelID, "thread_ts": threadTS, "text": text])

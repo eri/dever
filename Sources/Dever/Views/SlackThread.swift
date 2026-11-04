@@ -48,7 +48,8 @@ enum SlackMarkup {
             case "!":
                 out += "**@\(label ?? String(target.dropFirst()))**"
             default:
-                out += "[\(escape(label ?? SlackLinks.chipLabel(target, channels: channels)))](\(target))"
+                let bare = SlackLinks.isBare(text: label, url: target)
+                out += "[\(escape(bare ? SlackLinks.chipLabel(target, channels: channels) : label!))](\(target))"
             }
             last = m.range.location + m.range.length
         }
@@ -75,10 +76,20 @@ enum SlackMarkup {
         for m in pattern.matches(in: s, range: NSRange(location: 0, length: ns.length)).reversed() {
             let name = ns.substring(with: m.range(at: 1))
             // Unknown or custom emoji are dropped rather than left as ":code:" noise.
-            let replacement = emoji[name] ?? ""
+            let replacement = SlackMarkup.unicode(name) ?? ""
             out = (out as NSString).replacingCharacters(in: m.range, with: replacement)
         }
         return out.replacingOccurrences(of: "  ", with: " ")
+    }
+
+    /// A Slack short name ("+1", "wave::skin-tone-3") as text, from the full standard table.
+    static func unicode(_ name: String) -> String? {
+        let parts = name.split(separator: ":", omittingEmptySubsequences: true).map(String.init)
+        guard let base = parts.first, let scalar = SlackEmojiTable.names[base] ?? emoji[base] else { return nil }
+        guard parts.count > 1, let tone = parts.last, tone.hasPrefix("skin-tone-"),
+              let n = Int(tone.dropFirst(10)), (2...6).contains(n) else { return scalar }
+        let modifiers: [Unicode.Scalar] = ["\u{1F3FB}", "\u{1F3FC}", "\u{1F3FD}", "\u{1F3FE}", "\u{1F3FF}"]
+        return scalar.replacingOccurrences(of: "\u{FE0F}", with: "") + String(modifiers[n - 2])
     }
 
     /// "white_check_mark" → "white check mark", "+1" → "thumbs up": for labels and tooltips.
@@ -86,7 +97,8 @@ enum SlackMarkup {
         switch name {
         case "+1", "thumbsup": return "thumbs up"
         case "-1": return "thumbs down"
-        default: return name.replacingOccurrences(of: "_", with: " ").replacingOccurrences(of: "-", with: " ")
+        default:
+            return name.split(separator: ":").first.map { $0.replacingOccurrences(of: "_", with: " ").replacingOccurrences(of: "-", with: " ") } ?? name
         }
     }
 
@@ -124,6 +136,25 @@ enum SlackMarkup {
     ]
 }
 
+/// The pointing hand over anything clickable that is not a system control.
+struct HandCursor: ViewModifier {
+    func body(content: Content) -> some View {
+        content.onHover { inside in if inside { NSCursor.pointingHand.push() } else { NSCursor.pop() } }
+    }
+}
+
+extension View {
+    func handCursor() -> some View { modifier(HandCursor()) }
+}
+
+extension SlackMessage {
+    /// Channel events Slack posts as messages: renames, topics, pins…
+    var isSystem: Bool {
+        ["channel_name", "channel_purpose", "channel_topic", "pinned_item", "unpinned_item", "bot_add", "bot_remove",
+         "channel_archive", "channel_unarchive", "reminder_add", "group_name", "group_purpose", "group_topic"].contains(subtype ?? "")
+    }
+}
+
 /// Bare URLs read badly in a narrow column. They become a chip: a short label on a lime wash,
 /// and a Slack permalink says what it is ("Message in #channel") instead of showing its path.
 enum SlackLinks {
@@ -141,8 +172,24 @@ enum SlackLinks {
             return "Slack message"
         }
         guard let u = URL(string: url), let host = u.host else { return url }
-        let path = u.path.count > 28 ? String(u.path.prefix(28)) + "…" : (u.path == "/" ? "" : u.path)
-        return host.replacingOccurrences(of: "www.", with: "") + path
+        // Host and the first path segment: "figma.com/design…", "github.com/eri…".
+        let segments = u.path.split(separator: "/").map(String.init)
+        var label = host.replacingOccurrences(of: "www.", with: "")
+        if let first = segments.first {
+            label += "/" + (first.count > 18 ? String(first.prefix(18)) : first)
+            if segments.count > 1 || first.count > 18 || u.query != nil { label += "…" }
+        } else if u.query != nil {
+            label += "/…"
+        }
+        return label
+    }
+
+    /// Slack keeps a shortened URL as a link's text ("figma.com/design/…?node-id=…"): still bare.
+    static func isBare(text: String?, url: String) -> Bool {
+        guard let text, !text.isEmpty else { return true }
+        if url.lowercased().contains(text.lowercased()) { return true }
+        guard let host = URL(string: url)?.host?.replacingOccurrences(of: "www.", with: "") else { return false }
+        return !text.contains(" ") && text.lowercased().contains(host.lowercased())
     }
 
     /// A chip as attributed text, for the rich text renderer.
@@ -233,8 +280,7 @@ enum SlackRichText {
         case "link":
             let url = leaf.url.flatMap(URL.init(string:))
             // A link is "bare" when its text is the URL or a piece of it (Slack keeps what was typed).
-            let bare = leaf.text.map { (leaf.url ?? "").lowercased().contains($0.lowercased()) } ?? true
-            if let url, bare {
+            if let url, SlackLinks.isBare(text: leaf.text, url: leaf.url ?? "") {
                 s = SlackLinks.chip(url, label: SlackLinks.plainLabel(leaf.url ?? "", channels: channels))
             } else {
                 s = AttributedString(leaf.text ?? "")
@@ -250,7 +296,7 @@ enum SlackRichText {
             s = AttributedString("@" + (leaf.range ?? "here"))
             s.inlinePresentationIntent = .stronglyEmphasized
         case "emoji":
-            s = AttributedString(leaf.unicode.flatMap(emoji) ?? leaf.name.flatMap { SlackMarkup.emoji[$0] } ?? "")
+            s = AttributedString(leaf.unicode.flatMap(emoji) ?? leaf.name.flatMap(SlackMarkup.unicode) ?? "")
         default:
             s = AttributedString(leaf.text ?? "")
         }
@@ -293,9 +339,15 @@ struct SlackThreadView: View {
     var loadingEarlier = false
     /// The reading room: full text, day headings, threads in a pane beside the messages.
     var wide = false
+    /// The message to land on when the wide view opens (its `ts`).
+    var focus: String?
+    var customEmoji: [String: URL] = [:]
     var showEarlier: () -> Void = {}
+    /// Compact view: a click on a message opens the wide view there.
+    var openWide: ((SlackMessage) -> Void)?
     var actions = SlackMessageActions()
     @State private var openThread: SlackMessage?
+    @State private var preview: SlackFile?
 
     private var channels: [String: String] {
         guard let channelID, let channelName else { return [:] }
@@ -309,14 +361,15 @@ struct SlackThreadView: View {
             HStack(alignment: .top, spacing: 24) {
                 ScrollViewReader { proxy in
                     ScrollView {
-                        list.frame(maxWidth: 880, alignment: .leading)
+                        list.frame(maxWidth: 1200, alignment: .leading)
                         Color.clear.frame(height: 1).id("slack-end")
                     }
                     .scrollIndicators(.automatic)
-                    // Opens on the latest messages, as Slack does; earlier ones are above.
-                    .onAppear { proxy.scrollTo("slack-end", anchor: .bottom) }
+                    // Opens on the message that was clicked, else on the latest, as Slack does.
+                    .onAppear { proxy.scrollTo(focus ?? "slack-end", anchor: focus == nil ? .bottom : .center) }
+                    .onChange(of: focus) { _, ts in if let ts { withAnimation { proxy.scrollTo(ts, anchor: .center) } } }
                 }
-                .frame(maxWidth: 880, maxHeight: .infinity, alignment: .topLeading)
+                .frame(maxWidth: 1200, maxHeight: .infinity, alignment: .topLeading)
                 Rectangle().fill(Soot.line).frame(width: 1)
                 // Beside the messages: the open thread, or what the channel holds when none is open.
                 Group {
@@ -329,16 +382,21 @@ struct SlackThreadView: View {
                         ChannelAside(messages: messages, users: users, channels: channels)
                     }
                 }
-                .frame(width: 360)
+                .frame(width: 300)
                 .transition(.opacity)
             }
+            .modifier(FilePreviewHost(preview: $preview, firstFile: firstFile))
             .onChange(of: messages.map(\.ts)) { _, ts in
                 // The thread pane follows a message that scrolled out of the loaded range.
                 if let parent = openThread, !ts.contains(parent.ts) { openThread = nil }
             }
         } else {
-            list
+            list.modifier(FilePreviewHost(preview: $preview, firstFile: firstFile))
         }
+    }
+
+    private func firstFile() -> SlackFile? {
+        return messages.flatMap { $0.files ?? [] }.first { $0.isReadable && $0.url_private != nil }
     }
 
     private var list: some View {
@@ -361,10 +419,18 @@ struct SlackThreadView: View {
                 if newDay {
                     DayDivider(date: m.date).padding(.top, index == 0 ? 0 : (wide ? 22 : 16)).padding(.bottom, wide ? 10 : 6)
                 }
-                MessageRow(message: m, user: m.user.flatMap { users[$0] }, users: users, channels: channels,
-                           grouped: grouped, wide: wide, selected: openThread?.ts == m.ts, permalink: permalink(m),
-                           actions: actions, openThread: wide ? { openThread = $0 } : nil)
-                    .padding(.top, grouped ? 2 : (newDay ? 0 : (wide ? 18 : 14)))
+                if m.isSystem {
+                    SystemRow(message: m, user: m.user.flatMap { users[$0] }, users: users, channels: channels)
+                        .padding(.top, newDay ? 0 : 10)
+                        .id(m.ts)
+                } else {
+                    MessageRow(message: m, user: m.user.flatMap { users[$0] }, users: users, channels: channels,
+                               customEmoji: customEmoji, grouped: grouped, wide: wide,
+                               selected: openThread?.ts == m.ts || focus == m.ts, permalink: permalink(m),
+                               actions: actions, openThread: wide ? { openThread = $0 } : nil, openWide: openWide)
+                        .padding(.top, grouped ? 2 : (newDay ? 0 : (wide ? 18 : 14)))
+                        .id(m.ts)
+                }
             }
         }
     }
@@ -410,6 +476,7 @@ private struct ChannelAside: View {
     let messages: [SlackMessage]
     let users: [String: SlackUser]
     let channels: [String: String]
+    @State private var allPeople = false
 
     private var people: [(user: SlackUser, count: Int)] {
         var counts: [String: Int] = [:]
@@ -418,60 +485,73 @@ private struct ChannelAside: View {
             .sorted { $0.1 > $1.1 || ($0.1 == $1.1 && $0.0.name < $1.0.name) }
     }
 
-    private var links: [(message: SlackMessage, card: SlackAttachment)] {
-        messages.flatMap { m in (m.attachments ?? []).filter { !$0.isEmpty && ($0.title_link ?? $0.from_url ?? $0.original_url) != nil }.map { (m, $0) } }
+    private var links: [(message: SlackMessage, card: SlackAttachment, url: URL)] {
+        messages.flatMap { m in
+            (m.attachments ?? []).compactMap { c -> (SlackMessage, SlackAttachment, URL)? in
+                guard !c.isEmpty, let u = (c.title_link ?? c.from_url ?? c.original_url).flatMap(URL.init(string:)) else { return nil }
+                return (m, c, u)
+            }
+        }
     }
 
-    private var files: [SlackFile] { messages.flatMap { $0.files ?? [] } }
+    private var files: [(message: SlackMessage, file: SlackFile)] { messages.flatMap { m in (m.files ?? []).map { (m, $0) } } }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 22) {
-            section("People", count: people.count) {
-                VStack(alignment: .leading, spacing: 8) {
-                    ForEach(people.prefix(6), id: \.user.id) { p in
+            section("People", symbol: "person.2", count: people.count) {
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(allPeople ? people : Array(people.prefix(5)), id: \.user.id) { p in
                         HStack(spacing: 10) {
-                            SlackAvatar(user: p.user, name: p.user.name, size: 26, radius: 7)
+                            SlackAvatar(user: p.user, name: p.user.name, size: 24, radius: 6)
                             Text(p.user.name).font(.system(size: 13, weight: .medium)).foregroundStyle(Soot.ink).lineLimit(1)
                             Spacer(minLength: 8)
-                            Text("^[\(p.count) message](inflect: true)").font(.system(size: 11)).foregroundStyle(Soot.muted).monospacedDigit()
+                            Text("\(p.count)").font(.system(size: 11)).foregroundStyle(Soot.muted).monospacedDigit()
+                                .accessibilityLabel("^[\(p.count) message](inflect: true)")
                         }
                         .accessibilityElement(children: .combine)
                     }
-                    if people.count > 6 {
-                        Text("and \(people.count - 6) more").font(.system(size: 11)).foregroundStyle(Soot.muted).padding(.leading, 36)
+                    if people.count > 5 {
+                        Button(allPeople ? "Show fewer" : "Show all \(people.count)") { allPeople.toggle() }
+                            .buttonStyle(.plain).handCursor().font(.system(size: 12, weight: .semibold)).foregroundStyle(Soot.lime)
+                            .padding(.top, 2).modifier(FocusOutline(radius: 4))
                     }
                 }
             }
             if !links.isEmpty {
-                section("Links", count: links.count) {
-                    VStack(alignment: .leading, spacing: 6) {
+                section("Links", symbol: "link", count: links.count) {
+                    VStack(alignment: .leading, spacing: 4) {
                         ForEach(Array(links.prefix(6).enumerated()), id: \.offset) { _, l in
-                            if let url = (l.card.title_link ?? l.card.from_url ?? l.card.original_url).flatMap(URL.init(string:)) {
-                                Link(destination: url) {
-                                    HStack(alignment: .top, spacing: 8) {
-                                        Image(systemName: "link").font(.system(size: 11)).foregroundStyle(Soot.muted).frame(width: 14).padding(.top, 2)
-                                        VStack(alignment: .leading, spacing: 1) {
-                                            Text(SlackMarkup.render(l.card.title ?? l.card.fallback ?? SlackLinks.plainLabel(url.absoluteString, channels: channels), users: [:]))
-                                                .font(.system(size: 13, weight: .medium)).foregroundStyle(Soot.ink).tint(Soot.ink).lineLimit(2)
-                                            Text((l.card.service_name ?? url.host ?? "") + " · " + l.message.date.formatted(.relative(presentation: .named)))
-                                                .font(.system(size: 11)).foregroundStyle(Soot.muted).lineLimit(1)
-                                        }
+                            let host = (l.url.host ?? "").replacingOccurrences(of: "www.", with: "")
+                            Link(destination: l.url) {
+                                HStack(alignment: .center, spacing: 10) {
+                                    Text(String(host.prefix(1)).uppercased())
+                                        .font(.system(size: 11, weight: .bold)).foregroundStyle(Color.black.opacity(0.7))
+                                        .frame(width: 24, height: 24)
+                                        .background(PersonTint.color(for: host), in: RoundedRectangle(cornerRadius: 6))
+                                    VStack(alignment: .leading, spacing: 1) {
+                                        Text(SlackMarkup.render(LinkPreview.excerpt(l.card.title ?? l.card.fallback, lines: 1) ?? SlackLinks.plainLabel(l.url.absoluteString, channels: channels), users: [:]))
+                                            .font(.system(size: 12, weight: .medium)).foregroundStyle(Soot.ink).tint(Soot.ink).lineLimit(1)
+                                        Text(host + " · " + l.message.date.formatted(.relative(presentation: .named)))
+                                            .font(.system(size: 11)).foregroundStyle(Soot.muted).lineLimit(1)
                                     }
-                                    .padding(.horizontal, 10).padding(.vertical, 7)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                    .background(Soot.ground, in: RoundedRectangle(cornerRadius: 8))
+                                    Spacer(minLength: 0)
                                 }
-                                .buttonStyle(.plain)
-                                .modifier(FocusOutline(radius: 8))
+                                .padding(.horizontal, 8).frame(height: 40)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .background(Soot.ground, in: RoundedRectangle(cornerRadius: 8))
                             }
+                            .buttonStyle(.plain)
+                            .handCursor()
+                            .modifier(FocusOutline(radius: 8))
+                            .help(l.url.absoluteString)
                         }
                     }
                 }
             }
             if !files.isEmpty {
-                section("Files", count: files.count) {
-                    VStack(alignment: .leading, spacing: 6) {
-                        ForEach(files.prefix(5)) { FileRow(file: $0) }
+                section("Files", symbol: "paperclip", count: files.count) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        ForEach(files.prefix(6), id: \.file.id) { f in AsideFileRow(file: f.file, date: f.message.date) }
                     }
                 }
             }
@@ -483,15 +563,120 @@ private struct ChannelAside: View {
         .accessibilityLabel("About this conversation")
     }
 
-    private func section<Content: View>(_ title: String, count: Int, @ViewBuilder content: () -> Content) -> some View {
+    private func section<Content: View>(_ title: String, symbol: String, count: Int, @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Image(systemName: symbol).font(.system(size: 11, weight: .semibold)).foregroundStyle(Soot.muted)
                 Text(title).font(.system(size: 13, weight: .semibold)).foregroundStyle(Soot.ink).accessibilityAddTraits(.isHeader)
                 Text("\(count)").font(.system(size: 12)).foregroundStyle(Soot.muted).monospacedDigit()
             }
             content()
         }
     }
+}
+
+/// A file in the aside: a small thumbnail for pictures, a glyph otherwise; opens the preview.
+private struct AsideFileRow: View {
+    @EnvironmentObject var app: AppState
+    let file: SlackFile
+    let date: Date
+    @State private var thumb: CGImage?
+
+    var body: some View {
+        Button { NotificationCenter.default.post(name: .previewSlackFile, object: file) } label: {
+            HStack(spacing: 10) {
+                Group {
+                    if let thumb {
+                        Image(decorative: thumb, scale: 2).resizable().aspectRatio(contentMode: .fill)
+                    } else {
+                        Image(systemName: file.isImage ? "photo" : "doc").font(.system(size: 12)).foregroundStyle(Soot.muted)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity).background(Soot.surface)
+                    }
+                }
+                .frame(width: 28, height: 28).clipShape(RoundedRectangle(cornerRadius: 6))
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(file.displayName).font(.system(size: 12, weight: .medium)).foregroundStyle(Soot.ink).lineLimit(1)
+                    Text([file.filetype?.uppercased(), file.size.map { ByteCountFormatter.string(fromByteCount: Int64($0), countStyle: .file) },
+                          date.formatted(.relative(presentation: .named))].compactMap { $0 }.joined(separator: " · "))
+                        .font(.system(size: 11)).foregroundStyle(Soot.muted).lineLimit(1)
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 6).frame(height: 40)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Soot.ground, in: RoundedRectangle(cornerRadius: 8))
+        }
+        .buttonStyle(.plain)
+        .handCursor()
+        .modifier(FocusOutline(radius: 8))
+        .help("Preview \(file.displayName)")
+        .disabled(!file.isReadable || file.url_private == nil)
+        .task(id: file.id) {
+            guard file.isImage, let url = file.thumb_360.flatMap(URL.init(string:)) else { return }
+            thumb = try? await app.withSlack { await SlackMediaCache.shared.thumbnail(url, fileID: file.id, variant: "360", maxPixels: 720, client: $0) }
+        }
+    }
+}
+
+/// A channel event ("renamed the channel…", "pinned a message"): one quiet line, no card.
+private struct SystemRow: View {
+    let message: SlackMessage
+    let user: SlackUser?
+    let users: [String: SlackUser]
+    let channels: [String: String]
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Image(systemName: symbol).font(.system(size: 11)).foregroundStyle(Soot.muted).frame(width: 32)
+            (Text(user?.name ?? "Slack").fontWeight(.semibold) + Text(" ") +
+             Text(SlackMarkup.render(stripLeadingMention(message.text ?? ""), users: users.mapValues(\.name), channels: channels)))
+                .font(.system(size: 12)).foregroundStyle(Soot.muted).tint(Soot.muted)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
+            Text(message.date.formatted(date: .omitted, time: .shortened)).font(.system(size: 11)).foregroundStyle(Soot.muted.opacity(0.8))
+        }
+        .padding(.horizontal, 8)
+        .accessibilityElement(children: .combine)
+    }
+
+    private var symbol: String {
+        switch message.subtype {
+        case "pinned_item", "unpinned_item": "pin"
+        case "channel_topic", "channel_purpose", "group_topic", "group_purpose": "text.quote"
+        case "bot_add", "bot_remove": "puzzlepiece"
+        case "channel_archive", "channel_unarchive": "archivebox"
+        default: "info.circle"
+        }
+    }
+
+    /// Slack starts these with the actor's mention; the name is already shown.
+    private func stripLeadingMention(_ text: String) -> String {
+        text.replacingOccurrences(of: #"^<@[A-Z0-9]+>\s*"#, with: "", options: .regularExpression)
+    }
+}
+
+/// Presents a Slack file in a sheet when a thumbnail or file row asks for it.
+struct FilePreviewHost: ViewModifier {
+    @Binding var preview: SlackFile?
+    /// For snapshots: the first readable file in view.
+    var firstFile: () -> SlackFile? = { nil }
+    func body(content: Content) -> some View {
+        content
+            .onReceive(NotificationCenter.default.publisher(for: .previewSlackFile)) { note in
+                preview = note.object as? SlackFile   // nil closes it
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .previewFirstSlackFile)) { _ in
+                preview = firstFile()
+            }
+            .sheet(item: $preview) { FilePreviewSheet(file: $0) }
+    }
+}
+
+extension Notification.Name {
+    /// Asks the nearest `FilePreviewHost` to show a `SlackFile`.
+    static let previewSlackFile = Notification.Name("dever.previewSlackFile")
+    /// Snapshots: previews the first readable file of the conversation.
+    static let previewFirstSlackFile = Notification.Name("dever.previewFirstSlackFile")
 }
 
 /// A thread beside the messages in the wide view: the parent, its replies, a composer.
@@ -644,6 +829,7 @@ private struct MessageRow: View {
     let user: SlackUser?
     let users: [String: SlackUser]
     let channels: [String: String]
+    var customEmoji: [String: URL] = [:]
     let grouped: Bool
     var wide = false
     var selected = false
@@ -651,6 +837,9 @@ private struct MessageRow: View {
     let actions: SlackMessageActions
     /// In the wide view the thread opens in a pane beside the list instead of inline.
     var openThread: ((SlackMessage) -> Void)? = nil
+    /// In the compact view a click on the message opens the wide view on it.
+    var openWide: ((SlackMessage) -> Void)? = nil
+    @State private var picking = false
     @State private var expanded = false
     @State private var hovering = false
     @State private var threadOpen = false
@@ -662,7 +851,7 @@ private struct MessageRow: View {
     @State private var reactions: [SlackReaction] = []
     @FocusState private var stripFocus: Int?
 
-    private var stripShown: Bool { hovering || stripFocus != nil }
+    private var stripShown: Bool { hovering || stripFocus != nil || picking }
 
     private var author: String { user?.name ?? "App" }
     private var me: String? { app.slack?.userID }
@@ -693,8 +882,8 @@ private struct MessageRow: View {
                 }
                 MessageBody(message: message, users: users, channels: channels, expanded: wide ? .constant(true) : $expanded)
                 MessageExtras(message: message)
-                if !reactions.isEmpty || stripShown {
-                    ReactionPills(reactions: reactions, me: me, canAdd: stripShown) { toggle($0) }
+                if !reactions.isEmpty {
+                    ReactionPills(reactions: reactions, me: me, customEmoji: customEmoji) { toggle($0) }
                 }
                 HStack(spacing: 12) {
                     if !wide, (message.text?.count ?? 0) > 240 {
@@ -732,6 +921,9 @@ private struct MessageRow: View {
         .padding(.horizontal, 8)
         .padding(.trailing, 4)
         .background(selected ? Soot.ground : (hovering ? Soot.ground.opacity(0.6) : Color.clear), in: RoundedRectangle(cornerRadius: 6))
+        .contentShape(Rectangle())
+        .simultaneousGesture(TapGesture().onEnded { if let openWide { openWide(message) } }, including: openWide == nil ? .none : .all)
+        .help(openWide == nil ? "" : "Open the conversation at this message")
         .overlay(alignment: .topTrailing) { toolbar.opacity(stripShown ? 1 : 0).offset(x: 0, y: -6) }
         .onHover { hovering = $0 }
         .onAppear { reactions = message.reactions ?? [] }
@@ -750,9 +942,25 @@ private struct MessageRow: View {
                         .background(on ? Soot.lime.opacity(0.2) : Color.clear, in: RoundedRectangle(cornerRadius: 5))
                 }
                 .buttonStyle(.plain)
+                .handCursor()
                 .focused($stripFocus, equals: i)
                 .modifier(FocusOutline(radius: 5))
                 .accessibilityLabel(on ? "Remove \(SlackMarkup.reactionName(name))" : "React with \(SlackMarkup.reactionName(name))")
+            }
+            Button { picking.toggle() } label: {
+                Image(systemName: "face.smiling").font(.system(size: 13)).foregroundStyle(Soot.ink)
+                    .frame(width: 26, height: 24)
+            }
+            .buttonStyle(.plain)
+            .handCursor()
+            .focused($stripFocus, equals: 3)
+            .modifier(FocusOutline(radius: 5))
+            .accessibilityLabel("Add a reaction")
+            .popover(isPresented: $picking, arrowEdge: .bottom) {
+                EmojiPicker(customEmoji: customEmoji, mine: Set(reactions.filter { mine($0.name) }.map(\.name))) { name in
+                    picking = false
+                    toggle(name)
+                }
             }
             Menu {
                 Button("Reply in thread") {
@@ -772,6 +980,7 @@ private struct MessageRow: View {
             .menuStyle(.borderlessButton)
             .menuIndicator(.hidden)
             .fixedSize()
+            .handCursor()
             .focused($stripFocus, equals: 2)
             .modifier(FocusOutline(radius: 5))
             .accessibilityLabel("More actions")
@@ -825,56 +1034,135 @@ private struct MessageRow: View {
 }
 
 /// Reactions under a message, as Slack shows them: emoji and count in a small bordered pill,
-/// the ones you gave on a lime wash. Click toggles; a quiet "+" offers a few more while hovering.
+/// the ones you gave on a lime wash. Hover lifts it, click toggles.
 private struct ReactionPills: View {
     let reactions: [SlackReaction]
     let me: String?
-    var canAdd = false
+    var customEmoji: [String: URL] = [:]
     let toggle: (String) -> Void
-
-    private static let quick = ["+1", "heart", "tada", "eyes", "white_check_mark", "pray"]
 
     var body: some View {
         HStack(spacing: 6) {
             ForEach(reactions) { r in
-                let on = me.map { r.users?.contains($0) ?? false } ?? false
-                Button { toggle(r.name) } label: {
-                    HStack(spacing: 5) {
-                        Text(SlackMarkup.emoji[r.name] ?? r.name.replacingOccurrences(of: "_", with: " "))
-                            .font(.system(size: SlackMarkup.emoji[r.name] == nil ? 10 : 13))
-                            .lineLimit(1)
-                        Text("\(r.count)").font(.system(size: 12, weight: .semibold)).monospacedDigit()
-                            .foregroundStyle(on ? Soot.lime : Soot.ink.opacity(0.85))
-                    }
-                    .padding(.horizontal, 8).frame(height: 24)
-                    .background(on ? Soot.lime.opacity(0.14) : Soot.ground, in: Capsule())
-                    .overlay(Capsule().strokeBorder(on ? Soot.lime : Soot.edge.opacity(0.6)))
-                }
-                .buttonStyle(ReactionPillStyle())
-                .modifier(FocusOutline(radius: 12))
-                .help(on ? "Remove your \(SlackMarkup.reactionName(r.name)) reaction" : "React with \(SlackMarkup.reactionName(r.name))")
-                .accessibilityLabel("\(SlackMarkup.reactionName(r.name)), \(r.count)\(on ? ", including you" : "")")
-                .accessibilityAddTraits(on ? .isSelected : [])
-            }
-            if canAdd {
-                Menu {
-                    ForEach(Self.quick, id: \.self) { name in
-                        Button("\(SlackMarkup.emoji[name] ?? name)  \(SlackMarkup.reactionName(name).capitalized)") { toggle(name) }
-                    }
-                } label: {
-                    Image(systemName: "face.smiling").font(.system(size: 12, weight: .medium)).foregroundStyle(Soot.muted)
-                        .frame(width: 28, height: 24)
-                        .background(Soot.ground, in: Capsule())
-                        .overlay(Capsule().strokeBorder(Soot.edge.opacity(0.6)))
-                }
-                .menuStyle(.borderlessButton)
-                .menuIndicator(.hidden)
-                .fixedSize()
-                .modifier(FocusOutline(radius: 12))
-                .accessibilityLabel("Add a reaction")
+                ReactionPill(reaction: r, on: me.map { r.users?.contains($0) ?? false } ?? false,
+                             custom: customEmoji[r.name.split(separator: ":").first.map(String.init) ?? r.name]) { toggle(r.name) }
             }
         }
         .padding(.top, 4)
+    }
+}
+
+private struct ReactionPill: View {
+    let reaction: SlackReaction
+    let on: Bool
+    let custom: URL?
+    let toggle: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        Button(action: toggle) {
+            HStack(spacing: 5) {
+                EmojiGlyph(name: reaction.name, custom: custom, size: 14)
+                Text("\(reaction.count)").font(.system(size: 12, weight: .semibold)).monospacedDigit()
+                    .foregroundStyle(on ? Soot.lime : Soot.ink.opacity(0.85))
+            }
+            .padding(.horizontal, 8).frame(height: 24)
+            .background(on ? Soot.lime.opacity(hovering ? 0.24 : 0.14) : (hovering ? Soot.surface : Soot.ground), in: Capsule())
+            .overlay(Capsule().strokeBorder(on ? Soot.lime : (hovering ? Soot.ink.opacity(0.6) : Soot.edge.opacity(0.6))))
+        }
+        .buttonStyle(ReactionPillStyle())
+        .handCursor()
+        .onHover { hovering = $0 }
+        .modifier(FocusOutline(radius: 12))
+        .help(on ? "Remove your \(SlackMarkup.reactionName(reaction.name)) reaction" : "React with \(SlackMarkup.reactionName(reaction.name))")
+        .accessibilityLabel("\(SlackMarkup.reactionName(reaction.name)), \(reaction.count)\(on ? ", including you" : "")")
+        .accessibilityAddTraits(on ? .isSelected : [])
+    }
+}
+
+/// A standard emoji as text, a custom one as its picture, an unknown one as its name.
+struct EmojiGlyph: View {
+    let name: String
+    var custom: URL?
+    var size: CGFloat = 14
+    @State private var image: CGImage?
+
+    var body: some View {
+        if let text = SlackMarkup.unicode(name) {
+            Text(text).font(.system(size: size - 1))
+        } else if custom != nil {
+            Group {
+                if let image {
+                    Image(decorative: image, scale: 2).resizable().aspectRatio(contentMode: .fit)
+                } else {
+                    RoundedRectangle(cornerRadius: 3).fill(Soot.line)
+                }
+            }
+            .frame(width: size + 2, height: size + 2)
+            .task(id: custom) {
+                guard let custom else { return }
+                image = await SlackMediaCache.shared.publicImage(custom, maxPixels: Int(size * 4))
+            }
+        } else {
+            Text(":\(name):").font(.system(size: size - 4, weight: .medium)).foregroundStyle(Soot.muted).lineLimit(1)
+        }
+    }
+}
+
+/// A small grid of reactions to pick from: the usual ones, the team's own, and a search over all.
+struct EmojiPicker: View {
+    let customEmoji: [String: URL]
+    let mine: Set<String>
+    let choose: (String) -> Void
+    @State private var query = ""
+    @FocusState private var searching: Bool
+
+    private static let usual = ["+1", "heart", "tada", "eyes", "white_check_mark", "pray", "joy", "fire", "rocket", "raised_hands",
+                                "clap", "100", "thinking_face", "muscle", "sparkles", "bulb", "wave", "ok_hand", "sob", "heavy_check_mark",
+                                "x", "warning", "hourglass_flowing_sand", "point_up", "handshake", "star", "coffee", "bug"]
+
+    private var results: [(name: String, custom: URL?)] {
+        let q = query.trimmingCharacters(in: .whitespaces).lowercased().replacingOccurrences(of: " ", with: "_")
+        if q.isEmpty {
+            return Self.usual.map { ($0, nil) } + customEmoji.keys.sorted().prefix(32).map { ($0, customEmoji[$0]) }
+        }
+        let custom = customEmoji.keys.filter { $0.contains(q) }.sorted().map { ($0, customEmoji[$0]) }
+        let standard = SlackEmojiTable.names.keys.filter { $0.contains(q) }.sorted { ($0.hasPrefix(q) ? 0 : 1, $0) < ($1.hasPrefix(q) ? 0 : 1, $1) }
+            .prefix(48).map { ($0, nil as URL?) }
+        return custom + standard
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            TextField("Search emoji", text: $query)
+                .textFieldStyle(.plain).font(.system(size: 13)).foregroundStyle(Soot.ink)
+                .focused($searching)
+                .padding(.horizontal, 10).frame(height: 30)
+                .background(Soot.ground, in: RoundedRectangle(cornerRadius: 8))
+                .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(searching ? Soot.lime : Soot.edge))
+            if results.isEmpty {
+                Text("No emoji for “\(query)”").font(.system(size: 12)).foregroundStyle(Soot.muted).padding(.vertical, 8)
+            } else {
+                LazyVGrid(columns: Array(repeating: GridItem(.fixed(32), spacing: 2), count: 8), spacing: 2) {
+                    ForEach(results, id: \.name) { r in
+                        Button { choose(r.name) } label: {
+                            EmojiGlyph(name: r.name, custom: r.custom, size: 18)
+                                .frame(width: 32, height: 32)
+                                .background(mine.contains(r.name) ? Soot.lime.opacity(0.2) : Color.clear, in: RoundedRectangle(cornerRadius: 6))
+                        }
+                        .buttonStyle(.plain)
+                        .handCursor()
+                        .modifier(FocusOutline(radius: 6))
+                        .help(SlackMarkup.reactionName(r.name))
+                        .accessibilityLabel(SlackMarkup.reactionName(r.name))
+                    }
+                }
+            }
+        }
+        .padding(12)
+        .frame(width: 8 * 34 + 24)
+        .background(Soot.surface)
+        .onAppear { searching = true }
     }
 }
 
@@ -947,12 +1235,13 @@ private struct SlackImage: View {
         let width = min(320, CGFloat(file.thumb_360_w ?? 320))
         Group {
             if let image {
-                Link(destination: URL(string: file.permalink ?? "") ?? URL(string: "https://slack.com")!) {
+                Button { NotificationCenter.default.post(name: .previewSlackFile, object: file) } label: {
                     Image(decorative: image, scale: 2).resizable().aspectRatio(contentMode: .fill)
                         .frame(width: width, height: width / ratio)
                 }
                 .buttonStyle(.plain)
-                .help("Open \(file.displayName) in Slack")
+                .handCursor()
+                .help("Preview \(file.displayName)")
             } else if failed {
                 FileRow(file: file)
             } else {
@@ -1014,8 +1303,12 @@ private struct FileRow: View {
         .background(Soot.ground, in: RoundedRectangle(cornerRadius: 8))
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(file.displayName), \(detail)")
-        if let url = file.permalink.flatMap(URL.init(string:)) {
-            Link(destination: url) { row }.buttonStyle(.plain).modifier(FocusOutline(radius: 8))
+        if file.isReadable, file.url_private != nil {
+            Button { NotificationCenter.default.post(name: .previewSlackFile, object: file) } label: { row }
+                .buttonStyle(.plain).handCursor().modifier(FocusOutline(radius: 8))
+                .help("Preview \(file.displayName)")
+        } else if let url = file.permalink.flatMap(URL.init(string:)) {
+            Link(destination: url) { row }.buttonStyle(.plain).handCursor().modifier(FocusOutline(radius: 8))
                 .help("Open in Slack")
         } else {
             row
@@ -1070,7 +1363,7 @@ private struct LinkPreview: View {
             image = await SlackMediaCache.shared.publicImage(url, maxPixels: 96)
         }
         if let link {
-            Link(destination: link) { body }.buttonStyle(.plain).modifier(FocusOutline(radius: 8))
+            Link(destination: link) { body }.buttonStyle(.plain).handCursor().modifier(FocusOutline(radius: 8))
         } else {
             body
         }

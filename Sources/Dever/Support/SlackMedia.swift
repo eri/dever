@@ -101,7 +101,7 @@ actor SlackMediaCache {
         return digest.prefix(6).map { String(format: "%02x", $0) }.joined()
     }
 
-    private static func safe(_ key: String) -> String {
+    static func safe(_ key: String) -> String {
         String(key.map { $0.isLetter || $0.isNumber || $0 == "-" || $0 == "_" ? $0 : "_" })
     }
 
@@ -150,9 +150,51 @@ actor SlackDirectory {
         return users
     }
 
+    private var emojiCache: (team: String, emoji: [String: URL], at: Date)?
+    private var emojiLoading: Task<[String: URL], Error>?
+
+    /// The team's custom emoji, one `emoji.list` an hour; a disk copy for offline and for
+    /// tokens without `emoji:read` (then the last known set, or none).
+    func customEmoji(team: String, via client: SlackClient) async -> [String: URL] {
+        if let emojiCache, emojiCache.team == team, Date().timeIntervalSince(emojiCache.at) < 3600 { return emojiCache.emoji }
+        if let emojiLoading { return (try? await emojiLoading.value) ?? [:] }
+        let file = Self.file(team).deletingLastPathComponent().appendingPathComponent("emoji-\(team).json")
+        let task = Task<[String: URL], Error> {
+            do {
+                let emoji = try await client.customEmoji()
+                try? JSONEncoder().encode(emoji).write(to: file, options: .atomic)
+                return emoji
+            } catch {
+                return (try? JSONDecoder().decode([String: URL].self, from: Data(contentsOf: file))) ?? [:]
+            }
+        }
+        emojiLoading = task
+        defer { emojiLoading = nil }
+        let emoji = (try? await task.value) ?? [:]
+        emojiCache = (team, emoji, Date())
+        return emoji
+    }
+
     private static func file(_ team: String) -> URL {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("Dever", isDirectory: true)
             .appendingPathComponent("users-\(team).json")
+    }
+}
+
+extension SlackMediaCache {
+    /// The whole file on disk (for Quick Look), downloaded once with the token.
+    func localFile(for file: SlackFile, client: SlackClient) async throws -> URL {
+        guard let urlString = file.url_private, let url = URL(string: urlString) else { throw AppError.message("File: no download URL") }
+        let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("Dever/files/originals", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let ext = (file.name as NSString?)?.pathExtension ?? ""
+        let name = Self.safe(file.id) + (ext.isEmpty ? "" : "." + ext)
+        let target = dir.appendingPathComponent(name)
+        if FileManager.default.fileExists(atPath: target.path) { return target }
+        let data = try await client.download(url)
+        try data.write(to: target, options: .atomic)
+        return target
     }
 }

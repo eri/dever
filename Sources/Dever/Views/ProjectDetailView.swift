@@ -14,6 +14,8 @@ struct ProjectDetailView: View {
     @State private var hasEarlier = false
     @State private var loadingEarlier = false
     @State private var slackExpanded = false
+    @State private var slackFocus: String?
+    @State private var customEmoji: [String: URL] = [:]
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var pulls: [ProjectPullRequests.Match] = []
     @State private var pullsScoped = false
@@ -379,8 +381,16 @@ struct ProjectDetailView: View {
                 SlackThreadView(messages: messages, users: users, domain: app.slack?.domain,
                                 channelID: project.slack?.id, channelName: project.slack?.name, shown: shownMessages,
                                 hasEarlier: hasEarlier, loadingEarlier: loadingEarlier,
-                                wide: slackExpanded,
+                                wide: slackExpanded, focus: slackFocus, customEmoji: customEmoji,
                                 showEarlier: { Task { await showEarlier() } },
+                                openWide: slackExpanded ? nil : { m in
+                                    slackFocus = m.ts
+                                    withAnimation(reduceMotion ? nil : .snappy(duration: 0.3)) {
+                                        slackExpanded = true
+                                        shownMessages = max(shownMessages, 30)
+                                    }
+                                    Task { try? await Task.sleep(nanoseconds: 3_000_000_000); if slackFocus == m.ts { slackFocus = nil } }
+                                },
                                 actions: slackActions)
             }
         }
@@ -528,6 +538,9 @@ struct ProjectDetailView: View {
             }
             let authors = Set(messages.prefix(shownMessages).compactMap(\.user)).compactMap { users[$0] }
             Task.detached(priority: .utility) { await SlackMediaCache.shared.prefetchAvatars(authors) }
+            if customEmoji.isEmpty, let team = app.slack?.teamID {
+                customEmoji = (try? await app.withSlack { await SlackDirectory.shared.customEmoji(team: team, via: $0) }) ?? [:]
+            }
         } catch { errors[.slack] = error.localizedDescription }
     }
 
