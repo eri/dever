@@ -226,15 +226,6 @@ struct IssueRow: View {
             .help(issue.title)
             .layoutPriority(1)
         Spacer(minLength: 12)
-        if !issue.labelList.isEmpty {
-            HStack(spacing: 4) {
-                ForEach(issue.labelList.prefix(3)) { LabelPill(label: $0) }
-                if issue.labelList.count > 3 {
-                    Text("+\(issue.labelList.count - 3)").font(.system(size: 11, weight: .medium)).foregroundStyle(Soot.muted)
-                        .accessibilityLabel("\(issue.labelList.count - 3) more labels")
-                }
-            }
-        }
         DueDateText(dueDate: issue.dueDate)
         if let person = issue.assignee {
             LinearAvatar(name: person.name, avatarURL: person.avatarUrl).help(person.name)
@@ -291,14 +282,14 @@ struct ChoiceChip<Label: View, Item: Identifiable, Row: View>: View {
                 label()
                 Image(systemName: "chevron.down").font(.system(size: 9, weight: .bold)).foregroundStyle(Soot.muted)
             }
-            .padding(.horizontal, 9)
-            .frame(height: 28)
-            .background(hovering || open ? Soot.ground : Soot.ground.opacity(0.6), in: RoundedRectangle(cornerRadius: 7))
-            .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(open ? Soot.lime : Soot.edge.opacity(0.6)))
-            .contentShape(RoundedRectangle(cornerRadius: 7))
+            .padding(.horizontal, 10)
+            .frame(height: 30)
+            .background(hovering || open ? Soot.surface.opacity(0.7) : Soot.surface, in: RoundedRectangle(cornerRadius: 8))
+            .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(open ? Soot.lime : Soot.edge))
+            .contentShape(RoundedRectangle(cornerRadius: 8))
         }
         .buttonStyle(.plain)
-        .modifier(FocusOutline(radius: 7))
+        .modifier(FocusOutline(radius: 8))
         .onHover { hovering = $0 }
         .accessibilityLabel(accessibilityLabel)
         .accessibilityAddTraits(.isButton)
