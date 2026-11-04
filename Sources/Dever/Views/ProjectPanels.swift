@@ -15,13 +15,19 @@ enum PersonTint {
 struct PersonAvatar: View {
     let name: String
     var size: CGFloat = 22
+    /// When the person is a Slack member, their real picture replaces the initial.
+    var slackUser: SlackUser? = nil
     var body: some View {
-        Text(String(name.prefix(1)).uppercased())
-            .font(.system(size: size * 0.48, weight: .semibold))
-            .foregroundStyle(Color.black.opacity(0.75))
-            .frame(width: size, height: size)
-            .background(PersonTint.color(for: name), in: Circle())
-            .accessibilityHidden(true)
+        if slackUser?.avatar != nil {
+            SlackAvatar(user: slackUser, name: name, size: size, radius: size / 2)
+        } else {
+            Text(String(name.prefix(1)).uppercased())
+                .font(.system(size: size * 0.48, weight: .semibold))
+                .foregroundStyle(Color.black.opacity(0.75))
+                .frame(width: size, height: size)
+                .background(PersonTint.color(for: name), in: Circle())
+                .accessibilityHidden(true)
+        }
     }
 }
 

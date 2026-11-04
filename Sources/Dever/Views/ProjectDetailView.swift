@@ -9,7 +9,10 @@ struct ProjectDetailView: View {
 
     @State private var issues: [LinearIssue] = []
     @State private var messages: [SlackMessage] = []
-    @State private var users: [String: String] = [:]
+    @State private var users: [String: SlackUser] = [:]
+    @State private var shownMessages = 8
+    @State private var hasEarlier = false
+    @State private var loadingEarlier = false
     @State private var pulls: [ProjectPullRequests.Match] = []
     @State private var pullsScoped = false
     @State private var runs: [GitHubRun] = []
@@ -336,30 +339,13 @@ struct ProjectDetailView: View {
                 EmptySection(title: "No messages yet", message: "Messages posted in #\(project.slack?.name ?? "") appear here.")
             } else {
                 SlackThreadView(messages: messages, users: users, domain: app.slack?.domain,
-                                channelID: project.slack?.id, limit: 6)
+                                channelID: project.slack?.id, shown: shownMessages,
+                                hasEarlier: hasEarlier, loadingEarlier: loadingEarlier,
+                                showEarlier: { Task { await showEarlier() } },
+                                replies: { m in try await loadReplies(m) })
             }
         }
         .sootPanel()
-    }
-
-    private func message(_ m: SlackMessage) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 6) {
-                Text(m.user.flatMap { users[$0] } ?? "Integration").font(Theme.bodyStrong).foregroundStyle(Theme.text)
-                Text(m.date.formatted(.relative(presentation: .named))).font(Theme.small).foregroundStyle(Theme.muted)
-                if let r = m.reply_count, r > 0 {
-                    Text("· ^[\(r) reply](inflect: true)").font(Theme.small).foregroundStyle(Theme.muted)
-                }
-            }
-            Text(m.text ?? "")
-                .font(Theme.body)
-                .foregroundStyle(Theme.text)
-                .lineLimit(3)
-                .lineSpacing(2)
-                .textSelection(.enabled)
-                .help(m.text ?? "")
-        }
-        .accessibilityElement(children: .combine)
     }
 
     // MARK: GitHub
@@ -494,10 +480,43 @@ struct ProjectDetailView: View {
     private func loadSlack() async {
         guard let id = project.slack?.id else { return }
         do {
-            messages = try await app.withSlack { try await $0.history(id) }
-                .filter { $0.subtype != "channel_join" && $0.subtype != "channel_leave" }
-            if users.isEmpty { users = (try? await app.withSlack { try await $0.userNames() }) ?? [:] }
+            let page = try await app.withSlack { try await $0.historyPage(id, limit: 20) }
+            merge(page.messages)
+            if messages.count <= 20 { hasEarlier = page.hasMore }
+            if let team = app.slack?.teamID {
+                // One users.list per quarter hour across the app, not one per visit.
+                users = try await app.withSlack { try await SlackDirectory.shared.users(team: team, via: $0) }
+            }
+            let authors = Set(messages.prefix(shownMessages).compactMap(\.user)).compactMap { users[$0] }
+            Task.detached(priority: .utility) { await SlackMediaCache.shared.prefetchAvatars(authors) }
         } catch { errors[.slack] = error.localizedDescription }
+    }
+
+    /// New messages replace the ones with the same `ts`; the rest stays as loaded, so a
+    /// refresh never throws away earlier pages or re-renders unchanged rows.
+    private func merge(_ incoming: [SlackMessage]) {
+        var byTS = Dictionary(messages.map { ($0.ts, $0) }, uniquingKeysWith: { _, new in new })
+        for m in incoming where m.subtype != "channel_join" && m.subtype != "channel_leave" { byTS[m.ts] = m }
+        messages = byTS.values.sorted { $0.ts > $1.ts }
+    }
+
+    /// Reveals already loaded messages first; fetches an earlier page only when those run out.
+    private func showEarlier() async {
+        if messages.count > shownMessages { shownMessages += 10; return }
+        guard let id = project.slack?.id, let oldest = messages.last?.ts, !loadingEarlier else { return }
+        loadingEarlier = true
+        defer { loadingEarlier = false }
+        do {
+            let page = try await app.withSlack { try await $0.historyPage(id, before: oldest, limit: 20) }
+            merge(page.messages)
+            hasEarlier = page.hasMore
+            shownMessages += 10
+        } catch { app.report(error) }
+    }
+
+    private func loadReplies(_ m: SlackMessage) async throws -> [SlackMessage] {
+        guard let id = project.slack?.id else { return [] }
+        return try await app.withSlack { try await $0.replies(id, threadTS: m.ts) }
     }
 
     private func loadGitHub() async {

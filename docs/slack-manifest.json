@@ -16,7 +16,8 @@
         "channels:write",
         "groups:write",
         "users:read",
-        "team:read"
+        "team:read",
+        "files:read"
       ]
     }
   },
