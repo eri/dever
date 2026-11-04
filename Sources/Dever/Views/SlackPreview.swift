@@ -122,33 +122,67 @@ struct RichTextLabel: NSViewRepresentable {
     var lineLimit: Int = 0
     @Environment(\.colorScheme) private var colorScheme
 
-    func makeNSView(context: Context) -> NSTextField {
-        let field = NSTextField(wrappingLabelWithString: "")
-        field.isSelectable = true
-        // Selecting hands the text to the field editor; without this it falls back to the
-        // field's plain font and the bold, links and chips vanish mid-click.
-        field.allowsEditingTextAttributes = true
-        field.font = NSFont.systemFont(ofSize: size)
-        field.lineBreakMode = .byWordWrapping
-        field.cell?.truncatesLastVisibleLine = true
-        field.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        field.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        return field
+    /// A read-only text view: unlike a text field it honours the link colour and keeps its
+    /// attributes while selecting; links show the pointing hand and open on click.
+    final class LabelView: NSTextView {
+        override var acceptsFirstResponder: Bool { true }
+        override func resetCursorRects() {
+            super.resetCursorRects()
+            guard let lm = layoutManager, let tc = textContainer, let storage = textStorage else { return }
+            storage.enumerateAttribute(.link, in: NSRange(location: 0, length: storage.length)) { value, range, _ in
+                guard value != nil else { return }
+                let glyphs = lm.glyphRange(forCharacterRange: range, actualCharacterRange: nil)
+                lm.enumerateEnclosingRects(forGlyphRange: glyphs, withinSelectedGlyphRange: NSRange(location: NSNotFound, length: 0), in: tc) { rect, _ in
+                    self.addCursorRect(rect.offsetBy(dx: self.textContainerOrigin.x, dy: self.textContainerOrigin.y), cursor: .pointingHand)
+                }
+            }
+        }
     }
 
-    func updateNSView(_ field: NSTextField, context: Context) {
-        field.attributedStringValue = Self.nsAttributed(text, size: size, color: color)
-        field.maximumNumberOfLines = lineLimit
+    func makeNSView(context: Context) -> LabelView {
+        let view = LabelView()
+        view.isEditable = false
+        view.isSelectable = true
+        view.drawsBackground = false
+        view.isRichText = true
+        view.textContainerInset = .zero
+        view.textContainer?.lineFragmentPadding = 0
+        view.textContainer?.widthTracksTextView = true
+        view.isVerticallyResizable = false
+        view.isHorizontallyResizable = false
+        view.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        return view
     }
 
-    func sizeThatFits(_ proposal: ProposedViewSize, nsView field: NSTextField, context: Context) -> CGSize? {
-        let width = proposal.width ?? 320
-        field.preferredMaxLayoutWidth = width
-        let height = field.cell?.cellSize(forBounds: NSRect(x: 0, y: 0, width: width, height: .greatestFiniteMagnitude)).height ?? 0
+    func updateNSView(_ view: LabelView, context: Context) {
+        view.linkTextAttributes = [.foregroundColor: NSColor(Soot.lime), .cursor: NSCursor.pointingHand]
+        view.textStorage?.setAttributedString(Self.nsAttributed(text, size: size, color: color))
+        view.textContainer?.maximumNumberOfLines = lineLimit
+        view.textContainer?.lineBreakMode = lineLimit > 0 ? .byTruncatingTail : .byWordWrapping
+        view.window?.invalidateCursorRects(for: view)
+    }
+
+    func sizeThatFits(_ proposal: ProposedViewSize, nsView view: LabelView, context: Context) -> CGSize? {
+        let width = max(proposal.width ?? 320, 40)
+        guard let container = view.textContainer, let lm = view.layoutManager else { return nil }
+        container.containerSize = NSSize(width: width, height: .greatestFiniteMagnitude)
+        lm.ensureLayout(for: container)
+        let height = lm.usedRect(for: container).height
         return CGSize(width: width, height: ceil(height))
     }
 
     /// SwiftUI's presentation intents and colours turned into AppKit fonts and attributes.
+    /// The SF Symbol "link" as an inline attachment, lime, sized to the text.
+    static func linkGlyph(size: CGFloat) -> NSTextAttachment? {
+        let config = NSImage.SymbolConfiguration(pointSize: size * 0.82, weight: .semibold)
+            .applying(.init(paletteColors: [NSColor(Soot.lime)]))
+        guard let image = NSImage(systemSymbolName: "link", accessibilityDescription: "Link")?.withSymbolConfiguration(config) else { return nil }
+        let attachment = NSTextAttachment()
+        attachment.image = image
+        attachment.bounds = CGRect(x: 0, y: -1, width: image.size.width, height: image.size.height)
+        return attachment
+    }
+
     static func nsAttributed(_ text: AttributedString, size: CGFloat, color: Color) -> NSAttributedString {
         let out = NSMutableAttributedString()
         let paragraph = NSMutableParagraphStyle()
@@ -175,9 +209,21 @@ struct RichTextLabel: NSViewRepresentable {
             if let bg = run.backgroundColor { attrs[.backgroundColor] = NSColor(bg) }
             if let link = run.link {
                 attrs[.link] = link
-                attrs[.foregroundColor] = NSColor(run.foregroundColor ?? Soot.lime)
+                attrs[.foregroundColor] = NSColor(Soot.lime)
                 attrs[.underlineStyle] = 0
+                attrs[.backgroundColor] = nil
                 attrs[.cursor] = NSCursor.pointingHand
+                // A bare URL (a chip) leads with a small link glyph instead of a highlight.
+                if piece.hasPrefix("\u{2009}"), let glyph = linkGlyph(size: size) {
+                    let icon = NSMutableAttributedString(attachment: glyph)
+                    icon.addAttributes([.link: link, .cursor: NSCursor.pointingHand], range: NSRange(location: 0, length: icon.length))
+                    out.append(icon)
+                    out.append(NSAttributedString(string: "\u{2009}", attributes: attrs))
+                    let label = piece.trimmingCharacters(in: CharacterSet(charactersIn: "\u{2009}"))
+                    attrs[.font] = NSFont.systemFont(ofSize: size, weight: .medium)
+                    out.append(NSAttributedString(string: label, attributes: attrs))
+                    continue
+                }
             }
             out.append(NSAttributedString(string: piece, attributes: attrs))
         }

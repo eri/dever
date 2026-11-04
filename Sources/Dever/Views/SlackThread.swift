@@ -212,9 +212,7 @@ enum SlackLinks {
     }
 
     private static func style(_ s: inout AttributedString) {
-        s.backgroundColor = Soot.lime.opacity(0.22)
         s.foregroundColor = Soot.lime
-        s.inlinePresentationIntent = .stronglyEmphasized
     }
 }
 
