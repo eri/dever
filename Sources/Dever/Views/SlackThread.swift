@@ -345,6 +345,8 @@ struct SlackThreadView: View {
     var showEarlier: () -> Void = {}
     /// Compact view: a click on a message opens the wide view there.
     var openWide: ((SlackMessage) -> Void)?
+    /// Compact view: opens the wide view on the latest messages.
+    var expand: (() -> Void)?
     var actions = SlackMessageActions()
     @State private var openThread: SlackMessage?
     @AppStorage("slackThreadPaneWidth") private var paneWidth: Double = 320
@@ -411,7 +413,7 @@ struct SlackThreadView: View {
 
     private var list: some View {
         VStack(alignment: .leading, spacing: 0) {
-            if hasEarlier || messages.count > shown {
+            if wide, hasEarlier || messages.count > shown {
                 if loadingEarlier {
                     WaitingLine().padding(.horizontal, 8).padding(.bottom, 12)
                         .accessibilityElement().accessibilityLabel("Loading earlier messages")
@@ -441,6 +443,20 @@ struct SlackThreadView: View {
                         .padding(.top, grouped ? 2 : (newDay ? 0 : (wide ? 18 : 14)))
                         .id(m.ts)
                 }
+            }
+            if !wide, let expand, messages.count > shown {
+                Button(action: expand) {
+                    HStack(spacing: 6) {
+                        Text("Read the conversation")
+                        Image(systemName: "arrow.up.left.and.arrow.down.right").font(.system(size: 10, weight: .semibold))
+                    }
+                }
+                .buttonStyle(.plain)
+                .handCursor()
+                .font(.system(size: 13, weight: .semibold)).foregroundStyle(Soot.lime)
+                .padding(.horizontal, 8).padding(.top, 14)
+                .modifier(FocusOutline(radius: 4))
+                .help("Read the whole conversation (⌘⇧E)")
             }
         }
     }
@@ -638,13 +654,17 @@ private struct SystemRow: View {
 
     var body: some View {
         HStack(alignment: .center, spacing: 10) {
-            ZStack {
-                SlackAvatar(user: user, name: user?.name ?? "S", size: 22, radius: 6)
-                Image(systemName: symbol).font(.system(size: 8, weight: .bold)).foregroundStyle(Soot.limeInk)
-                    .frame(width: 13, height: 13).background(Soot.lime, in: Circle())
-                    .offset(x: 9, y: 9)
+            ZStack(alignment: .bottomTrailing) {
+                SlackAvatar(user: user, name: user?.name ?? "S", size: 24, radius: 6)
+                    .padding([.bottom, .trailing], 5)
+                Image(systemName: symbol)
+                    .font(.system(size: 8, weight: .heavy))
+                    .foregroundStyle(Soot.limeInk)
+                    .frame(width: 16, height: 16)
+                    .background(Soot.lime, in: Circle())
+                    .overlay(Circle().strokeBorder(Soot.surface, lineWidth: 2))
             }
-            .frame(width: 32)
+            .frame(width: 32, height: 30)
             (Text(user?.name ?? "Slack").fontWeight(.semibold).foregroundColor(Soot.ink) + Text(" ") +
              Text(SlackMarkup.render(stripLeadingMention(message.text ?? ""), users: users.mapValues(\.name), channels: channels)))
                 .font(.system(size: 13)).foregroundStyle(Soot.muted).tint(Soot.muted)
@@ -659,11 +679,12 @@ private struct SystemRow: View {
 
     private var symbol: String {
         switch message.subtype {
-        case "pinned_item", "unpinned_item": "pin"
+        case "channel_name", "group_name": "pencil"
+        case "pinned_item", "unpinned_item": "pin.fill"
         case "channel_topic", "channel_purpose", "group_topic", "group_purpose": "text.quote"
-        case "bot_add", "bot_remove": "puzzlepiece"
-        case "channel_archive", "channel_unarchive": "archivebox"
-        default: "info.circle"
+        case "bot_add", "bot_remove": "puzzlepiece.fill"
+        case "channel_archive", "channel_unarchive": "archivebox.fill"
+        default: "info"
         }
     }
 

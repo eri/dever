@@ -223,7 +223,7 @@ struct IssueRow: View {
         PriorityGlyph(priority: issue.priority, dimmed: issue.priority == nil || issue.priority == 0)
             .help(LinearPriority.label(issue.priority))
         IDPill(text: issue.identifier)
-        Text(issue.title).font(.system(size: 14)).foregroundStyle(Soot.ink).lineLimit(1)
+        Text(MarkdownTheme.inline(issue.title, size: 14)).font(.system(size: 14)).foregroundStyle(Soot.ink).lineLimit(1)
             .help(issue.title)
             .layoutPriority(1)
         Spacer(minLength: 12)

@@ -289,7 +289,7 @@ struct ProjectDetailView: View {
             ForEach(capped(toClose, key: "close"), id: \.issue.id) { item in
                 TileRow(url: URL(string: item.issue.url)) {
                     IDPill(text: item.issue.identifier)
-                    Text(item.issue.title).font(.system(size: 14)).foregroundStyle(Soot.ink).lineLimit(1)
+                    Text(MarkdownTheme.inline(item.issue.title, size: 14)).font(.system(size: 14)).foregroundStyle(Soot.ink).lineLimit(1)
                     Spacer(minLength: 12)
                     Text(item.pull.mergedAt.map { "merged \($0.formatted(.relative(presentation: .named)))" } ?? "merged")
                         .font(.system(size: 12)).foregroundStyle(Soot.muted)
@@ -374,13 +374,15 @@ struct ProjectDetailView: View {
                 if slackExpanded {
                     // The way back sits where a back control is looked for: leading, before the title.
                     Button { toggleSlackWide() } label: {
-                        HStack(spacing: 4) {
-                            Image(systemName: "chevron.left").font(.system(size: 12, weight: .semibold))
-                            Text(project.name)
+                        HStack(spacing: 5) {
+                            Image(systemName: "chevron.left").font(.system(size: 12, weight: .bold))
+                            Text("Back")
                         }
                         .font(.system(size: 13, weight: .semibold)).foregroundStyle(Soot.ink)
-                        .padding(.leading, 8).padding(.trailing, 12).frame(height: 30)
-                        .background(Soot.ground, in: Capsule())
+                        .padding(.horizontal, 10).frame(height: 30)
+                        .background(Soot.surface, in: Capsule())
+                        .overlay(Capsule().strokeBorder(Soot.edge))
+                        .contentShape(Capsule())
                     }
                     .buttonStyle(.plain)
                     .handCursor()
@@ -394,12 +396,13 @@ struct ProjectDetailView: View {
                 VStack(alignment: .leading, spacing: 1) {
                     Text(project.slack.map { "#\($0.name)" } ?? "Slack").font(.system(size: 16, weight: .semibold))
                         .foregroundStyle(Soot.ink).accessibilityAddTraits(.isHeader)
-                    Text("Latest messages").font(.system(size: 12)).foregroundStyle(Soot.muted)
+                    Text(slackSubtitle).font(.system(size: 12)).foregroundStyle(Soot.muted)
                 }
                 Spacer()
-                if let url = slackURL {
-                    Link(destination: url) { HStack(spacing: 4) { Text("Open"); Image(systemName: "arrow.up.right") } }
+                if slackExpanded, let url = slackURL {
+                    Link(destination: url) { HStack(spacing: 4) { Text("Open in Slack"); Image(systemName: "arrow.up.right") } }
                         .font(.system(size: 13, weight: .semibold)).foregroundStyle(Soot.lime)
+                        .handCursor()
                         .help("Open the channel in Slack")
                 }
                 if project.slack != nil, !slackExpanded {
@@ -441,7 +444,8 @@ struct ProjectDetailView: View {
                 EmptySection(title: "No messages yet", message: "Messages posted in #\(project.slack?.name ?? "") appear here.")
             } else {
                 SlackThreadView(messages: messages, users: users, domain: app.slack?.domain,
-                                channelID: project.slack?.id, channelName: project.slack?.name, shown: shownMessages,
+                                channelID: project.slack?.id, channelName: project.slack?.name,
+                                shown: slackExpanded ? shownMessages : railPlan.count,
                                 hasEarlier: hasEarlier, loadingEarlier: loadingEarlier,
                                 wide: slackExpanded, focus: slackFocus, customEmoji: customEmoji,
                                 showEarlier: { Task { await showEarlier() } },
@@ -453,6 +457,7 @@ struct ProjectDetailView: View {
                                     }
                                     Task { try? await Task.sleep(nanoseconds: 3_000_000_000); if slackFocus == m.ts { slackFocus = nil } }
                                 },
+                                expand: slackExpanded ? nil : { toggleSlackWide() },
                                 actions: slackActions)
             }
         }
@@ -650,6 +655,25 @@ struct ProjectDetailView: View {
             hasEarlier = page.hasMore
             shownMessages += 10
         } catch { app.report(error) }
+    }
+
+    /// What the rail shows: this week's messages, at most six; when the channel has been
+    /// quiet all week, only its last message, under a note saying since when.
+    private var railPlan: (count: Int, recent: Int, quietSince: Date?) {
+        let weekAgo = Date().addingTimeInterval(-7 * 86_400)
+        let recent = messages.prefix { $0.date >= weekAgo }.count   // newest first
+        if recent == 0 { return (min(1, messages.count), 0, messages.first?.date) }
+        return (min(recent, 6), recent, nil)
+    }
+
+    private var slackSubtitle: String {
+        if slackExpanded { return "Conversation" }
+        if !loaded { return "Latest messages" }
+        let plan = railPlan
+        if let since = plan.quietSince {
+            return "Quiet since \(since.formatted(.relative(presentation: .named)))"
+        }
+        return plan.recent == 1 ? "1 message this week" : "\(plan.recent) messages this week"
     }
 
     private func toggleSlackWide() {

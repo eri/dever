@@ -479,7 +479,7 @@ struct IssueDetailView: View {
                                 TileLink(value: IssueRoute(projectID: route.projectID, brief: b)) {
                                     PriorityGlyph(priority: b.priority, dimmed: (b.priority ?? 0) == 0).help(LinearPriority.label(b.priority))
                                     IDPill(text: b.identifier).fixedSize()
-                                    Text(b.title).font(.system(size: 14)).foregroundStyle(Soot.ink).lineLimit(1).help(b.title)
+                                    Text(MarkdownTheme.inline(b.title, size: 14)).font(.system(size: 14)).foregroundStyle(Soot.ink).lineLimit(1).help(b.title)
                                     Spacer(minLength: 12)
                                     HStack(spacing: 6) {
                                         StateDot(state: b.state)
