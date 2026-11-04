@@ -55,29 +55,28 @@ struct ProjectEditorSheet: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            VStack(alignment: .leading, spacing: 6) {
+        SheetScaffold(width: 640) {
+            VStack(alignment: .leading, spacing: 8) {
                 SheetTitle(title: isNew ? "New project" : "Edit project",
                            mark: { ActionIcon(symbol: isNew ? "plus" : "pencil") }, close: { dismiss() })
                 Text("A Dever project follows one Slack channel and one Linear project.")
                     .font(.system(size: 14)).foregroundStyle(Soot.muted)
             }
-            VStack(alignment: .leading, spacing: 8) {
-                FieldLabel(text: "Name in Dever")
-                UnderlineField(placeholder: "e.g. Checkout redesign", text: $project.name, size: 20)
-                    .accessibilityLabel("Name in Dever")
-                if let nameError { ErrorLabel(nameError) }
+        } content: {
+            VStack(alignment: .leading, spacing: 32) {
+                VStack(alignment: .leading, spacing: 8) {
+                    SootField(label: "Name in Dever", placeholder: "e.g. Checkout redesign", text: $project.name)
+                    if let nameError { ErrorLabel(nameError) }
+                }
+                // One section per tool: its name, then the one choice, then what that choice needs.
+                slackSection
+                Rectangle().fill(Soot.line).frame(height: 1)
+                linearSection
+                Rectangle().fill(Soot.line).frame(height: 1)
+                githubSection
+                ForEach(catalog.errors + [error].compactMap { $0 }, id: \.self) { ErrorLabel($0) }
             }
-            // One row per tool: what it is on the left, the one choice on the right.
-            VStack(spacing: 0) {
-                slackRow
-                Rectangle().fill(Soot.ground).frame(height: 1)
-                linearRow
-                Rectangle().fill(Soot.ground).frame(height: 1)
-                githubRow
-            }
-            .background(Soot.surface, in: RoundedRectangle(cornerRadius: Soot.radius))
-            ForEach(catalog.errors + [error].compactMap { $0 }, id: \.self) { ErrorLabel($0) }
+        } footer: {
             HStack(spacing: 12) {
                 Text(saving ? "Saving…" : consequence)
                     .font(.system(size: 13)).foregroundStyle(Soot.muted).lineLimit(2)
@@ -88,9 +87,7 @@ struct ProjectEditorSheet: View {
                     .keyboardShortcut(.defaultAction)
                     .disabled(saving)
             }
-            .padding(.top, 4)
         }
-        .sootSheet(width: 580)
         .fixedSize(horizontal: false, vertical: true)
         .task {
             // New projects default to creating what's missing; edits never create anything implicitly.
@@ -121,44 +118,40 @@ struct ProjectEditorSheet: View {
             }
     }
 
-    /// A tool's row: logo and name, then its control (or why there is none).
-    private func toolRow<Control: View, Extra: View>(_ service: ServiceKind, title: String,
-                                                     @ViewBuilder control: () -> Control,
-                                                     @ViewBuilder extra: () -> Extra) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 12) {
-                BrandLogo(service: service, size: 18).foregroundStyle(Soot.ink)
-                Text(title).font(.system(size: 15, weight: .semibold)).foregroundStyle(Soot.ink)
-                    .frame(width: 150, alignment: .leading)
-                if app.isConnected(service) {
-                    if catalog.loading {
-                        Skeleton(width: 200, height: 14)
-                    } else {
-                        control().labelsHidden().frame(maxWidth: .infinity, alignment: .leading)
-                    }
+    /// A tool's section: logo and name, then its control (or why there is none), then extras.
+    private func toolSection<Control: View, Extra: View>(_ service: ServiceKind, title: String,
+                                                         @ViewBuilder control: () -> Control,
+                                                         @ViewBuilder extra: () -> Extra) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            SectionHeading(title: title) { BrandLogo(service: service, size: 18).foregroundStyle(Soot.ink) }
+            if app.isConnected(service) {
+                if catalog.loading {
+                    Skeleton(height: Soot.fieldHeight, radius: Soot.fieldRadius)
                 } else {
-                    Button {
-                        dismiss()
-                        NotificationCenter.default.post(name: .showScreen, object: SidebarItem.settings)
-                    } label: {
-                        HStack(spacing: 4) { Text("Connect \(service.label)"); Image(systemName: "arrow.up.right") }
-                    }
-                    .buttonStyle(.plain)
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(Soot.lime)
-                    .help("Opens Settings, where you can connect \(service.label)")
+                    control().labelsHidden().frame(maxWidth: .infinity, alignment: .leading)
                 }
-                Spacer(minLength: 0)
+            } else {
+                Button {
+                    dismiss()
+                    NotificationCenter.default.post(name: .showScreen, object: SidebarItem.settings)
+                } label: {
+                    HStack(spacing: 6) { Text("Connect \(service.label)"); Image(systemName: "arrow.up.right") }
+                        .frame(minHeight: 32)
+                }
+                .buttonStyle(.plain)
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(Soot.lime)
+                .help("Opens Settings, where you can connect \(service.label)")
+                .modifier(FocusOutline(radius: 6))
             }
             extra()
         }
-        .padding(16)
         .accessibilityElement(children: .contain)
         .accessibilityLabel(title)
     }
 
-    private var slackRow: some View {
-        toolRow(.slack, title: "Slack channel") {
+    private var slackSection: some View {
+        toolSection(.slack, title: "Slack channel") {
             SearchPicker(label: "Slack channel", placeholder: "Not linked",
                          actions: [PickerItem(id: Self.noneItem, title: "Not linked", symbol: "minus.circle"),
                                    PickerItem(id: Self.newItem, title: "New channel…", symbol: "plus")],
@@ -174,21 +167,21 @@ struct ProjectEditorSheet: View {
                             }))
         } extra: {
             if slackMode == .create && app.slack != nil {
-                HStack(spacing: 10) {
-                    FieldLabel(text: "Name")
-                    UnderlineField(placeholder: Naming.channelName(for: project.name.isEmpty ? "project" : project.name,
-                                                                   prefix: channelPrefix),
-                                   text: $newChannelName, size: 15)
+                VStack(alignment: .leading, spacing: 16) {
+                    SootField(label: "Channel name",
+                              placeholder: Naming.channelName(for: project.name.isEmpty ? "project" : project.name,
+                                                              prefix: channelPrefix),
+                              text: $newChannelName)
                         .accessibilityLabel("New channel name")
-                    Toggle("Private", isOn: $privateChannel).toggleStyle(.switch).tint(Soot.lime).fixedSize()
+                    SwitchRow(title: "Private channel", detail: "Only invited people can see it", isOn: $privateChannel)
                 }
-                .padding(.leading, 30)
+                .padding(.top, 6)
             }
         }
     }
 
-    private var linearRow: some View {
-        toolRow(.linear, title: "Linear project") {
+    private var linearSection: some View {
+        toolSection(.linear, title: "Linear project") {
             SearchPicker(label: "Linear project", placeholder: "Not linked",
                          actions: [PickerItem(id: Self.noneItem, title: "Not linked", symbol: "minus.circle"),
                                    PickerItem(id: Self.newItem, title: "New project…", symbol: "plus")],
@@ -207,21 +200,19 @@ struct ProjectEditorSheet: View {
                             }))
         } extra: {
             if linearMode == .create && app.linear != nil && !catalog.loading {
-                HStack(spacing: 10) {
+                VStack(alignment: .leading, spacing: 8) {
                     FieldLabel(text: "In team")
-                    Picker("Team", selection: $teamPick) {
-                        ForEach(catalog.teams) { Text($0.name).tag(Optional($0.id)) }
-                    }
-                    .labelsHidden()
-                    .frame(maxWidth: 220, alignment: .leading)
+                    SearchPicker(label: "Team", placeholder: "Pick a team",
+                                 items: catalog.teams.map { PickerItem(id: $0.id, title: $0.name) },
+                                 selection: $teamPick)
                 }
-                .padding(.leading, 30)
+                .padding(.top, 6)
             }
         }
     }
 
-    private var githubRow: some View {
-        toolRow(.github, title: "GitHub repository") {
+    private var githubSection: some View {
+        toolSection(.github, title: "GitHub repository") {
             SearchPicker(label: "GitHub repository", placeholder: "Not linked",
                          actions: [PickerItem(id: Self.noneItem, title: "Not linked", symbol: "minus.circle")],
                          items: catalog.repos.map {
@@ -232,14 +223,11 @@ struct ProjectEditorSheet: View {
                             set: { project.githubRepo = ($0 == Self.noneItem) ? nil : $0 }))
         } extra: {
             if project.githubRepo != nil && app.github != nil {
-                Toggle(isOn: Binding(get: { project.githubWholeRepo == true },
-                                     set: { project.githubWholeRepo = $0 })) {
-                    Text("Count every pull request, not only those linked to this project's issues")
-                        .font(.system(size: 13)).foregroundStyle(Soot.ink)
-                }
-                .toggleStyle(.switch)
-                .tint(Soot.lime)
-                .padding(.leading, 30)
+                SwitchRow(title: "Count every pull request",
+                          detail: "Not only those linked to this project's issues",
+                          isOn: Binding(get: { project.githubWholeRepo == true },
+                                        set: { project.githubWholeRepo = $0 }))
+                    .padding(.top, 6)
             }
         }
     }
@@ -383,37 +371,41 @@ struct ImportSheet: View {
     private var counterpart: ServiceKind { source == .slack ? .linear : .slack }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            SheetTitle(title: source == .slack ? "Import channels" : "Import projects", mark: {
-                ActionIcon(symbol: "square.and.arrow.down")
-            }, close: { dismiss() })
-            HStack(spacing: 16) {
-                HStack(spacing: 8) {
-                    Image(systemName: "magnifyingglass").foregroundStyle(Soot.muted).accessibilityHidden(true)
-                    UnderlineField(placeholder: source == .slack ? "Search channels" : "Search projects", text: $search, size: 16)
-                        .accessibilityLabel(source == .slack ? "Search channels" : "Search projects")
-                }
-                if source == .slack {
-                    if !channelPrefix.isEmpty {
-                        FilterChip(label: "Starts with \(channelPrefix)", on: $onlyPrefixed)
-                            .help("Only channels starting with \(channelPrefix)")
+        SheetScaffold(width: 680, height: 660) {
+            VStack(alignment: .leading, spacing: 24) {
+                SheetTitle(title: source == .slack ? "Import channels" : "Import projects", mark: {
+                    ActionIcon(symbol: "square.and.arrow.down")
+                }, close: { dismiss() })
+                VStack(alignment: .leading, spacing: 14) {
+                    SootField(label: source == .slack ? "Search channels" : "Search projects",
+                              placeholder: source == .slack ? "Channel name" : "Project name",
+                              text: $search, leadingSymbol: "magnifyingglass")
+                    if source == .slack {
+                        HStack(spacing: 10) {
+                            if !channelPrefix.isEmpty {
+                                FilterChip(label: "Starts with \(channelPrefix)", on: $onlyPrefixed)
+                                    .help("Only channels starting with \(channelPrefix)")
+                            }
+                            FilterChip(label: "I'm in", on: $onlyMine)
+                                .help("Only channels you're a member of")
+                        }
                     }
-                    FilterChip(label: "I'm in", on: $onlyMine)
-                        .help("Only channels you're a member of")
                 }
             }
-            ForEach(catalog.errors, id: \.self) { ErrorLabel($0) }
-            list
+        } content: {
+            VStack(alignment: .leading, spacing: 12) {
+                ForEach(catalog.errors, id: \.self) { ErrorLabel($0) }
+                list
+            }
+        } footer: {
             footer
         }
-        .sootSheet(width: 640, height: 600)
         .task { await catalog.load(app) }
     }
 
     @ViewBuilder
     private var list: some View {
-        ScrollView {
-            LazyVStack(spacing: 6) {
+        LazyVStack(spacing: 8) {
                 if catalog.loading {
                     ForEach(0..<6, id: \.self) { i in
                         HStack(spacing: 12) {
@@ -422,17 +414,15 @@ struct ImportSheet: View {
                             Spacer()
                             Skeleton(width: 110, height: 12)
                         }
-                        .padding(.horizontal, 16).frame(height: 56)
-                        .background(Soot.surface, in: RoundedRectangle(cornerRadius: Soot.radius))
+                        .padding(.horizontal, 18).frame(height: 60)
+                        .background(Soot.surface, in: RoundedRectangle(cornerRadius: Soot.fieldRadius))
                     }
                 } else if candidates.isEmpty {
                     emptyState
                 } else {
                     ForEach(candidates) { c in row(c) }
                 }
-            }
         }
-        .frame(maxHeight: .infinity)
     }
 
     private func row(_ c: Candidate) -> some View {
@@ -440,9 +430,9 @@ struct ImportSheet: View {
         return Button {
             if on { selection.remove(c.id) } else { selection.insert(c.id) }
         } label: {
-            HStack(spacing: 12) {
+            HStack(spacing: 14) {
                 CheckCircle(on: on)
-                VStack(alignment: .leading, spacing: 2) {
+                VStack(alignment: .leading, spacing: 3) {
                     Text(c.title).font(.system(size: 15, weight: .medium)).foregroundStyle(Soot.ink).lineLimit(1)
                     if c.projectName != c.title {
                         Text(c.projectName).font(.system(size: 13)).foregroundStyle(Soot.muted).lineLimit(1)
@@ -458,11 +448,13 @@ struct ImportSheet: View {
                 }
                 .help(c.match == nil ? "Link it later from the project" : "Linked automatically")
             }
-            .padding(.horizontal, 16)
-            .frame(height: 56)
-            .background(Soot.surface, in: RoundedRectangle(cornerRadius: Soot.radius))
-            .overlay(RoundedRectangle(cornerRadius: Soot.radius).strokeBorder(on ? Soot.lime.opacity(0.5) : .clear))
-            .contentShape(Rectangle())
+            .padding(.horizontal, 18)
+            .frame(height: 60)
+            .background(Soot.surface, in: RoundedRectangle(cornerRadius: Soot.fieldRadius))
+            .overlay(RoundedRectangle(cornerRadius: Soot.fieldRadius)
+                .strokeBorder(on ? Soot.lime : .clear, lineWidth: 1.5))
+            .contentShape(RoundedRectangle(cornerRadius: Soot.fieldRadius))
+            .modifier(FocusOutline(radius: Soot.fieldRadius))
         }
         .buttonStyle(.plain)
         .accessibilityAddTraits(on ? .isSelected : [])
@@ -482,7 +474,7 @@ struct ImportSheet: View {
             }
         }
         .frame(maxWidth: .infinity)
-        .padding(.top, 80)
+        .padding(.top, 72)
     }
 
     private var footer: some View {
@@ -491,7 +483,9 @@ struct ImportSheet: View {
                 Button(selection.count == candidates.count ? "Select none" : "Select all") {
                     selection = selection.count == candidates.count ? [] : Set(candidates.map(\.id))
                 }
-                .buttonStyle(.plain).font(.system(size: 14)).foregroundStyle(Soot.muted)
+                .buttonStyle(.plain).font(.system(size: 14, weight: .medium)).foregroundStyle(Soot.ink)
+                .frame(minHeight: 32)
+                .modifier(FocusOutline(radius: 6))
             }
             Spacer()
             Button("Cancel") { dismiss() }.buttonStyle(QuietButton())
@@ -543,9 +537,12 @@ private struct FilterChip: View {
             }
             .font(.system(size: 13, weight: .semibold))
             .foregroundStyle(on ? Soot.limeInk : Soot.ink)
-            .padding(.horizontal, 12)
-            .frame(height: 28)
+            .padding(.horizontal, 14)
+            .frame(height: 32)
             .background(on ? Soot.lime : Soot.surface, in: Capsule())
+            .overlay(Capsule().strokeBorder(on ? Color.clear : Soot.edge))
+            .contentShape(Capsule())
+            .modifier(FocusOutline(radius: 16))
         }
         .buttonStyle(.plain)
         .fixedSize()

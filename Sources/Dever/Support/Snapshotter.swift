@@ -20,7 +20,9 @@ enum Snapshotter {
         // the loading state instead.
         let wait = ProcessInfo.processInfo.environment["DEVER_SNAPSHOT_WAIT"].flatMap(Double.init) ?? 15
         try? await Task.sleep(nanoseconds: UInt64(wait * 1_000_000_000))
-        for (themeName, appearance) in [("dark", NSAppearance.Name.darkAqua), ("light", .aqua)] {
+        // DEVER_SNAPSHOT_SCREENS=0 skips the main screens when only sheets or onboarding are wanted.
+        let wantScreens = ProcessInfo.processInfo.environment["DEVER_SNAPSHOT_SCREENS"] != "0"
+        for (themeName, appearance) in [("dark", NSAppearance.Name.darkAqua), ("light", .aqua)] where wantScreens {
             NSApp.appearance = NSAppearance(named: appearance)
             for (name, item) in screens {
                 NotificationCenter.default.post(name: .showScreen, object: item)
@@ -30,7 +32,9 @@ enum Snapshotter {
             }
         }
         if ProcessInfo.processInfo.environment["DEVER_SNAPSHOT_SHEETS"] == "1" {
-            NSApp.appearance = NSAppearance(named: .darkAqua)
+            // Sheets are captured dark unless DEVER_SNAPSHOT_SHEET_THEME=light.
+            let light = ProcessInfo.processInfo.environment["DEVER_SNAPSHOT_SHEET_THEME"] == "light"
+            NSApp.appearance = NSAppearance(named: light ? .aqua : .darkAqua)
             NotificationCenter.default.post(name: .showScreen, object: SidebarItem.overview)
             for (name, sheet) in [("sheet-import-slack", "import-slack"), ("sheet-import-linear", "import-linear"),
                                   ("sheet-new-project", "new-project"), ("sheet-github", "github")] {

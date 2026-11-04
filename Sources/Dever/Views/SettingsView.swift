@@ -193,19 +193,26 @@ struct GitHubLoginSheet: View {
     @State private var copied = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 28) {
-            SheetTitle(title: "Connect GitHub", mark: { ActionIcon(symbol: "link") },
-                       close: { task?.cancel(); dismiss() })
-            if let code {
-                VStack(alignment: .leading, spacing: 20) {
+        SheetScaffold(width: 540) {
+            VStack(alignment: .leading, spacing: 8) {
+                SheetTitle(title: "Connect GitHub", mark: { ActionIcon(symbol: "link") },
+                           close: { task?.cancel(); dismiss() })
+                Text(code == nil ? "Dever reads your pull requests. It never writes."
+                                 : "Enter this code on GitHub, then approve Dever.")
+                    .font(.system(size: 14)).foregroundStyle(Soot.muted)
+            }
+        } content: {
+            VStack(alignment: .leading, spacing: 28) {
+                if let code {
                     VStack(alignment: .leading, spacing: 10) {
                         FieldLabel(text: "Your code")
-                        HStack(spacing: 14) {
+                        HStack(spacing: 16) {
                             Text(code.user_code)
-                                .font(.system(size: 36, weight: .semibold, design: .monospaced))
+                                .font(.system(size: 34, weight: .semibold, design: .monospaced))
                                 .tracking(2)
                                 .foregroundStyle(Soot.lime)
                                 .textSelection(.enabled)
+                            Spacer(minLength: 12)
                             Button {
                                 NSPasteboard.general.clearContents()
                                 NSPasteboard.general.setString(code.user_code, forType: .string)
@@ -215,43 +222,52 @@ struct GitHubLoginSheet: View {
                             }
                             .buttonStyle(QuietButton())
                         }
+                        .padding(.horizontal, 20)
+                        .frame(height: 76)
+                        .background(Soot.surface, in: RoundedRectangle(cornerRadius: Soot.fieldRadius))
+                        .overlay(RoundedRectangle(cornerRadius: Soot.fieldRadius).strokeBorder(Soot.edge))
                     }
                     // Waiting: a light travelling along the bottom edge, like the onboarding rows.
-                    VStack(alignment: .leading, spacing: 6) {
-                        HStack(spacing: 10) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack(spacing: 12) {
                             BrandLogo(service: .github, size: 18).foregroundStyle(Soot.ink)
-                            Text("Waiting for you to approve on GitHub").font(.system(size: 14)).foregroundStyle(Soot.ink)
+                            Text("Waiting for you to approve on GitHub").font(.system(size: 15)).foregroundStyle(Soot.ink)
                             Spacer()
                         }
-                        .padding(.horizontal, 16)
-                        .frame(height: 52)
-                        .background(Soot.surface, in: RoundedRectangle(cornerRadius: Soot.radius))
+                        .padding(.horizontal, 20)
+                        .frame(height: 60)
+                        .background(Soot.surface, in: RoundedRectangle(cornerRadius: Soot.fieldRadius))
                         .overlay(alignment: .bottom) { WaitingLine() }
-                        .clipShape(RoundedRectangle(cornerRadius: Soot.radius))
+                        .clipShape(RoundedRectangle(cornerRadius: Soot.fieldRadius))
                         .accessibilityElement(children: .combine)
-                        Text("Dever connects as soon as you approve.").font(.system(size: 12)).foregroundStyle(Soot.muted)
+                        Text("Dever connects as soon as you approve.").font(.system(size: 13)).foregroundStyle(Soot.muted)
+                    }
+                } else {
+                    VStack(spacing: 10) {
+                        OptionRow(icon: AnyView(BrandLogo(service: .github, size: 20).foregroundStyle(Soot.ink)),
+                                  title: "Sign in with a code", detail: "Approve Dever on github.com",
+                                  recommended: true, enabled: true) { startDeviceFlow() }
+                        OptionRow(icon: AnyView(Image(systemName: "terminal").font(.system(size: 16)).foregroundStyle(Soot.ink)),
+                                  title: "Use GitHub CLI", detail: "Reuse your gh session",
+                                  recommended: false, enabled: true) { importGh() }
                     }
                 }
-                HStack {
+                if let error { ErrorLabel(error) }
+            }
+        } footer: {
+            HStack {
+                if let code {
+                    Text("Code expires in \(code.expires_in / 60) min")
+                        .font(.system(size: 13)).foregroundStyle(Soot.muted)
                     Spacer()
                     Link(destination: URL(string: code.verification_uri)!) { Text("Link this device on GitHub") }
                         .buttonStyle(LimeButton())
-                }
-                .padding(.top, 8)
-            } else {
-                VStack(spacing: 8) {
-                    OptionRow(icon: AnyView(BrandLogo(service: .github, size: 20).foregroundStyle(Soot.ink)),
-                              title: "Sign in with a code", detail: "Approve Dever on github.com",
-                              recommended: true, enabled: true) { startDeviceFlow() }
-                    OptionRow(icon: AnyView(Image(systemName: "terminal").font(.system(size: 16)).foregroundStyle(Soot.ink)),
-                              title: "Use GitHub CLI", detail: "Reuse your gh session",
-                              recommended: false, enabled: true) { importGh() }
+                } else {
+                    Spacer()
+                    Button("Cancel") { dismiss() }.buttonStyle(QuietButton())
                 }
             }
-            if let error { ErrorLabel(error) }
         }
-        .padding(8)
-        .sootSheet(width: 500)
         .onAppear {
             // Snapshots: DEVER_SNAPSHOT_GITHUB_CODE shows the waiting state with a sample code.
             if let sample = ProcessInfo.processInfo.environment["DEVER_SNAPSHOT_GITHUB_CODE"] {

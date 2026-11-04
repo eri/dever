@@ -19,6 +19,22 @@ Verdict after fixes: ✅ 0 Blockers · 2 Warnings · 4 Advisories
 | Secondary button and chip edge | 1.10:1 → **3.87:1** (ground), **3.51:1** (surface) | 3 | fixed |
 | Selected outline (lime 50 %) on surface | 4.65:1 | 3 | ✅ |
 
+## Sheet redesign (filled fields)
+
+Inputs and selects are 44px filled fields (`SootField`, `SearchPicker`) with a label above them;
+the focused one gets a 2px lime edge. Measured:
+
+| Pair | Dark | Light | Need |
+|---|---|---|---|
+| Field edge `Soot.edge` on ground / on surface | 3.87 / 3.51:1 | 3.13 / 3.45:1 | 3 |
+| Focus edge `Soot.lime` on ground | 16.55:1 | 6.43:1 | 3 |
+| Selected import row edge (lime, full) | 15.03:1 | 7.08:1 | 3 |
+| Placeholder `Soot.muted` on surface | 5.38:1 | 6.05:1 | 4.5 |
+| Field label `Soot.ink` on ground | 18.4:1 | 17.5:1 | 4.5 |
+
+Targets: fields and selects 44px, list rows 40–60px, chips and footer links 32px, close 32px.
+Hairlines between sections (`Soot.line`) are decorative and carry no information.
+
 ## Blockers fixed
 
 - **1.4.11 Non-text contrast** — idle field underlines, radio rings and secondary-button/chip
@@ -35,8 +51,8 @@ Verdict after fixes: ✅ 0 Blockers · 2 Warnings · 4 Advisories
 
 ## Warnings
 
-- **2.5.8 Target size** — chips and the close button are 28px tall: above the 24px minimum,
-  below the comfortable 44px.
+- **2.5.8 Target size** — chips and the close button are 32px tall: above the 24px minimum,
+  below the comfortable 44px. Fields, selects and rows are 44px or more.
 - **1.4.1 Use of colour** — the selected option is shown by the lime ring and dot (shape and
   fill, not hue alone) and by the `isSelected` trait; keep it that way if restyled.
 
