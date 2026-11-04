@@ -31,6 +31,21 @@ enum Snapshotter {
                 capture(to: dir.appendingPathComponent("\(name)-\(themeName).png"))
             }
         }
+        if ProcessInfo.processInfo.environment["DEVER_SNAPSHOT_ISSUE"] == "1", let first = projects.first {
+            // The first project's first listed issue, in both modes.
+            for (themeName, appearance) in [("dark", NSAppearance.Name.darkAqua), ("light", .aqua)] {
+                NSApp.appearance = NSAppearance(named: appearance)
+                NotificationCenter.default.post(name: .showScreen, object: SidebarItem.project(first.id))
+                try? await Task.sleep(nanoseconds: 2_000_000_000)
+                NotificationCenter.default.post(name: .openFirstIssue, object: nil)
+                try? await Task.sleep(nanoseconds: UInt64((wait == 0 ? 0.4 : 8) * 1_000_000_000))
+                capture(to: dir.appendingPathComponent("issue-\(themeName).png"))
+                capturePopover(to: dir.appendingPathComponent("issue-\(themeName)-popover.png"))
+                NotificationCenter.default.post(name: .scrollToEnd, object: nil)
+                try? await Task.sleep(nanoseconds: 1_500_000_000)
+                capture(to: dir.appendingPathComponent("issue-\(themeName)-end.png"))
+            }
+        }
         if ProcessInfo.processInfo.environment["DEVER_SNAPSHOT_SHEETS"] == "1" {
             // Sheets are captured dark unless DEVER_SNAPSHOT_SHEET_THEME=light.
             let light = ProcessInfo.processInfo.environment["DEVER_SNAPSHOT_SHEET_THEME"] == "light"
@@ -41,13 +56,7 @@ enum Snapshotter {
                 NotificationCenter.default.post(name: .showSheet, object: sheet)
                 try? await Task.sleep(nanoseconds: 6_000_000_000)
                 capture(to: dir.appendingPathComponent("\(name).png"))
-                // An open popover lives in its own window.
-                if let popover = NSApp.windows.first(where: { $0.isVisible && String(describing: type(of: $0)).contains("Popover") }),
-                   let view = popover.contentView?.superview ?? popover.contentView,
-                   let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) {
-                    view.cacheDisplay(in: view.bounds, to: rep)
-                    try? rep.representation(using: .png, properties: [:])?.write(to: dir.appendingPathComponent("\(name)-popover.png"))
-                }
+                capturePopover(to: dir.appendingPathComponent("\(name)-popover.png"))
                 NotificationCenter.default.post(name: .showSheet, object: "none")
                 try? await Task.sleep(nanoseconds: 1_000_000_000)
             }
@@ -64,6 +73,15 @@ enum Snapshotter {
             }
         }
         NSApp.terminate(nil)
+    }
+
+    /// An open popover lives in its own window; nothing is written when none is open.
+    private static func capturePopover(to url: URL) {
+        guard let popover = NSApp.windows.first(where: { $0.isVisible && String(describing: type(of: $0)).contains("Popover") }),
+              let view = popover.contentView?.superview ?? popover.contentView,
+              let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return }
+        view.cacheDisplay(in: view.bounds, to: rep)
+        try? rep.representation(using: .png, properties: [:])?.write(to: url)
     }
 
     private static func capture(to url: URL) {

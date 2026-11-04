@@ -31,9 +31,26 @@ struct LinearProject: Codable, Identifiable, Hashable {
     var teams: Teams?
 }
 
-struct LinearIssue: Codable, Identifiable {
-    struct State: Codable { var name: String; var type: String }
-    struct Person: Codable { var name: String }
+struct LinearIssue: Codable, Identifiable, Hashable {
+    struct State: Codable, Hashable {
+        var id: String?
+        var name: String
+        var type: String
+        /// Linear's hex colour for the state ("#f2c94c").
+        var color: String?
+    }
+    struct Person: Codable, Hashable {
+        var id: String?
+        var name: String
+        var avatarUrl: String?
+    }
+    struct Label: Codable, Hashable, Identifiable {
+        var id: String
+        var name: String
+        var color: String
+    }
+    struct Labels: Codable, Hashable { var nodes: [Label] }
+
     var id: String
     var identifier: String
     var title: String
@@ -43,6 +60,14 @@ struct LinearIssue: Codable, Identifiable {
     var assignee: Person?
     var branchName: String?
     var attachments: Attachments?
+    /// Linear's 0–4: none, urgent, high, medium, low.
+    var priority: Int?
+    /// "YYYY-MM-DD".
+    var dueDate: String?
+    var labels: Labels?
+    var archivedAt: String?
+
+    var labelList: [Label] { labels?.nodes ?? [] }
 }
 
 /// Links attached to a Linear issue (GitHub PRs, among others).
@@ -206,16 +231,45 @@ struct LinearClient {
         return all.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
     }
 
-    func issues(projectID: String) async throws -> [LinearIssue] {
+    /// The fields every issue row needs; the detail page asks for more (`issueDetail`).
+    static let issueRowFields = """
+    id identifier title url updatedAt archivedAt priority dueDate
+    state { id name type color } assignee { id name avatarUrl }
+    labels { nodes { id name color } }
+    branchName attachments { nodes { url } }
+    """
+
+    /// A project's issues, 50 a page behind a cursor (the page size Linear's own client uses).
+    /// - Parameter updatedSince: only issues changed after this ISO date, for a delta refresh;
+    ///   archived ones are included then, so the caller can drop them.
+    func issues(projectID: String, updatedSince: String? = nil) async throws -> [LinearIssue] {
         struct R: Decodable {
-            struct P: Decodable { struct C: Decodable { var nodes: [LinearIssue] }; var issues: C }
+            struct P: Decodable {
+                struct C: Decodable {
+                    struct Page: Decodable { var hasNextPage: Bool; var endCursor: String? }
+                    var nodes: [LinearIssue]; var pageInfo: Page
+                }
+                var issues: C
+            }
             var project: P
         }
-        return try await query("""
-        query($id: String!) { project(id: $id) { issues(first: 250, orderBy: updatedAt) { nodes {
-          id identifier title url updatedAt state { name type } assignee { name }
-          branchName attachments { nodes { url } } } } } }
-        """, variables: ["id": projectID], as: R.self).project.issues.nodes
+        var all: [LinearIssue] = []
+        var after: Any = NSNull()
+        var filter: Any = NSNull()
+        if let updatedSince { filter = ["updatedAt": ["gt": updatedSince]] }
+        for _ in 0..<20 {
+            let page = try await query("""
+            query($id: String!, $after: String, $filter: IssueFilter, $archived: Boolean) {
+              project(id: $id) { issues(first: 50, after: $after, orderBy: updatedAt, filter: $filter, includeArchived: $archived) {
+                nodes { \(Self.issueRowFields) }
+                pageInfo { hasNextPage endCursor } } } }
+            """, variables: ["id": projectID, "after": after, "filter": filter, "archived": updatedSince != nil],
+            as: R.self).project.issues
+            all += page.nodes
+            guard page.pageInfo.hasNextPage, let cursor = page.pageInfo.endCursor else { break }
+            after = cursor
+        }
+        return all
     }
 
     struct ProjectSummary: Decodable {

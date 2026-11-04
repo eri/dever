@@ -10,6 +10,8 @@ struct ContentView: View {
     @EnvironmentObject var app: AppState
     @EnvironmentObject var store: OverviewStore
     @State private var selection: SidebarItem = .overview
+    /// Pages pushed over the selected screen (an issue, then the issues it links to).
+    @State private var path = NavigationPath()
     @State private var showNew = false
     @State private var importSource: ImportSheet.Source?
     @State private var editing: Project?
@@ -55,7 +57,7 @@ struct ContentView: View {
         HStack(spacing: 0) {
             rail
             Rectangle().fill(Theme.border).frame(width: 1)
-            NavigationStack {
+            NavigationStack(path: $path) {
             Group {
                 switch selection {
                 case .project(let id):
@@ -77,7 +79,12 @@ struct ContentView: View {
             .environment(\.openSettings, { selection = .settings })
             .background(Theme.frame)
             .toolbarBackgroundHiddenIfAvailable()
+            .navigationDestination(for: IssueRoute.self) { IssueDetailView(route: $0) }
             }
+        }
+        .onChange(of: selection) { _, _ in path = NavigationPath() }
+        .onReceive(NotificationCenter.default.publisher(for: .openIssue)) { note in
+            if let route = note.object as? IssueRoute { path.append(route) }
         }
         .task {
             store.startAutoRefresh(app)
@@ -101,7 +108,7 @@ struct ContentView: View {
         }
         .sheet(isPresented: $githubSheet) { GitHubLoginSheet() }
         .onReceive(NotificationCenter.default.publisher(for: .showScreen)) { note in
-            if let item = note.object as? SidebarItem { selection = item }
+            if let item = note.object as? SidebarItem { selection = item; path = NavigationPath() }
         }
         .onReceive(NotificationCenter.default.publisher(for: .openProject)) { note in
             if let id = note.object as? UUID, app.projects.contains(where: { $0.id == id }) {

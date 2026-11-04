@@ -7,12 +7,13 @@ struct ProjectDetailView: View {
     let project: Project
     let edit: () -> Void
 
-    @State private var issues: [LinearIssue] = []
+    @ObservedObject private var issueStore = IssueStore.shared
     @State private var messages: [SlackMessage] = []
     @State private var users: [String: SlackUser] = [:]
     @State private var shownMessages = 8
     @State private var hasEarlier = false
     @State private var loadingEarlier = false
+    @State private var slackExpanded = false
     @State private var pulls: [ProjectPullRequests.Match] = []
     @State private var pullsScoped = false
     @State private var runs: [GitHubRun] = []
@@ -25,6 +26,8 @@ struct ProjectDetailView: View {
     @State private var pullTab: PullTab = .merged
 
     private var status: ProjectStatus { project.status(store.snapshots[project.id]) }
+
+    private var issues: [LinearIssue] { project.linear.map { issueStore.issues(project: $0.id) } ?? [] }
 
     private var delivery: Delivery {
         Delivery(issues: issues.map { ($0.identifier, $0.state.type, $0.state.name) },
@@ -50,7 +53,9 @@ struct ProjectDetailView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 24) {
                     titleRow
-                    if twoColumns {
+                    if slackExpanded {
+                        slackPanel
+                    } else if twoColumns {
                         HStack(alignment: .top, spacing: 16) {
                             workColumn.frame(maxWidth: .infinity)
                             slackPanel.frame(width: min(420, geo.size.width * 0.34))
@@ -68,6 +73,11 @@ struct ProjectDetailView: View {
         .navigationTitle(project.name)
         .windowTitleHidden()
         .task { await load() }
+        .onReceive(NotificationCenter.default.publisher(for: .openFirstIssue)) { _ in
+            if let first = issues(in: currentIssueTab).first {
+                NotificationCenter.default.post(name: .openIssue, object: IssueRoute(project: project, issue: first))
+            }
+        }
     }
 
     private var workColumn: some View {
@@ -99,7 +109,7 @@ struct ProjectDetailView: View {
             }
             Spacer(minLength: 16)
             HStack(spacing: 8) {
-                Button { Task { await load() } } label: {
+                Button { Task { await load(force: true) } } label: {
                     Image(systemName: "arrow.clockwise").foregroundStyle(Theme.muted)
                 }
                 .buttonStyle(.borderless)
@@ -280,19 +290,9 @@ struct ProjectDetailView: View {
                 let list = issues(in: currentIssueTab)
                 VStack(alignment: .leading, spacing: 2) {
                     ForEach(capped(list, key: "issues")) { issue in
-                        TileRow(url: URL(string: issue.url)) {
-                            IDPill(text: issue.identifier)
-                            Text(issue.title).font(.system(size: 14)).foregroundStyle(Soot.ink).lineLimit(1)
-                                .help(issue.title)
-                            Spacer(minLength: 12)
-                            if let name = issue.assignee?.name {
-                                PersonAvatar(name: name).help(name)
-                            } else {
-                                Image(systemName: "person.crop.circle.badge.questionmark").foregroundStyle(Soot.muted)
-                                    .help("Unassigned")
-                            }
-                        }
-                        .accessibilityElement(children: .combine)
+                        TileLink(value: IssueRoute(project: project, issue: issue)) { IssueRow(issue: issue) }
+                            .accessibilityElement(children: .combine)
+                            .accessibilityHint("Opens the issue")
                     }
                     showAll(list.count, key: "issues")
                 }
@@ -318,6 +318,21 @@ struct ProjectDetailView: View {
                         .font(.system(size: 13, weight: .semibold)).foregroundStyle(Soot.lime)
                         .help("Open the channel in Slack")
                 }
+                if project.slack != nil {
+                    Button {
+                        slackExpanded.toggle()
+                        if slackExpanded { shownMessages = max(shownMessages, 30) }
+                    } label: {
+                        Image(systemName: slackExpanded ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right")
+                            .font(.system(size: 12, weight: .semibold)).foregroundStyle(Soot.ink)
+                            .frame(width: 28, height: 28).background(Soot.ground, in: Circle())
+                    }
+                    .buttonStyle(.plain)
+                    .modifier(FocusOutline(radius: 14))
+                    .help(slackExpanded ? "Back to the project" : "Read the channel full width")
+                    .accessibilityLabel(slackExpanded ? "Back to the project" : "Expand the conversation")
+                    .keyboardShortcut(slackExpanded ? .cancelAction : KeyboardShortcut("e", modifiers: [.command, .shift]))
+                }
             }
             if project.slack == nil {
                 EmptySection(title: "No Slack channel", message: "Link a channel to follow its conversation here.")
@@ -339,10 +354,11 @@ struct ProjectDetailView: View {
                 EmptySection(title: "No messages yet", message: "Messages posted in #\(project.slack?.name ?? "") appear here.")
             } else {
                 SlackThreadView(messages: messages, users: users, domain: app.slack?.domain,
-                                channelID: project.slack?.id, shown: shownMessages,
+                                channelID: project.slack?.id, channelName: project.slack?.name, shown: shownMessages,
                                 hasEarlier: hasEarlier, loadingEarlier: loadingEarlier,
                                 showEarlier: { Task { await showEarlier() } },
-                                replies: { m in try await loadReplies(m) })
+                                actions: slackActions)
+                    .frame(maxWidth: slackExpanded ? 760 : .infinity, alignment: .leading)
             }
         }
         .sootPanel()
@@ -461,20 +477,20 @@ struct ProjectDetailView: View {
 
     // MARK: Loading
 
-    private func load() async {
+    private func load(force: Bool = false) async {
         loading = true
         defer { loading = false; loaded = true }
         errors = [:]
         async let s: Void = loadSlack()
         // GitHub needs the Linear issues to tell which pull requests belong to the project.
-        await loadLinear()
+        await loadLinear(force: force)
         await loadGitHub()
         await s
     }
 
-    private func loadLinear() async {
+    private func loadLinear(force: Bool) async {
         guard let id = project.linear?.id else { return }
-        do { issues = try await app.withLinear { try await $0.issues(projectID: id) } } catch { errors[.linear] = error.localizedDescription }
+        do { _ = try await issueStore.load(project: id, force: force, app: app) } catch { errors[.linear] = error.localizedDescription }
     }
 
     private func loadSlack() async {
@@ -514,9 +530,22 @@ struct ProjectDetailView: View {
         } catch { app.report(error) }
     }
 
-    private func loadReplies(_ m: SlackMessage) async throws -> [SlackMessage] {
-        guard let id = project.slack?.id else { return [] }
-        return try await app.withSlack { try await $0.replies(id, threadTS: m.ts) }
+    private var slackActions: SlackMessageActions {
+        SlackMessageActions(
+            reply: { m, text in
+                guard let id = project.slack?.id else { return }
+                try await app.withSlack { try await $0.reply(id, threadTS: m.ts, text: text) }
+                await loadSlack()
+            },
+            react: { m, name, on in
+                guard let id = project.slack?.id else { return }
+                try await app.withSlack { try await $0.react(id, ts: m.ts, name: name, on: on) }
+                await loadSlack()
+            },
+            replies: { m in
+                guard let id = project.slack?.id else { return [] }
+                return try await app.withSlack { try await $0.replies(id, threadTS: m.ts) }
+            })
     }
 
     private func loadGitHub() async {
@@ -534,6 +563,11 @@ struct ProjectDetailView: View {
             merged = MergedPull.list(repo: repo, recentlyMerged: try await recentlyMerged, issues: refs,
                                      wholeRepository: project.showsWholeRepository,
                                      open: Set(prs.matches.map(\.pull.number)))
+            for m in merged { issueStore.pullsByURL[m.url] = .init(number: m.number, title: m.title ?? "", state: .merged) }
+            for p in pulls {
+                issueStore.pullsByURL[p.pull.html_url] = .init(number: p.pull.number, title: p.pull.title,
+                                                               state: p.pull.draft == true ? .draft : .open)
+            }
         } catch { errors[.github] = error.localizedDescription }
     }
 }
