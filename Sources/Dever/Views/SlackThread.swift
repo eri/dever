@@ -274,7 +274,7 @@ enum SlackRichText {
     private static func render(_ leaf: SlackRichElement, users: [String: SlackUser], channels: [String: String]) -> AttributedString {
         var s: AttributedString
         switch leaf.type {
-        case "text": s = AttributedString(leaf.text ?? "")
+        case "text": s = autolinked(leaf.text ?? "", channels: channels)
         case "link":
             let url = leaf.url.flatMap(URL.init(string:))
             // A link is "bare" when its text is the URL or a piece of it (Slack keeps what was typed).
@@ -307,6 +307,24 @@ enum SlackRichText {
             if !intent.isEmpty { s.inlinePresentationIntent = intent }
         }
         return s
+    }
+
+    /// URLs typed as plain text (Slack leaves them unlinked inside quotes) become chips.
+    private static let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue)
+
+    private static func autolinked(_ text: String, channels: [String: String]) -> AttributedString {
+        guard let detector, text.contains("://") else { return AttributedString(text) }
+        let ns = text as NSString
+        var out = AttributedString()
+        var last = 0
+        for m in detector.matches(in: text, range: NSRange(location: 0, length: ns.length)) {
+            guard let url = m.url, url.scheme?.hasPrefix("http") == true else { continue }
+            out.append(AttributedString(ns.substring(with: NSRange(location: last, length: m.range.location - last))))
+            out.append(SlackLinks.chip(url, label: SlackLinks.plainLabel(url.absoluteString, channels: channels)))
+            last = m.range.location + m.range.length
+        }
+        out.append(AttributedString(ns.substring(from: last)))
+        return out
     }
 
     /// "1f44d-1f3fb" → 👍🏻
@@ -358,7 +376,7 @@ struct SlackThreadView: View {
 
     var body: some View {
         if wide {
-            HStack(alignment: .top, spacing: 24) {
+            HStack(alignment: .top, spacing: 16) {
                 ScrollViewReader { proxy in
                     ScrollView {
                         list.frame(maxWidth: 1200, alignment: .leading)
@@ -728,7 +746,7 @@ private struct PaneHandle: View {
         Rectangle().fill(hovering || start != nil ? Soot.lime : Soot.line)
             .frame(width: 2)
             .opacity(hovering || start != nil ? 1 : 0.6)
-            .padding(.horizontal, 5)
+            .padding(.horizontal, 4)
             .contentShape(Rectangle())
             .overlay(CursorArea(cursor: .resizeLeftRight))
             .onHover { hovering = $0 }
@@ -828,7 +846,7 @@ private struct ThreadPane: View {
             .frame(maxHeight: .infinity)
             ReplyComposer(draft: $draft, sending: sending, autofocus: false, send: { await send() }, cancel: { draft = "" })
         }
-        .padding(14)
+        .padding(18)
         .frame(maxHeight: .infinity, alignment: .top)
         .background(Soot.ground, in: RoundedRectangle(cornerRadius: 12))
         .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Soot.line))
