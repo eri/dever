@@ -98,11 +98,25 @@ struct SlackAttachment: Codable, Identifiable {
     var channel_name: String?
     var author_subname: String?
     var footer: String?
+    var ts: FlexibleString?
     var isEmpty: Bool { title == nil && text == nil && pretext == nil && image_url == nil && fallback == nil }
     /// A Slack message quoted in this one (shared or unfurled).
     var isMessageUnfurl: Bool {
         is_msg_unfurl == true || (from_url ?? "").range(of: #"slack\.com/archives/[A-Z0-9]+/p\d+"#, options: .regularExpression) != nil
     }
+}
+
+/// A value Slack sends as a string in one place and a number in another (attachment `ts`).
+struct FlexibleString: Codable, Hashable {
+    var value: String
+    init(from decoder: Decoder) throws {
+        let c = try decoder.singleValueContainer()
+        if let s = try? c.decode(String.self) { value = s }
+        else if let d = try? c.decode(Double.self) { value = String(d) }
+        else if let i = try? c.decode(Int.self) { value = String(i) }
+        else { throw DecodingError.typeMismatch(String.self, .init(codingPath: decoder.codingPath, debugDescription: "string or number")) }
+    }
+    func encode(to encoder: Encoder) throws { var c = encoder.singleValueContainer(); try c.encode(value) }
 }
 
 /// Block Kit, as far as reading goes: `rich_text` blocks with their nested elements.

@@ -125,7 +125,10 @@ struct RichTextLabel: NSViewRepresentable {
     func makeNSView(context: Context) -> NSTextField {
         let field = NSTextField(wrappingLabelWithString: "")
         field.isSelectable = true
-        field.allowsEditingTextAttributes = false
+        // Selecting hands the text to the field editor; without this it falls back to the
+        // field's plain font and the bold, links and chips vanish mid-click.
+        field.allowsEditingTextAttributes = true
+        field.font = NSFont.systemFont(ofSize: size)
         field.lineBreakMode = .byWordWrapping
         field.cell?.truncatesLastVisibleLine = true
         field.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
@@ -180,6 +183,47 @@ struct RichTextLabel: NSViewRepresentable {
         }
         return out
     }
+}
+
+/// A cursor for the area of a view, through AppKit's cursor rects: reliable where
+/// pushing cursors on hover is not. Clicks pass through.
+struct CursorArea: NSViewRepresentable {
+    let cursor: NSCursor
+
+    final class CursorView: NSView {
+        var cursor: NSCursor = .arrow
+        override func hitTest(_ point: NSPoint) -> NSView? { nil }
+        override func resetCursorRects() { addCursorRect(bounds, cursor: cursor) }
+    }
+
+    func makeNSView(context: Context) -> CursorView {
+        let view = CursorView()
+        view.cursor = cursor
+        return view
+    }
+
+    func updateNSView(_ view: CursorView, context: Context) {
+        view.cursor = cursor
+        view.window?.invalidateCursorRects(for: view)
+    }
+}
+
+/// Sets the enclosing scroll view to thin overlay scrollers that hide when idle.
+struct OverlayScrollers: NSViewRepresentable {
+    final class Probe: NSView {
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            var view: NSView? = superview
+            while let v = view, !(v is NSScrollView) { view = v.superview }
+            if let scroll = view as? NSScrollView {
+                scroll.scrollerStyle = .overlay
+                scroll.autohidesScrollers = true
+                scroll.verticalScroller?.controlSize = .small
+            }
+        }
+    }
+    func makeNSView(context: Context) -> Probe { Probe(frame: .zero) }
+    func updateNSView(_ view: Probe, context: Context) {}
 }
 
 /// A picture at its natural size, scaled down to fit; decoded off the main thread.

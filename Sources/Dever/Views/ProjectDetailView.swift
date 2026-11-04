@@ -371,6 +371,25 @@ struct ProjectDetailView: View {
     private var slackPanel: some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack(spacing: 10) {
+                if slackExpanded {
+                    // The way back sits where a back control is looked for: leading, before the title.
+                    Button { toggleSlackWide() } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: "chevron.left").font(.system(size: 12, weight: .semibold))
+                            Text(project.name)
+                        }
+                        .font(.system(size: 13, weight: .semibold)).foregroundStyle(Soot.ink)
+                        .padding(.leading, 8).padding(.trailing, 12).frame(height: 30)
+                        .background(Soot.ground, in: Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .handCursor()
+                    .modifier(FocusOutline(radius: 15))
+                    .help("Back to the project (⌘⇧E)")
+                    .accessibilityLabel("Back to the project")
+                    .keyboardShortcut("e", modifiers: [.command, .shift])
+                    Rectangle().fill(Soot.line).frame(width: 1, height: 22)
+                }
                 BrandLogo(service: .slack, size: 18)
                 VStack(alignment: .leading, spacing: 1) {
                     Text(project.slack.map { "#\($0.name)" } ?? "Slack").font(.system(size: 16, weight: .semibold))
@@ -383,28 +402,16 @@ struct ProjectDetailView: View {
                         .font(.system(size: 13, weight: .semibold)).foregroundStyle(Soot.lime)
                         .help("Open the channel in Slack")
                 }
-                if project.slack != nil {
-                    // Wide view: a labelled way back, not only a glyph, since the work column is gone.
-                    Button {
-                        withAnimation(reduceMotion ? nil : .snappy(duration: 0.3)) {
-                            slackExpanded.toggle()
-                            if slackExpanded { shownMessages = max(shownMessages, 30) }
-                        }
-                    } label: {
-                        HStack(spacing: 6) {
-                            Image(systemName: slackExpanded ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right")
-                                .font(.system(size: 11, weight: .semibold))
-                            if slackExpanded { Text("Back to project") }
-                        }
-                        .font(.system(size: 13, weight: .semibold)).foregroundStyle(Soot.ink)
-                        .padding(.horizontal, slackExpanded ? 12 : 0)
-                        .frame(minWidth: 30, minHeight: 30)
-                        .background(Soot.ground, in: Capsule())
+                if project.slack != nil, !slackExpanded {
+                    Button { toggleSlackWide() } label: {
+                        Image(systemName: "arrow.up.left.and.arrow.down.right").font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(Soot.ink).frame(width: 30, height: 30).background(Soot.ground, in: Circle())
                     }
                     .buttonStyle(.plain)
+                    .handCursor()
                     .modifier(FocusOutline(radius: 15))
-                    .help(slackExpanded ? "Back to the project (⌘⇧E)" : "Read the conversation full width (⌘⇧E)")
-                    .accessibilityLabel(slackExpanded ? "Back to the project" : "Read the conversation full width")
+                    .help("Read the conversation full width (⌘⇧E)")
+                    .accessibilityLabel("Read the conversation full width")
                     .keyboardShortcut("e", modifiers: [.command, .shift])
                 }
             }
@@ -643,6 +650,13 @@ struct ProjectDetailView: View {
             hasEarlier = page.hasMore
             shownMessages += 10
         } catch { app.report(error) }
+    }
+
+    private func toggleSlackWide() {
+        withAnimation(reduceMotion ? nil : .snappy(duration: 0.3)) {
+            slackExpanded.toggle()
+            if slackExpanded { shownMessages = max(shownMessages, 30) }
+        }
     }
 
     private var slackActions: SlackMessageActions {

@@ -139,7 +139,7 @@ enum SlackMarkup {
 /// The pointing hand over anything clickable that is not a system control.
 struct HandCursor: ViewModifier {
     func body(content: Content) -> some View {
-        content.onHover { inside in if inside { NSCursor.pointingHand.push() } else { NSCursor.pop() } }
+        content.overlay(CursorArea(cursor: .pointingHand))
     }
 }
 
@@ -364,7 +364,7 @@ struct SlackThreadView: View {
                         list.frame(maxWidth: 1200, alignment: .leading)
                         Color.clear.frame(height: 1).id("slack-end")
                     }
-                    .scrollIndicators(.automatic)
+                    .background(OverlayScrollers())
                     // Opens on the message that was clicked, else on the latest, as Slack does.
                     .onAppear { proxy.scrollTo(focus ?? "slack-end", anchor: focus == nil ? .bottom : .center) }
                     .onChange(of: focus) { _, ts in if let ts { withAnimation { proxy.scrollTo(ts, anchor: .center) } } }
@@ -707,19 +707,21 @@ private struct PaneHandle: View {
 
     var body: some View {
         Rectangle().fill(hovering || start != nil ? Soot.lime : Soot.line)
-            .frame(width: hovering || start != nil ? 2 : 1)
+            .frame(width: 2)
+            .opacity(hovering || start != nil ? 1 : 0.6)
             .padding(.horizontal, 5)
             .contentShape(Rectangle())
-            .onHover { inside in
-                hovering = inside
-                if inside { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() }
-            }
-            .gesture(DragGesture(minimumDistance: 2)
+            .overlay(CursorArea(cursor: .resizeLeftRight))
+            .onHover { hovering = $0 }
+            // Global coordinates: the handle itself moves while dragging, so a local
+            // translation would feed back into the width and make everything shake.
+            .gesture(DragGesture(minimumDistance: 2, coordinateSpace: .global)
                 .onChanged { value in
                     if start == nil { start = width }
-                    width = min(560, max(260, (start ?? width) - value.translation.width))
+                    width = min(560, max(260, (start ?? width) - (value.location.x - value.startLocation.x)))
                 }
                 .onEnded { _ in start = nil })
+            .transaction { $0.animation = nil }
             .onTapGesture(count: 2) { width = 320 }
             .accessibilityElement()
             .accessibilityLabel("Pane width")
@@ -788,6 +790,7 @@ private struct ThreadPane: View {
             }
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
+                    Color.clear.frame(height: 0).background(OverlayScrollers())
                     HStack(alignment: .top, spacing: 10) {
                         SlackAvatar(user: user, name: user?.name ?? "App", size: 32)
                         VStack(alignment: .leading, spacing: 4) {
@@ -796,7 +799,7 @@ private struct ThreadPane: View {
                                 Text(parent.date.formatted(.relative(presentation: .named))).font(.system(size: 12)).foregroundStyle(Soot.muted)
                             }
                             MessageBody(message: parent, users: users, channels: channels, expanded: .constant(true))
-                            MessageExtras(message: parent, channels: channels)
+                            MessageExtras(message: parent, channels: channels, users: users)
                         }
                     }
                     Rectangle().fill(Soot.line).frame(height: 1)
@@ -960,7 +963,7 @@ private struct MessageRow: View {
                     }
                 }
                 MessageBody(message: message, users: users, channels: channels, expanded: wide ? .constant(true) : $expanded)
-                MessageExtras(message: message, channels: channels)
+                MessageExtras(message: message, channels: channels, users: users)
                 if !reactions.isEmpty {
                     ReactionPills(reactions: reactions, me: me, customEmoji: customEmoji) { toggle($0) }
                 }
@@ -1010,6 +1013,7 @@ private struct MessageRow: View {
         .padding(.horizontal, 8)
         .padding(.trailing, 4)
         .background(selected ? Soot.ground : (hovering ? Soot.ground.opacity(0.6) : Color.clear), in: RoundedRectangle(cornerRadius: 6))
+        .padding(.leading, selected ? 8 : 0)
         .overlay(alignment: .leading) {
             if selected { RoundedRectangle(cornerRadius: 2).fill(Soot.lime).frame(width: 3).padding(.vertical, 6) }
         }
@@ -1290,6 +1294,7 @@ private struct MessageBody: View {
 private struct MessageExtras: View {
     let message: SlackMessage
     var channels: [String: String] = [:]
+    var users: [String: SlackUser] = [:]
 
     var body: some View {
         let files = message.files ?? []
@@ -1299,7 +1304,7 @@ private struct MessageExtras: View {
                 ForEach(files) { file in
                     if file.isReadable, file.isImage { SlackImage(file: file) } else { FileRow(file: file) }
                 }
-                ForEach(Array(cards.enumerated()), id: \.offset) { _, card in LinkPreview(card: card, channels: channels) }
+                ForEach(Array(cards.enumerated()), id: \.offset) { _, card in LinkPreview(card: card, channels: channels, users: users) }
             }
             .padding(.top, 2)
         }
@@ -1407,7 +1412,13 @@ private struct FileRow: View {
 private struct LinkPreview: View {
     let card: SlackAttachment
     var channels: [String: String] = [:]
+    var users: [String: SlackUser] = [:]
     @State private var image: CGImage?
+
+    private var names: [String: String] { users.mapValues(\.name) }
+    private var quotedDate: String? {
+        card.ts.flatMap { Double($0.value) }.map { Date(timeIntervalSince1970: $0).formatted(date: .abbreviated, time: .shortened) }
+    }
 
     /// Slack messages quoted from another channel are not linked: without access the link
     /// only opens an error. The quote itself already carries the content.
@@ -1430,22 +1441,30 @@ private struct LinkPreview: View {
             RoundedRectangle(cornerRadius: 2).fill(bar).frame(width: 4)
             VStack(alignment: .leading, spacing: 3) {
                 if card.isMessageUnfurl {
-                    HStack(spacing: 5) {
-                        Image(systemName: "quote.opening").font(.system(size: 9, weight: .bold))
-                        Text([card.author_name, card.channel_name.map { "#\($0)" } ?? card.footer].compactMap { $0 }.joined(separator: " in "))
-                            .lineLimit(1)
+                    // A quoted message: who, where, when; then its text with mentions resolved.
+                    // Its `title` repeats the text with a date prefix, so it is left out.
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        Image(systemName: "quote.opening").font(.system(size: 9, weight: .bold)).foregroundStyle(Soot.muted)
+                        Text(card.author_name ?? "Slack message").font(.system(size: 12, weight: .semibold)).foregroundStyle(Soot.ink)
+                        Text([card.channel_name.map { "#\($0)" }, quotedDate].compactMap { $0 }.joined(separator: " · "))
+                            .font(.system(size: 11)).foregroundStyle(Soot.muted).lineLimit(1)
                     }
-                    .font(.system(size: 11, weight: .semibold)).foregroundStyle(Soot.muted)
-                } else if let site = card.service_name ?? card.author_name {
-                    Text(site).font(.system(size: 11, weight: .semibold)).foregroundStyle(Soot.muted).lineLimit(1)
-                }
-                if let title = Self.excerpt(card.title ?? card.pretext ?? card.fallback, lines: 2) {
-                    Text(SlackMarkup.render(title, users: [:])).font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(Soot.ink).tint(Soot.ink).lineLimit(2)
-                }
-                if let text = Self.excerpt(card.text) {
-                    Text(SlackMarkup.render(text, users: [:])).font(.system(size: 12)).foregroundStyle(Soot.ink.opacity(0.8))
-                        .tint(Soot.lime).lineLimit(3)
+                    if let text = Self.excerpt(card.text ?? card.fallback, lines: 4) {
+                        Text(SlackMarkup.render(text, users: names, channels: channels)).font(.system(size: 13))
+                            .foregroundStyle(Soot.ink.opacity(0.88)).tint(Soot.lime).lineLimit(4)
+                    }
+                } else {
+                    if let site = card.service_name ?? card.author_name {
+                        Text(site).font(.system(size: 11, weight: .semibold)).foregroundStyle(Soot.muted).lineLimit(1)
+                    }
+                    if let title = Self.excerpt(card.title ?? card.pretext ?? card.fallback, lines: 2) {
+                        Text(SlackMarkup.render(title, users: names)).font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(Soot.ink).tint(Soot.ink).lineLimit(2)
+                    }
+                    if let text = Self.excerpt(card.text) {
+                        Text(SlackMarkup.render(text, users: names)).font(.system(size: 12)).foregroundStyle(Soot.ink.opacity(0.8))
+                            .tint(Soot.lime).lineLimit(3)
+                    }
                 }
             }
             .fixedSize(horizontal: false, vertical: true)
@@ -1494,7 +1513,7 @@ private struct ThreadReplies: View {
                                 Text(reply.date.formatted(.relative(presentation: .named))).font(.system(size: 11)).foregroundStyle(Soot.muted)
                             }
                             MessageBody(message: reply, users: users, channels: channels, expanded: .constant(true))
-                            MessageExtras(message: reply, channels: channels)
+                            MessageExtras(message: reply, channels: channels, users: users)
                             if let r = reply.reactions, !r.isEmpty {
                                 ReactionPills(reactions: r, me: nil) { _ in }
                             }
