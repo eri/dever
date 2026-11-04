@@ -28,10 +28,19 @@ struct SlackMessage: Codable, Identifiable {
     var files: [SlackFile]?
     var attachments: [SlackAttachment]?
     var blocks: [SlackBlock]?
+    var reactions: [SlackReaction]?
     var id: String { ts }
     var date: Date { Date(timeIntervalSince1970: Double(ts) ?? 0) }
     /// A thread parent is its own message; a reply carries its parent's `thread_ts`.
     var isReply: Bool { thread_ts != nil && thread_ts != ts }
+}
+
+/// An emoji reaction and who gave it.
+struct SlackReaction: Codable, Identifiable, Hashable {
+    var name: String
+    var count: Int
+    var users: [String]?
+    var id: String { name }
 }
 
 /// A file shared in a message. Thumbnails and `url_private` are served only with the
@@ -174,6 +183,7 @@ enum SlackAuth {
     static let userScopes = [
         "channels:read", "groups:read", "channels:history", "groups:history",
         "channels:write", "groups:write", "users:read", "team:read", "files:read",
+        "chat:write", "reactions:write",
     ].joined(separator: ",")
 
     static func connect() async throws -> SlackCredentials {
@@ -280,6 +290,20 @@ struct SlackClient {
     func replies(_ channelID: String, threadTS: String, limit: Int = 100) async throws -> [SlackMessage] {
         let res = try await call("conversations.replies", ["channel": channelID, "ts": threadTS, "limit": "\(limit)"])
         return try decode(res["messages"], as: [SlackMessage].self).filter { $0.ts != threadTS }
+    }
+
+    /// Posts `text` as a reply in the thread of `threadTS`, as the signed-in user.
+    func reply(_ channelID: String, threadTS: String, text: String) async throws {
+        _ = try await call("chat.postMessage", ["channel": channelID, "thread_ts": threadTS, "text": text])
+    }
+
+    /// Adds or removes the signed-in user's reaction `name` ("+1", "heart") on a message.
+    func react(_ channelID: String, ts: String, name: String, on: Bool) async throws {
+        do {
+            _ = try await call(on ? "reactions.add" : "reactions.remove", ["channel": channelID, "timestamp": ts, "name": name])
+        } catch AppError.message(let m) where m.hasSuffix("already_reacted") || m.hasSuffix("no_reaction") {
+            // Already in the wanted state.
+        }
     }
 
     /// Bytes of a Slack-hosted file or thumbnail (`url_private`, `thumb_*`). Slack serves them

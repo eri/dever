@@ -3,11 +3,11 @@ import SwiftUI
 /// Slack's message markup ("mrkdwn") turned into styled text: links, mentions, channels,
 /// bold, italic, code, emoji shortcodes and HTML entities.
 enum SlackMarkup {
-    static func render(_ raw: String, users: [String: String]) -> AttributedString {
+    static func render(_ raw: String, users: [String: String], channels: [String: String] = [:]) -> AttributedString {
         var text = decodeEntities(raw)
         // Slack quotes ("&gt; " at a line start) become a bar, as in Slack.
         text = text.replacingOccurrences(of: #"(?m)^(\x{E001}|>) ?"#, with: "▍ ", options: .regularExpression)
-        text = replaceTokens(in: text, users: users)
+        text = replaceTokens(in: text, users: users, channels: channels)
         text = replaceEmoji(in: text)
         // Slack's *bold*, _italic_, ~strike~ map onto Markdown; `code` is the same in both.
         text = text.replacingOccurrences(of: #"(?<![\w*])\*(?!\s)([^*\n]+?)(?<!\s)\*(?![\w*])"#, with: "**$1**",
@@ -17,7 +17,9 @@ enum SlackMarkup {
         text = text.replacingOccurrences(of: #"(?<![\w~])~(?!\s)([^~\n]+?)(?<!\s)~(?![\w~])"#, with: "~~$1~~",
                                          options: .regularExpression)
         let options = AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace)
-        return (try? AttributedString(markdown: text, options: options)) ?? AttributedString(text)
+        var out = (try? AttributedString(markdown: text, options: options)) ?? AttributedString(text)
+        SlackLinks.styleChips(in: &out)
+        return out
     }
 
     private static func decodeEntities(_ s: String) -> String {
@@ -27,7 +29,7 @@ enum SlackMarkup {
     }
 
     /// `<https://…|label>`, `<https://…>`, `<@U123>`, `<#C123|name>`, `<!here>`.
-    private static func replaceTokens(in s: String, users: [String: String]) -> String {
+    private static func replaceTokens(in s: String, users: [String: String], channels: [String: String]) -> String {
         let pattern = try! NSRegularExpression(pattern: "<([^>|]+)(?:\\|([^>]+))?>")
         let ns = s as NSString
         var out = ""
@@ -42,11 +44,11 @@ enum SlackMarkup {
                 out += "**@\(users[id] ?? label ?? id)**"
             case "#":
                 // Without a name the ID means nothing to a reader.
-                out += "**#\(label ?? "channel")**"
+                out += "**#\(label ?? channels[String(target.dropFirst())] ?? "channel")**"
             case "!":
                 out += "**@\(label ?? String(target.dropFirst()))**"
             default:
-                out += "[\(escape(label ?? shortURL(target)))](\(target))"
+                out += "[\(escape(label ?? SlackLinks.chipLabel(target, channels: channels)))](\(target))"
             }
             last = m.range.location + m.range.length
         }
@@ -94,28 +96,75 @@ enum SlackMarkup {
     ]
 }
 
+/// Bare URLs read badly in a narrow column. They become a chip: a short label on a lime wash,
+/// and a Slack permalink says what it is ("Message in #channel") instead of showing its path.
+enum SlackLinks {
+    /// Thin spaces mark a chip label, so the style pass finds it after Markdown parsing.
+    private static let mark = "\u{2009}"
+
+    static func chipLabel(_ url: String, channels: [String: String]) -> String {
+        mark + plainLabel(url, channels: channels) + mark
+    }
+
+    static func plainLabel(_ url: String, channels: [String: String]) -> String {
+        if let m = url.range(of: #"slack\.com/archives/([A-Z0-9]+)/p\d+"#, options: .regularExpression) {
+            let id = String(url[m]).split(separator: "/")[2]
+            if let name = channels[String(id)] { return "Message in #\(name)" }
+            return "Slack message"
+        }
+        guard let u = URL(string: url), let host = u.host else { return url }
+        let path = u.path.count > 28 ? String(u.path.prefix(28)) + "…" : (u.path == "/" ? "" : u.path)
+        return host.replacingOccurrences(of: "www.", with: "") + path
+    }
+
+    /// A chip as attributed text, for the rich text renderer.
+    static func chip(_ url: URL, label: String) -> AttributedString {
+        var s = AttributedString(mark + label + mark)
+        s.link = url
+        style(&s)
+        return s
+    }
+
+    static func styleChips(in text: inout AttributedString) {
+        for run in text.runs where run.link != nil {
+            let piece = String(text[run.range].characters)
+            if piece.hasPrefix(mark) && piece.hasSuffix(mark) {
+                var chip = AttributedString(text[run.range])
+                style(&chip)
+                text.replaceSubrange(run.range, with: chip)
+            }
+        }
+    }
+
+    private static func style(_ s: inout AttributedString) {
+        s.backgroundColor = Soot.lime.opacity(0.22)
+        s.foregroundColor = Soot.lime
+        s.inlinePresentationIntent = .stronglyEmphasized
+    }
+}
+
 /// Block Kit `rich_text` turned into styled text. It is the faithful source: `text` loses
 /// list markers, code blocks and quote structure, which readers need.
 enum SlackRichText {
     /// Nil when the message carries no rich text block, so the caller falls back to `text`.
-    static func render(_ blocks: [SlackBlock]?, users: [String: SlackUser]) -> AttributedString? {
+    static func render(_ blocks: [SlackBlock]?, users: [String: SlackUser], channels: [String: String] = [:]) -> AttributedString? {
         let rich = (blocks ?? []).filter { $0.type == "rich_text" }
         guard !rich.isEmpty else { return nil }
         var out = AttributedString()
         for block in rich {
-            for element in block.elements ?? [] { append(element, to: &out, users: users) }
+            for element in block.elements ?? [] { append(element, to: &out, users: users, channels: channels) }
         }
         while out.characters.last?.isNewline == true { out.removeSubrange(out.index(beforeCharacter: out.endIndex)..<out.endIndex) }
         return out.characters.isEmpty ? nil : out
     }
 
-    private static func append(_ e: SlackRichElement, to out: inout AttributedString, users: [String: SlackUser]) {
+    private static func append(_ e: SlackRichElement, to out: inout AttributedString, users: [String: SlackUser], channels: [String: String]) {
         func startBlock() {
             if !out.characters.isEmpty, out.characters.last?.isNewline != true { out.append(AttributedString("\n")) }
         }
         switch e.type {
         case "rich_text_section":
-            for leaf in e.elements ?? [] { out.append(render(leaf, users: users)) }
+            for leaf in e.elements ?? [] { out.append(render(leaf, users: users, channels: channels)) }
         case "rich_text_list":
             startBlock()
             let ordered = e.listStyle == "ordered"
@@ -125,12 +174,12 @@ enum SlackRichText {
                 var marker = AttributedString(indent + (ordered ? "\(n + 1).  " : "•  "))
                 marker.foregroundColor = .secondary
                 out.append(marker)
-                for leaf in item.elements ?? [] { out.append(render(leaf, users: users)) }
+                for leaf in item.elements ?? [] { out.append(render(leaf, users: users, channels: channels)) }
             }
         case "rich_text_quote":
             startBlock()
             var quoted = AttributedString()
-            for leaf in e.elements ?? [] { quoted.append(render(leaf, users: users)) }
+            for leaf in e.elements ?? [] { quoted.append(render(leaf, users: users, channels: channels)) }
             let lines = String(quoted.characters).split(separator: "\n", omittingEmptySubsequences: false)
             for (i, line) in lines.enumerated() {
                 if i > 0 { out.append(AttributedString("\n")) }
@@ -141,26 +190,33 @@ enum SlackRichText {
         case "rich_text_preformatted":
             startBlock()
             var code = AttributedString()
-            for leaf in e.elements ?? [] { code.append(render(leaf, users: users)) }
+            for leaf in e.elements ?? [] { code.append(render(leaf, users: users, channels: channels)) }
             code.inlinePresentationIntent = .code
             out.append(code)
         default:
-            for leaf in e.elements ?? [] { out.append(render(leaf, users: users)) }
+            for leaf in e.elements ?? [] { out.append(render(leaf, users: users, channels: channels)) }
         }
     }
 
-    private static func render(_ leaf: SlackRichElement, users: [String: SlackUser]) -> AttributedString {
+    private static func render(_ leaf: SlackRichElement, users: [String: SlackUser], channels: [String: String]) -> AttributedString {
         var s: AttributedString
         switch leaf.type {
         case "text": s = AttributedString(leaf.text ?? "")
         case "link":
-            s = AttributedString(leaf.text ?? leaf.url.map(shortURL) ?? "")
-            if let url = leaf.url.flatMap(URL.init(string:)) { s.link = url }
+            let url = leaf.url.flatMap(URL.init(string:))
+            // A link is "bare" when its text is the URL or a piece of it (Slack keeps what was typed).
+            let bare = leaf.text.map { (leaf.url ?? "").lowercased().contains($0.lowercased()) } ?? true
+            if let url, bare {
+                s = SlackLinks.chip(url, label: SlackLinks.plainLabel(leaf.url ?? "", channels: channels))
+            } else {
+                s = AttributedString(leaf.text ?? "")
+                if let url { s.link = url }
+            }
         case "user":
             s = AttributedString("@" + (leaf.user_id.flatMap { users[$0]?.name } ?? leaf.user_id ?? "user"))
             s.inlinePresentationIntent = .stronglyEmphasized
         case "channel":
-            s = AttributedString("#" + (leaf.name ?? "channel"))
+            s = AttributedString("#" + (leaf.name ?? leaf.channel_id.flatMap { channels[$0] } ?? "channel"))
             s.inlinePresentationIntent = .stronglyEmphasized
         case "broadcast":
             s = AttributedString("@" + (leaf.range ?? "here"))
@@ -186,12 +242,13 @@ enum SlackRichText {
         let scalars = codes.split(separator: "-").compactMap { UInt32($0, radix: 16).flatMap(Unicode.Scalar.init) }
         return scalars.isEmpty ? nil : String(String.UnicodeScalarView(scalars))
     }
+}
 
-    static func shortURL(_ url: String) -> String {
-        guard let u = URL(string: url), let host = u.host else { return url }
-        let path = u.path.count > 24 ? String(u.path.prefix(24)) + "…" : u.path
-        return host.replacingOccurrences(of: "www.", with: "") + path
-    }
+/// What a row can do to its message, provided by the project page.
+struct SlackMessageActions {
+    var reply: (SlackMessage, String) async throws -> Void = { _, _ in }
+    var react: (SlackMessage, String, Bool) async throws -> Void = { _, _, _ in }
+    var replies: (SlackMessage) async throws -> [SlackMessage] = { _ in [] }
 }
 
 /// The channel's latest messages read like Slack: oldest at the top, newest at the bottom,
@@ -202,11 +259,17 @@ struct SlackThreadView: View {
     let users: [String: SlackUser]
     let domain: String?
     let channelID: String?
+    var channelName: String?
     var shown = 8
     var hasEarlier = false
     var loadingEarlier = false
     var showEarlier: () -> Void = {}
-    var replies: (SlackMessage) async throws -> [SlackMessage] = { _ in [] }
+    var actions = SlackMessageActions()
+
+    private var channels: [String: String] {
+        guard let channelID, let channelName else { return [:] }
+        return [channelID: channelName]
+    }
 
     private var visible: [SlackMessage] { Array(messages.prefix(shown).reversed()) }
 
@@ -226,8 +289,8 @@ struct SlackThreadView: View {
             ForEach(Array(visible.enumerated()), id: \.element.id) { index, m in
                 let previous = index > 0 ? visible[index - 1] : nil
                 let grouped = previous.map { $0.user == m.user && m.date.timeIntervalSince($0.date) < 600 } ?? false
-                MessageRow(message: m, user: m.user.flatMap { users[$0] }, users: users, grouped: grouped,
-                           permalink: permalink(m), replies: replies)
+                MessageRow(message: m, user: m.user.flatMap { users[$0] }, users: users, channels: channels,
+                           grouped: grouped, permalink: permalink(m), actions: actions)
                     .padding(.top, grouped ? 2 : (index == 0 ? 0 : 14))
             }
         }
@@ -274,16 +337,23 @@ private struct MessageRow: View {
     let message: SlackMessage
     let user: SlackUser?
     let users: [String: SlackUser]
+    let channels: [String: String]
     let grouped: Bool
     let permalink: URL?
-    let replies: (SlackMessage) async throws -> [SlackMessage]
+    let actions: SlackMessageActions
     @State private var expanded = false
     @State private var hovering = false
     @State private var threadOpen = false
     @State private var thread: [SlackMessage]?
     @State private var threadFailed = false
+    @State private var replying = false
+    @State private var draft = ""
+    @State private var sending = false
+    @State private var reactions: [SlackReaction] = []
+    @FocusState private var draftFocused: Bool
 
     private var author: String { user?.name ?? "App" }
+    private var me: String? { app.slack?.userID }
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
@@ -306,8 +376,11 @@ private struct MessageRow: View {
                             .font(.system(size: 12)).foregroundStyle(Soot.muted)
                     }
                 }
-                MessageBody(message: message, users: users, expanded: $expanded)
+                MessageBody(message: message, users: users, channels: channels, expanded: $expanded)
                 MessageExtras(message: message)
+                if !reactions.isEmpty {
+                    ReactionPills(reactions: reactions, me: me) { toggle($0) }
+                }
                 HStack(spacing: 12) {
                     if (message.text?.count ?? 0) > 240 {
                         Button(expanded ? "Show less" : "Show more") { expanded.toggle() }
@@ -328,30 +401,156 @@ private struct MessageRow: View {
                         .foregroundStyle(Soot.lime)
                         .modifier(FocusOutline(radius: 4))
                         .accessibilityLabel(threadOpen ? "Hide replies" : "Show \(r) replies")
-                        if let permalink {
-                            Link(destination: permalink) {
-                                HStack(spacing: 3) { Text("Open in Slack"); Image(systemName: "arrow.up.right") }
-                            }
-                            .font(.system(size: 12, weight: .semibold)).foregroundStyle(Soot.muted)
-                            .help("Open the thread in Slack")
-                        }
                     }
                 }
                 if threadOpen {
-                    ThreadReplies(replies: thread, failed: threadFailed, users: users)
+                    ThreadReplies(replies: thread, failed: threadFailed, users: users, channels: channels)
                 }
+                if replying { replyField }
             }
         }
         .padding(.vertical, 4)
         .padding(.horizontal, 8)
+        .padding(.trailing, 4)
         .background(hovering ? Soot.ground.opacity(0.6) : Color.clear, in: RoundedRectangle(cornerRadius: 6))
+        .overlay(alignment: .topTrailing) { toolbar.opacity(hovering ? 1 : 0).offset(x: 0, y: -6) }
         .onHover { hovering = $0 }
+        .onAppear { reactions = message.reactions ?? [] }
+        .onChange(of: message.reactions) { _, new in reactions = new ?? [] }
         .accessibilityElement(children: .contain)
+    }
+
+    /// Slack's hover strip, reduced to what matters here: two reactions and a menu.
+    private var toolbar: some View {
+        HStack(spacing: 2) {
+            ForEach(["+1", "heart"], id: \.self) { name in
+                let on = mine(name)
+                Button { toggle(name) } label: {
+                    Text(SlackMarkup.emoji[name] ?? name).font(.system(size: 13))
+                        .frame(width: 26, height: 24)
+                        .background(on ? Soot.lime.opacity(0.2) : Color.clear, in: RoundedRectangle(cornerRadius: 5))
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(on ? "Remove \(name == "+1" ? "thumbs up" : "heart")" : "React with \(name == "+1" ? "thumbs up" : "heart")")
+            }
+            Menu {
+                Button("Reply in thread") { replying = true; draftFocused = true }
+                if let permalink { Link("Open in Slack", destination: permalink) }
+                if let permalink {
+                    Button("Copy link") {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(permalink.absoluteString, forType: .string)
+                    }
+                }
+            } label: {
+                Image(systemName: "ellipsis").font(.system(size: 12, weight: .semibold)).foregroundStyle(Soot.ink)
+                    .frame(width: 26, height: 24)
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .accessibilityLabel("More actions")
+        }
+        .padding(2)
+        .background(Soot.surface, in: RoundedRectangle(cornerRadius: 7))
+        .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(Soot.line))
+    }
+
+    private var replyField: some View {
+        HStack(spacing: 8) {
+            TextField("Reply in thread", text: $draft)
+                .textFieldStyle(.plain)
+                .font(.system(size: 13))
+                .foregroundStyle(Soot.ink)
+                .focused($draftFocused)
+                .onSubmit { Task { await send() } }
+                .onExitCommand { replying = false; draft = "" }
+                .padding(.horizontal, 10)
+                .frame(height: 32)
+                .background(Soot.ground, in: RoundedRectangle(cornerRadius: 8))
+                .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(draftFocused ? Soot.lime : Soot.edge))
+                .disabled(sending)
+            Button("Send") { Task { await send() } }
+                .buttonStyle(.plain)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(draft.trimmingCharacters(in: .whitespaces).isEmpty || sending ? Soot.muted : Soot.limeInk)
+                .padding(.horizontal, 10).frame(height: 28)
+                .background(draft.trimmingCharacters(in: .whitespaces).isEmpty || sending ? Soot.ground : Soot.lime, in: Capsule())
+                .disabled(draft.trimmingCharacters(in: .whitespaces).isEmpty || sending)
+                .modifier(FocusOutline(radius: 14))
+        }
+        .padding(.top, 4)
+    }
+
+    private func mine(_ name: String) -> Bool {
+        guard let me else { return false }
+        return reactions.first { $0.name == name }?.users?.contains(me) ?? false
+    }
+
+    /// Optimistic: the pill changes at once, the request follows.
+    private func toggle(_ name: String) {
+        let on = !mine(name)
+        if let i = reactions.firstIndex(where: { $0.name == name }) {
+            var r = reactions[i]
+            r.count += on ? 1 : -1
+            var users = r.users ?? []
+            if on { if let me { users.append(me) } } else { users.removeAll { $0 == me } }
+            r.users = users
+            if r.count <= 0 { reactions.remove(at: i) } else { reactions[i] = r }
+        } else if on {
+            reactions.append(SlackReaction(name: name, count: 1, users: me.map { [$0] }))
+        }
+        Task {
+            do { try await actions.react(message, name, on) } catch { app.report(error); reactions = message.reactions ?? [] }
+        }
+    }
+
+    private func send() async {
+        let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty, !sending else { return }
+        sending = true
+        defer { sending = false }
+        do {
+            try await actions.reply(message, text)
+            draft = ""
+            replying = false
+            threadOpen = true
+            await loadThread()
+        } catch { app.report(error) }
     }
 
     private func loadThread() async {
         threadFailed = false
-        do { thread = try await replies(message) } catch { threadFailed = true }
+        do { thread = try await actions.replies(message) } catch { threadFailed = true }
+    }
+}
+
+/// Reactions under a message; the ones you gave are outlined in lime. Click to toggle.
+private struct ReactionPills: View {
+    let reactions: [SlackReaction]
+    let me: String?
+    let toggle: (String) -> Void
+
+    var body: some View {
+        HStack(spacing: 4) {
+            ForEach(reactions) { r in
+                let on = me.map { r.users?.contains($0) ?? false } ?? false
+                Button { toggle(r.name) } label: {
+                    HStack(spacing: 4) {
+                        Text(SlackMarkup.emoji[r.name] ?? ":\(r.name):").font(.system(size: 12))
+                        Text("\(r.count)").font(.system(size: 11, weight: .semibold)).monospacedDigit()
+                            .foregroundStyle(on ? Soot.lime : Soot.muted)
+                    }
+                    .padding(.horizontal, 7).frame(height: 22)
+                    .background(on ? Soot.lime.opacity(0.14) : Soot.ground, in: Capsule())
+                    .overlay(Capsule().strokeBorder(on ? Soot.lime : Color.clear))
+                }
+                .buttonStyle(.plain)
+                .modifier(FocusOutline(radius: 11))
+                .accessibilityLabel("\(r.name), \(r.count)\(on ? ", including you" : "")")
+            }
+        }
+        .padding(.top, 2)
     }
 }
 
@@ -359,11 +558,12 @@ private struct MessageRow: View {
 private struct MessageBody: View {
     let message: SlackMessage
     let users: [String: SlackUser]
+    var channels: [String: String] = [:]
     @Binding var expanded: Bool
 
     var body: some View {
-        let text = SlackRichText.render(message.blocks, users: users)
-            ?? SlackMarkup.render(message.text ?? "", users: users.mapValues(\.name))
+        let text = SlackRichText.render(message.blocks, users: users, channels: channels)
+            ?? SlackMarkup.render(message.text ?? "", users: users.mapValues(\.name), channels: channels)
         if !text.characters.isEmpty {
             Text(text)
                 .font(.system(size: 14))
@@ -538,6 +738,7 @@ private struct ThreadReplies: View {
     let replies: [SlackMessage]?
     let failed: Bool
     let users: [String: SlackUser]
+    var channels: [String: String] = [:]
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -553,8 +754,11 @@ private struct ThreadReplies: View {
                                 Text(user?.name ?? "App").font(.system(size: 13, weight: .semibold)).foregroundStyle(Soot.ink)
                                 Text(reply.date.formatted(.relative(presentation: .named))).font(.system(size: 11)).foregroundStyle(Soot.muted)
                             }
-                            MessageBody(message: reply, users: users, expanded: .constant(true))
+                            MessageBody(message: reply, users: users, channels: channels, expanded: .constant(true))
                             MessageExtras(message: reply)
+                            if let r = reply.reactions, !r.isEmpty {
+                                ReactionPills(reactions: r, me: nil) { _ in }
+                            }
                         }
                     }
                 }

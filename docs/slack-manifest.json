@@ -17,7 +17,9 @@
         "groups:write",
         "users:read",
         "team:read",
-        "files:read"
+        "files:read",
+        "chat:write",
+        "reactions:write"
       ]
     }
   },
