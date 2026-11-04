@@ -31,6 +31,19 @@ enum Snapshotter {
                 capture(to: dir.appendingPathComponent("\(name)-\(themeName).png"))
             }
         }
+        if ProcessInfo.processInfo.environment["DEVER_SNAPSHOT_SLACK_WIDE"] == "1", let first = projects.first {
+            // The first project's conversation at full width, in both modes.
+            for (themeName, appearance) in [("dark", NSAppearance.Name.darkAqua), ("light", .aqua)] {
+                NSApp.appearance = NSAppearance(named: appearance)
+                NotificationCenter.default.post(name: .showScreen, object: SidebarItem.project(first.id))
+                try? await Task.sleep(nanoseconds: 2_000_000_000)
+                NotificationCenter.default.post(name: .toggleSlackWide, object: nil)
+                try? await Task.sleep(nanoseconds: UInt64((wait == 0 ? 0.4 : 6) * 1_000_000_000))
+                capture(to: dir.appendingPathComponent("project-slack-wide-\(themeName).png"))
+                NotificationCenter.default.post(name: .toggleSlackWide, object: nil)
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+            }
+        }
         if ProcessInfo.processInfo.environment["DEVER_SNAPSHOT_ISSUE"] == "1", let first = projects.first {
             // The first project's first listed issue, in both modes.
             for (themeName, appearance) in [("dark", NSAppearance.Name.darkAqua), ("light", .aqua)] {
@@ -101,4 +114,6 @@ extension Notification.Name {
     static let showSheet = Notification.Name("dever.showSheet")
     /// Opens the onboarding flow (Help menu, snapshots).
     static let showOnboarding = Notification.Name("dever.showOnboarding")
+    /// Toggles the project page's wide Slack view (snapshots).
+    static let toggleSlackWide = Notification.Name("dever.toggleSlackWide")
 }

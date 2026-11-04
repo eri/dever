@@ -81,7 +81,35 @@ enum SlackMarkup {
         return out.replacingOccurrences(of: "  ", with: " ")
     }
 
+    /// "white_check_mark" → "white check mark", "+1" → "thumbs up": for labels and tooltips.
+    static func reactionName(_ name: String) -> String {
+        switch name {
+        case "+1", "thumbsup": return "thumbs up"
+        case "-1": return "thumbs down"
+        default: return name.replacingOccurrences(of: "_", with: " ").replacingOccurrences(of: "-", with: " ")
+        }
+    }
+
     static let emoji: [String: String] = [
+        "100": "💯", "partying_face": "🥳", "heart_eyes": "😍", "raised_hand": "✋", "handshake": "🤝",
+        "saluting_face": "🫡", "blue_heart": "💙", "green_heart": "💚", "yellow_heart": "💛", "purple_heart": "💜",
+        "orange_heart": "🧡", "black_heart": "🖤", "white_heart": "🤍", "star-struck": "🤩", "sunglasses": "😎",
+        "grimacing": "😬", "cry": "😢", "confused": "😕", "neutral_face": "😐", "no_entry_sign": "🚫",
+        "ballot_box_with_check": "☑️", "heavy_plus_sign": "➕", "pushpin": "📌", "crossed_fingers": "🤞",
+        "laughing": "😆", "rolling_on_the_floor_laughing": "🤣", "smiley": "😃", "blush": "😊", "pleading_face": "🥺",
+        "face_with_monocle": "🧐", "nerd_face": "🤓", "exploding_head": "🤯", "skull": "💀", "ghost": "👻",
+        "robot_face": "🤖", "brain": "🧠", "mag": "🔍", "pencil2": "✏️", "package": "📦", "ship": "🚢",
+        "checkered_flag": "🏁", "trophy": "🏆", "medal": "🏅", "first_place_medal": "🥇", "coffee": "☕",
+        "beer": "🍺", "beers": "🍻", "pizza": "🍕", "cake": "🍰", "sunny": "☀️", "rainbow": "🌈",
+        "hammer_and_wrench": "🛠️", "gear": "⚙️", "wrench": "🔧", "test_tube": "🧪", "art": "🎨",
+        "mega": "📣", "loudspeaker": "📢", "bell": "🔔", "alarm_clock": "⏰", "stopwatch": "⏱️",
+        "chart_with_downwards_trend": "📉", "bar_chart": "📊", "moneybag": "💰", "dollar": "💵",
+        "shrug": "🤷", "man-shrugging": "🤷‍♂️", "woman-shrugging": "🤷‍♀️", "facepalm": "🤦",
+        "man-facepalming": "🤦‍♂️", "woman-facepalming": "🤦‍♀️", "raising_hand": "🙋", "ok": "🆗",
+        "new": "🆕", "sos": "🆘", "up": "🆙", "cool": "🆒", "free": "🆓", "1234": "🔢", "soon": "🔜",
+        "heavy_minus_sign": "➖", "arrow_left": "⬅️", "arrow_up": "⬆️", "arrow_down": "⬇️", "arrows_counterclockwise": "🔄",
+        "see_no_evil": "🙈", "hear_no_evil": "🙉", "speak_no_evil": "🙊", "monkey": "🐒", "cat": "🐱", "dog": "🐶",
+        "unicorn_face": "🦄", "turtle": "🐢", "snail": "🐌", "bee": "🐝", "butterfly": "🦋", "owl": "🦉",
         "pray": "🙏", "white_check_mark": "✅", "heavy_check_mark": "✔️", "x": "❌", "warning": "⚠️",
         "repeat": "🔁", "relaxed": "☺️", "smile": "😄", "slightly_smiling_face": "🙂", "grinning": "😀",
         "joy": "😂", "sweat_smile": "😅", "wink": "😉", "thinking_face": "🤔", "eyes": "👀", "fire": "🔥",
@@ -263,8 +291,11 @@ struct SlackThreadView: View {
     var shown = 8
     var hasEarlier = false
     var loadingEarlier = false
+    /// The reading room: full text, day headings, threads in a pane beside the messages.
+    var wide = false
     var showEarlier: () -> Void = {}
     var actions = SlackMessageActions()
+    @State private var openThread: SlackMessage?
 
     private var channels: [String: String] {
         guard let channelID, let channelName else { return [:] }
@@ -274,6 +305,43 @@ struct SlackThreadView: View {
     private var visible: [SlackMessage] { Array(messages.prefix(shown).reversed()) }
 
     var body: some View {
+        if wide {
+            HStack(alignment: .top, spacing: 24) {
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        list.frame(maxWidth: 880, alignment: .leading)
+                        Color.clear.frame(height: 1).id("slack-end")
+                    }
+                    .scrollIndicators(.automatic)
+                    // Opens on the latest messages, as Slack does; earlier ones are above.
+                    .onAppear { proxy.scrollTo("slack-end", anchor: .bottom) }
+                }
+                .frame(maxWidth: 880, maxHeight: .infinity, alignment: .topLeading)
+                Rectangle().fill(Soot.line).frame(width: 1)
+                // Beside the messages: the open thread, or what the channel holds when none is open.
+                Group {
+                    if let parent = openThread {
+                        ThreadPane(parent: messages.first { $0.ts == parent.ts } ?? parent, user: parent.user.flatMap { users[$0] },
+                                   users: users, channels: channels, permalink: permalink(parent), actions: actions) {
+                            openThread = nil
+                        }
+                    } else {
+                        ChannelAside(messages: messages, users: users, channels: channels)
+                    }
+                }
+                .frame(width: 360)
+                .transition(.opacity)
+            }
+            .onChange(of: messages.map(\.ts)) { _, ts in
+                // The thread pane follows a message that scrolled out of the loaded range.
+                if let parent = openThread, !ts.contains(parent.ts) { openThread = nil }
+            }
+        } else {
+            list
+        }
+    }
+
+    private var list: some View {
         VStack(alignment: .leading, spacing: 0) {
             if hasEarlier || messages.count > shown {
                 if loadingEarlier {
@@ -288,10 +356,15 @@ struct SlackThreadView: View {
             }
             ForEach(Array(visible.enumerated()), id: \.element.id) { index, m in
                 let previous = index > 0 ? visible[index - 1] : nil
-                let grouped = previous.map { $0.user == m.user && m.date.timeIntervalSince($0.date) < 600 } ?? false
+                let newDay = previous.map { !Calendar.current.isDate($0.date, inSameDayAs: m.date) } ?? true
+                let grouped = !newDay && (previous.map { $0.user == m.user && m.date.timeIntervalSince($0.date) < 600 } ?? false)
+                if newDay {
+                    DayDivider(date: m.date).padding(.top, index == 0 ? 0 : (wide ? 22 : 16)).padding(.bottom, wide ? 10 : 6)
+                }
                 MessageRow(message: m, user: m.user.flatMap { users[$0] }, users: users, channels: channels,
-                           grouped: grouped, permalink: permalink(m), actions: actions)
-                    .padding(.top, grouped ? 2 : (index == 0 ? 0 : 14))
+                           grouped: grouped, wide: wide, selected: openThread?.ts == m.ts, permalink: permalink(m),
+                           actions: actions, openThread: wide ? { openThread = $0 } : nil)
+                    .padding(.top, grouped ? 2 : (newDay ? 0 : (wide ? 18 : 14)))
             }
         }
     }
@@ -299,6 +372,239 @@ struct SlackThreadView: View {
     private func permalink(_ m: SlackMessage) -> URL? {
         guard let domain, let channelID else { return nil }
         return URL(string: "https://\(domain).slack.com/archives/\(channelID)/p\(m.ts.replacingOccurrences(of: ".", with: ""))")
+    }
+}
+
+/// "Today", "Yesterday" or "Friday, 30 October" on a hairline, as Slack marks each day.
+struct DayDivider: View {
+    let date: Date
+
+    private var label: String {
+        if Calendar.current.isDateInToday(date) { return "Today" }
+        if Calendar.current.isDateInYesterday(date) { return "Yesterday" }
+        let sameYear = Calendar.current.isDate(date, equalTo: Date(), toGranularity: .year)
+        return date.formatted(sameYear ? .dateTime.weekday(.wide).day().month(.wide)
+                                       : .dateTime.weekday(.wide).day().month(.wide).year())
+    }
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Rectangle().fill(Soot.line).frame(height: 1)
+            Text(label)
+                .font(.system(size: 11, weight: .semibold)).foregroundStyle(Soot.muted)
+                .padding(.horizontal, 10).frame(height: 22)
+                .overlay(Capsule().strokeBorder(Soot.line))
+                .fixedSize()
+            Rectangle().fill(Soot.line).frame(height: 1)
+        }
+        .padding(.horizontal, 8)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(label)
+        .accessibilityAddTraits(.isHeader)
+    }
+}
+
+/// What the loaded conversation holds, for the wide view when no thread is open:
+/// who talks here, the links shared, the files posted.
+private struct ChannelAside: View {
+    let messages: [SlackMessage]
+    let users: [String: SlackUser]
+    let channels: [String: String]
+
+    private var people: [(user: SlackUser, count: Int)] {
+        var counts: [String: Int] = [:]
+        for m in messages { if let u = m.user { counts[u, default: 0] += 1 } }
+        return counts.compactMap { id, n in users[id].map { ($0, n) } }
+            .sorted { $0.1 > $1.1 || ($0.1 == $1.1 && $0.0.name < $1.0.name) }
+    }
+
+    private var links: [(message: SlackMessage, card: SlackAttachment)] {
+        messages.flatMap { m in (m.attachments ?? []).filter { !$0.isEmpty && ($0.title_link ?? $0.from_url ?? $0.original_url) != nil }.map { (m, $0) } }
+    }
+
+    private var files: [SlackFile] { messages.flatMap { $0.files ?? [] } }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 22) {
+            section("People", count: people.count) {
+                VStack(alignment: .leading, spacing: 8) {
+                    ForEach(people.prefix(6), id: \.user.id) { p in
+                        HStack(spacing: 10) {
+                            SlackAvatar(user: p.user, name: p.user.name, size: 26, radius: 7)
+                            Text(p.user.name).font(.system(size: 13, weight: .medium)).foregroundStyle(Soot.ink).lineLimit(1)
+                            Spacer(minLength: 8)
+                            Text("^[\(p.count) message](inflect: true)").font(.system(size: 11)).foregroundStyle(Soot.muted).monospacedDigit()
+                        }
+                        .accessibilityElement(children: .combine)
+                    }
+                    if people.count > 6 {
+                        Text("and \(people.count - 6) more").font(.system(size: 11)).foregroundStyle(Soot.muted).padding(.leading, 36)
+                    }
+                }
+            }
+            if !links.isEmpty {
+                section("Links", count: links.count) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        ForEach(Array(links.prefix(6).enumerated()), id: \.offset) { _, l in
+                            if let url = (l.card.title_link ?? l.card.from_url ?? l.card.original_url).flatMap(URL.init(string:)) {
+                                Link(destination: url) {
+                                    HStack(alignment: .top, spacing: 8) {
+                                        Image(systemName: "link").font(.system(size: 11)).foregroundStyle(Soot.muted).frame(width: 14).padding(.top, 2)
+                                        VStack(alignment: .leading, spacing: 1) {
+                                            Text(SlackMarkup.render(l.card.title ?? l.card.fallback ?? SlackLinks.plainLabel(url.absoluteString, channels: channels), users: [:]))
+                                                .font(.system(size: 13, weight: .medium)).foregroundStyle(Soot.ink).tint(Soot.ink).lineLimit(2)
+                                            Text((l.card.service_name ?? url.host ?? "") + " · " + l.message.date.formatted(.relative(presentation: .named)))
+                                                .font(.system(size: 11)).foregroundStyle(Soot.muted).lineLimit(1)
+                                        }
+                                    }
+                                    .padding(.horizontal, 10).padding(.vertical, 7)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .background(Soot.ground, in: RoundedRectangle(cornerRadius: 8))
+                                }
+                                .buttonStyle(.plain)
+                                .modifier(FocusOutline(radius: 8))
+                            }
+                        }
+                    }
+                }
+            }
+            if !files.isEmpty {
+                section("Files", count: files.count) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        ForEach(files.prefix(5)) { FileRow(file: $0) }
+                    }
+                }
+            }
+            if people.isEmpty && links.isEmpty && files.isEmpty {
+                Text("Open a thread to read it here.").font(.system(size: 13)).foregroundStyle(Soot.muted)
+            }
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("About this conversation")
+    }
+
+    private func section<Content: View>(_ title: String, count: Int, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text(title).font(.system(size: 13, weight: .semibold)).foregroundStyle(Soot.ink).accessibilityAddTraits(.isHeader)
+                Text("\(count)").font(.system(size: 12)).foregroundStyle(Soot.muted).monospacedDigit()
+            }
+            content()
+        }
+    }
+}
+
+/// A thread beside the messages in the wide view: the parent, its replies, a composer.
+private struct ThreadPane: View {
+    @EnvironmentObject var app: AppState
+    let parent: SlackMessage
+    let user: SlackUser?
+    let users: [String: SlackUser]
+    let channels: [String: String]
+    let permalink: URL?
+    let actions: SlackMessageActions
+    let close: () -> Void
+    @State private var replies: [SlackMessage]?
+    @State private var failed = false
+    @State private var draft = ""
+    @State private var sending = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 10) {
+                Text("Thread").font(.system(size: 15, weight: .semibold)).foregroundStyle(Soot.ink)
+                    .accessibilityAddTraits(.isHeader)
+                if let count = parent.reply_count {
+                    Text("^[\(count) reply](inflect: true)").font(.system(size: 12)).foregroundStyle(Soot.muted)
+                }
+                Spacer()
+                if let permalink {
+                    Link(destination: permalink) { Image(systemName: "arrow.up.right").font(.system(size: 11, weight: .semibold)) }
+                        .foregroundStyle(Soot.muted).help("Open the thread in Slack").accessibilityLabel("Open the thread in Slack")
+                }
+                Button(action: close) {
+                    Image(systemName: "xmark").font(.system(size: 11, weight: .semibold)).foregroundStyle(Soot.ink)
+                        .frame(width: 28, height: 28).background(Soot.ground, in: Circle())
+                }
+                .buttonStyle(.plain)
+                .modifier(FocusOutline(radius: 14))
+                .keyboardShortcut(.cancelAction)
+                .accessibilityLabel("Close the thread")
+            }
+            HStack(alignment: .top, spacing: 10) {
+                SlackAvatar(user: user, name: user?.name ?? "App", size: 32)
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Text(user?.name ?? "App").font(.system(size: 14, weight: .bold)).foregroundStyle(Soot.ink)
+                        Text(parent.date.formatted(.relative(presentation: .named))).font(.system(size: 12)).foregroundStyle(Soot.muted)
+                    }
+                    MessageBody(message: parent, users: users, channels: channels, expanded: .constant(true))
+                    MessageExtras(message: parent)
+                }
+            }
+            Rectangle().fill(Soot.line).frame(height: 1)
+            ThreadReplies(replies: replies, failed: failed, users: users, channels: channels, bare: true)
+            ReplyComposer(draft: $draft, sending: sending, autofocus: false, send: { await send() }, cancel: { draft = "" })
+        }
+        .task(id: parent.ts) { await load() }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Thread")
+    }
+
+    private func load() async {
+        failed = false
+        do { replies = try await actions.replies(parent) } catch { failed = true }
+    }
+
+    private func send() async {
+        let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty, !sending else { return }
+        sending = true
+        defer { sending = false }
+        do {
+            try await actions.reply(parent, text)
+            draft = ""
+            await load()
+        } catch { app.report(error) }
+    }
+}
+
+/// One line to answer in a thread: Return sends, Escape clears.
+private struct ReplyComposer: View {
+    @Binding var draft: String
+    let sending: Bool
+    var autofocus = true
+    let send: () async -> Void
+    let cancel: () -> Void
+    @FocusState private var focused: Bool
+
+    private var empty: Bool { draft.trimmingCharacters(in: .whitespaces).isEmpty }
+
+    var body: some View {
+        HStack(spacing: 8) {
+            TextField("Reply in thread", text: $draft)
+                .textFieldStyle(.plain)
+                .font(.system(size: 13))
+                .foregroundStyle(Soot.ink)
+                .focused($focused)
+                .onSubmit { Task { await send() } }
+                .onExitCommand(perform: cancel)
+                .padding(.horizontal, 10)
+                .frame(height: 32)
+                .background(Soot.ground, in: RoundedRectangle(cornerRadius: 8))
+                .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(focused ? Soot.lime : Soot.edge))
+                .disabled(sending)
+            Button("Send") { Task { await send() } }
+                .buttonStyle(.plain)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(empty || sending ? Soot.muted : Soot.limeInk)
+                .padding(.horizontal, 10).frame(height: 28)
+                .background(empty || sending ? Soot.ground : Soot.lime, in: Capsule())
+                .disabled(empty || sending)
+                .modifier(FocusOutline(radius: 14))
+        }
+        .padding(.top, 4)
+        .onAppear { if autofocus { focused = true } }
     }
 }
 
@@ -339,8 +645,12 @@ private struct MessageRow: View {
     let users: [String: SlackUser]
     let channels: [String: String]
     let grouped: Bool
+    var wide = false
+    var selected = false
     let permalink: URL?
     let actions: SlackMessageActions
+    /// In the wide view the thread opens in a pane beside the list instead of inline.
+    var openThread: ((SlackMessage) -> Void)? = nil
     @State private var expanded = false
     @State private var hovering = false
     @State private var threadOpen = false
@@ -350,7 +660,9 @@ private struct MessageRow: View {
     @State private var draft = ""
     @State private var sending = false
     @State private var reactions: [SlackReaction] = []
-    @FocusState private var draftFocused: Bool
+    @FocusState private var stripFocus: Int?
+
+    private var stripShown: Bool { hovering || stripFocus != nil }
 
     private var author: String { user?.name ?? "App" }
     private var me: String? { app.slack?.userID }
@@ -363,37 +675,42 @@ private struct MessageRow: View {
                         .font(.system(size: 10)).foregroundStyle(Soot.muted)
                         .opacity(hovering ? 1 : 0)
                 } else {
-                    SlackAvatar(user: user, name: author)
+                    SlackAvatar(user: user, name: author, size: wide ? 36 : 32)
                 }
             }
-            .frame(width: 32, alignment: .center)
+            .frame(width: wide ? 36 : 32, alignment: .center)
             .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 4) {
                 if !grouped {
                     HStack(alignment: .firstTextBaseline, spacing: 8) {
                         Text(author).font(.system(size: 14, weight: .bold)).foregroundStyle(Soot.ink)
-                        Text(message.date.formatted(.relative(presentation: .named)))
+                        // Under a day heading the clock time says more than "3 weeks ago".
+                        Text(wide ? message.date.formatted(date: .omitted, time: .shortened)
+                                  : message.date.formatted(.relative(presentation: .named)))
                             .font(.system(size: 12)).foregroundStyle(Soot.muted)
+                            .help(message.date.formatted(date: .abbreviated, time: .shortened))
                     }
                 }
-                MessageBody(message: message, users: users, channels: channels, expanded: $expanded)
+                MessageBody(message: message, users: users, channels: channels, expanded: wide ? .constant(true) : $expanded)
                 MessageExtras(message: message)
-                if !reactions.isEmpty {
-                    ReactionPills(reactions: reactions, me: me) { toggle($0) }
+                if !reactions.isEmpty || stripShown {
+                    ReactionPills(reactions: reactions, me: me, canAdd: stripShown) { toggle($0) }
                 }
                 HStack(spacing: 12) {
-                    if (message.text?.count ?? 0) > 240 {
+                    if !wide, (message.text?.count ?? 0) > 240 {
                         Button(expanded ? "Show less" : "Show more") { expanded.toggle() }
                             .buttonStyle(.plain).font(.system(size: 12, weight: .semibold)).foregroundStyle(Soot.muted)
                     }
                     if let r = message.reply_count, r > 0 {
                         Button {
+                            if let openThread { openThread(message); return }
                             threadOpen.toggle()
                             if threadOpen, thread == nil { Task { await loadThread() } }
                         } label: {
                             HStack(spacing: 4) {
                                 Image(systemName: threadOpen ? "chevron.down" : "bubble.left.and.bubble.right").font(.system(size: 11))
                                 Text("^[\(r) reply](inflect: true)")
+                                if openThread != nil { Image(systemName: "chevron.right").font(.system(size: 9, weight: .semibold)) }
                             }
                         }
                         .buttonStyle(.plain)
@@ -403,17 +720,19 @@ private struct MessageRow: View {
                         .accessibilityLabel(threadOpen ? "Hide replies" : "Show \(r) replies")
                     }
                 }
-                if threadOpen {
+                if threadOpen, openThread == nil {
                     ThreadReplies(replies: thread, failed: threadFailed, users: users, channels: channels)
                 }
-                if replying { replyField }
+                if replying, openThread == nil {
+                    ReplyComposer(draft: $draft, sending: sending, send: { await send() }, cancel: { replying = false; draft = "" })
+                }
             }
         }
         .padding(.vertical, 4)
         .padding(.horizontal, 8)
         .padding(.trailing, 4)
-        .background(hovering ? Soot.ground.opacity(0.6) : Color.clear, in: RoundedRectangle(cornerRadius: 6))
-        .overlay(alignment: .topTrailing) { toolbar.opacity(hovering ? 1 : 0).offset(x: 0, y: -6) }
+        .background(selected ? Soot.ground : (hovering ? Soot.ground.opacity(0.6) : Color.clear), in: RoundedRectangle(cornerRadius: 6))
+        .overlay(alignment: .topTrailing) { toolbar.opacity(stripShown ? 1 : 0).offset(x: 0, y: -6) }
         .onHover { hovering = $0 }
         .onAppear { reactions = message.reactions ?? [] }
         .onChange(of: message.reactions) { _, new in reactions = new ?? [] }
@@ -423,7 +742,7 @@ private struct MessageRow: View {
     /// Slack's hover strip, reduced to what matters here: two reactions and a menu.
     private var toolbar: some View {
         HStack(spacing: 2) {
-            ForEach(["+1", "heart"], id: \.self) { name in
+            ForEach(Array(["+1", "heart"].enumerated()), id: \.element) { i, name in
                 let on = mine(name)
                 Button { toggle(name) } label: {
                     Text(SlackMarkup.emoji[name] ?? name).font(.system(size: 13))
@@ -431,10 +750,14 @@ private struct MessageRow: View {
                         .background(on ? Soot.lime.opacity(0.2) : Color.clear, in: RoundedRectangle(cornerRadius: 5))
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel(on ? "Remove \(name == "+1" ? "thumbs up" : "heart")" : "React with \(name == "+1" ? "thumbs up" : "heart")")
+                .focused($stripFocus, equals: i)
+                .modifier(FocusOutline(radius: 5))
+                .accessibilityLabel(on ? "Remove \(SlackMarkup.reactionName(name))" : "React with \(SlackMarkup.reactionName(name))")
             }
             Menu {
-                Button("Reply in thread") { replying = true; draftFocused = true }
+                Button("Reply in thread") {
+                    if let openThread { openThread(message) } else { replying = true }
+                }
                 if let permalink { Link("Open in Slack", destination: permalink) }
                 if let permalink {
                     Button("Copy link") {
@@ -449,37 +772,13 @@ private struct MessageRow: View {
             .menuStyle(.borderlessButton)
             .menuIndicator(.hidden)
             .fixedSize()
+            .focused($stripFocus, equals: 2)
+            .modifier(FocusOutline(radius: 5))
             .accessibilityLabel("More actions")
         }
         .padding(2)
         .background(Soot.surface, in: RoundedRectangle(cornerRadius: 7))
         .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(Soot.line))
-    }
-
-    private var replyField: some View {
-        HStack(spacing: 8) {
-            TextField("Reply in thread", text: $draft)
-                .textFieldStyle(.plain)
-                .font(.system(size: 13))
-                .foregroundStyle(Soot.ink)
-                .focused($draftFocused)
-                .onSubmit { Task { await send() } }
-                .onExitCommand { replying = false; draft = "" }
-                .padding(.horizontal, 10)
-                .frame(height: 32)
-                .background(Soot.ground, in: RoundedRectangle(cornerRadius: 8))
-                .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(draftFocused ? Soot.lime : Soot.edge))
-                .disabled(sending)
-            Button("Send") { Task { await send() } }
-                .buttonStyle(.plain)
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(draft.trimmingCharacters(in: .whitespaces).isEmpty || sending ? Soot.muted : Soot.limeInk)
-                .padding(.horizontal, 10).frame(height: 28)
-                .background(draft.trimmingCharacters(in: .whitespaces).isEmpty || sending ? Soot.ground : Soot.lime, in: Capsule())
-                .disabled(draft.trimmingCharacters(in: .whitespaces).isEmpty || sending)
-                .modifier(FocusOutline(radius: 14))
-        }
-        .padding(.top, 4)
     }
 
     private func mine(_ name: String) -> Bool {
@@ -525,32 +824,68 @@ private struct MessageRow: View {
     }
 }
 
-/// Reactions under a message; the ones you gave are outlined in lime. Click to toggle.
+/// Reactions under a message, as Slack shows them: emoji and count in a small bordered pill,
+/// the ones you gave on a lime wash. Click toggles; a quiet "+" offers a few more while hovering.
 private struct ReactionPills: View {
     let reactions: [SlackReaction]
     let me: String?
+    var canAdd = false
     let toggle: (String) -> Void
 
+    private static let quick = ["+1", "heart", "tada", "eyes", "white_check_mark", "pray"]
+
     var body: some View {
-        HStack(spacing: 4) {
+        HStack(spacing: 6) {
             ForEach(reactions) { r in
                 let on = me.map { r.users?.contains($0) ?? false } ?? false
                 Button { toggle(r.name) } label: {
-                    HStack(spacing: 4) {
-                        Text(SlackMarkup.emoji[r.name] ?? ":\(r.name):").font(.system(size: 12))
-                        Text("\(r.count)").font(.system(size: 11, weight: .semibold)).monospacedDigit()
-                            .foregroundStyle(on ? Soot.lime : Soot.muted)
+                    HStack(spacing: 5) {
+                        Text(SlackMarkup.emoji[r.name] ?? r.name.replacingOccurrences(of: "_", with: " "))
+                            .font(.system(size: SlackMarkup.emoji[r.name] == nil ? 10 : 13))
+                            .lineLimit(1)
+                        Text("\(r.count)").font(.system(size: 12, weight: .semibold)).monospacedDigit()
+                            .foregroundStyle(on ? Soot.lime : Soot.ink.opacity(0.85))
                     }
-                    .padding(.horizontal, 7).frame(height: 22)
+                    .padding(.horizontal, 8).frame(height: 24)
                     .background(on ? Soot.lime.opacity(0.14) : Soot.ground, in: Capsule())
-                    .overlay(Capsule().strokeBorder(on ? Soot.lime : Color.clear))
+                    .overlay(Capsule().strokeBorder(on ? Soot.lime : Soot.edge.opacity(0.6)))
                 }
-                .buttonStyle(.plain)
-                .modifier(FocusOutline(radius: 11))
-                .accessibilityLabel("\(r.name), \(r.count)\(on ? ", including you" : "")")
+                .buttonStyle(ReactionPillStyle())
+                .modifier(FocusOutline(radius: 12))
+                .help(on ? "Remove your \(SlackMarkup.reactionName(r.name)) reaction" : "React with \(SlackMarkup.reactionName(r.name))")
+                .accessibilityLabel("\(SlackMarkup.reactionName(r.name)), \(r.count)\(on ? ", including you" : "")")
+                .accessibilityAddTraits(on ? .isSelected : [])
+            }
+            if canAdd {
+                Menu {
+                    ForEach(Self.quick, id: \.self) { name in
+                        Button("\(SlackMarkup.emoji[name] ?? name)  \(SlackMarkup.reactionName(name).capitalized)") { toggle(name) }
+                    }
+                } label: {
+                    Image(systemName: "face.smiling").font(.system(size: 12, weight: .medium)).foregroundStyle(Soot.muted)
+                        .frame(width: 28, height: 24)
+                        .background(Soot.ground, in: Capsule())
+                        .overlay(Capsule().strokeBorder(Soot.edge.opacity(0.6)))
+                }
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .fixedSize()
+                .modifier(FocusOutline(radius: 12))
+                .accessibilityLabel("Add a reaction")
             }
         }
-        .padding(.top, 2)
+        .padding(.top, 4)
+    }
+}
+
+/// A pill that presses to 0.96 and lifts a tone on hover; no motion under Reduce Motion.
+private struct ReactionPillStyle: ButtonStyle {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed && !reduceMotion ? 0.96 : 1)
+            .opacity(configuration.isPressed ? 0.85 : 1)
+            .animation(reduceMotion ? nil : .easeOut(duration: 0.15), value: configuration.isPressed)
     }
 }
 
@@ -613,7 +948,8 @@ private struct SlackImage: View {
         Group {
             if let image {
                 Link(destination: URL(string: file.permalink ?? "") ?? URL(string: "https://slack.com")!) {
-                    Image(decorative: image, scale: 2).resizable().aspectRatio(contentMode: .fit)
+                    Image(decorative: image, scale: 2).resizable().aspectRatio(contentMode: .fill)
+                        .frame(width: width, height: width / ratio)
                 }
                 .buttonStyle(.plain)
                 .help("Open \(file.displayName) in Slack")
@@ -693,6 +1029,14 @@ private struct LinkPreview: View {
     @State private var image: CGImage?
 
     private var link: URL? { (card.title_link ?? card.from_url ?? card.original_url).flatMap(URL.init(string:)) }
+
+    /// Three lines at most, blank lines dropped: a clamp alone keeps the full height in a fixed-size stack.
+    static func excerpt(_ text: String?, lines max: Int = 3) -> String? {
+        guard let text else { return nil }
+        let lines = text.split(whereSeparator: \.isNewline).map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+        let out = lines.prefix(max).joined(separator: "\n")
+        return out.isEmpty ? nil : String(out.prefix(max * 100))
+    }
     private var bar: Color { card.color.flatMap(Color.init(hex:)) ?? Soot.line }
 
     var body: some View {
@@ -702,11 +1046,11 @@ private struct LinkPreview: View {
                 if let site = card.service_name ?? card.author_name {
                     Text(site).font(.system(size: 11, weight: .semibold)).foregroundStyle(Soot.muted).lineLimit(1)
                 }
-                if let title = card.title ?? card.pretext ?? card.fallback {
+                if let title = Self.excerpt(card.title ?? card.pretext ?? card.fallback, lines: 2) {
                     Text(SlackMarkup.render(title, users: [:])).font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(Soot.ink).tint(Soot.ink).lineLimit(2)
                 }
-                if let text = card.text, !text.isEmpty {
+                if let text = Self.excerpt(card.text) {
                     Text(SlackMarkup.render(text, users: [:])).font(.system(size: 12)).foregroundStyle(Soot.ink.opacity(0.8))
                         .tint(Soot.lime).lineLimit(3)
                 }
@@ -739,16 +1083,18 @@ private struct ThreadReplies: View {
     let failed: Bool
     let users: [String: SlackUser]
     var channels: [String: String] = [:]
+    /// Without the indent and bar, for the thread pane.
+    var bare = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: bare ? 14 : 10) {
             if failed {
                 Text("Couldn't load the replies.").font(.system(size: 12)).foregroundStyle(Soot.muted)
             } else if let replies {
                 ForEach(replies) { reply in
                     let user = reply.user.flatMap { users[$0] }
                     HStack(alignment: .top, spacing: 8) {
-                        SlackAvatar(user: user, name: user?.name ?? "App", size: 22, radius: 6)
+                        SlackAvatar(user: user, name: user?.name ?? "App", size: bare ? 28 : 22, radius: bare ? 7 : 6)
                         VStack(alignment: .leading, spacing: 2) {
                             HStack(alignment: .firstTextBaseline, spacing: 6) {
                                 Text(user?.name ?? "App").font(.system(size: 13, weight: .semibold)).foregroundStyle(Soot.ink)
@@ -766,9 +1112,9 @@ private struct ThreadReplies: View {
                 WaitingLine().frame(width: 120).accessibilityElement().accessibilityLabel("Loading replies")
             }
         }
-        .padding(.leading, 10)
-        .padding(.top, 6)
-        .overlay(alignment: .leading) { Rectangle().fill(Soot.line).frame(width: 2).padding(.top, 6) }
+        .padding(.leading, bare ? 0 : 10)
+        .padding(.top, bare ? 0 : 6)
+        .overlay(alignment: .leading) { if !bare { Rectangle().fill(Soot.line).frame(width: 2).padding(.top, 6) } }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Replies")
     }

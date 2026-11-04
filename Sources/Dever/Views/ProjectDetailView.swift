@@ -14,6 +14,7 @@ struct ProjectDetailView: View {
     @State private var hasEarlier = false
     @State private var loadingEarlier = false
     @State private var slackExpanded = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var pulls: [ProjectPullRequests.Match] = []
     @State private var pullsScoped = false
     @State private var runs: [GitHubRun] = []
@@ -50,29 +51,42 @@ struct ProjectDetailView: View {
             // The same two columns as the skeleton, loaded or not: the work on the left,
             // the conversation alongside it. Below ~1000px they stack.
             let twoColumns = geo.size.width >= 1000
-            ScrollView {
+            // In the wide view the page stops scrolling: the messages scroll inside their
+            // panel and the thread pane stays put beside them. Same ScrollView either way,
+            // so the panel's state (open thread, draft) survives the switch.
+            ScrollView(.vertical) {
                 VStack(alignment: .leading, spacing: 24) {
                     titleRow
-                    if slackExpanded {
-                        slackPanel
-                    } else if twoColumns {
+                    // The Slack panel keeps one place in the hierarchy whichever layout is on,
+                    // so open threads and a half-written reply survive a switch to the wide view.
+                    if twoColumns {
                         HStack(alignment: .top, spacing: 16) {
-                            workColumn.frame(maxWidth: .infinity)
-                            slackPanel.frame(width: min(420, geo.size.width * 0.34))
+                            if !slackExpanded { workColumn.frame(maxWidth: .infinity) }
+                            slackPanel
+                                .frame(width: slackExpanded ? nil : min(420, geo.size.width * 0.34))
+                                .frame(maxHeight: slackExpanded ? .infinity : nil, alignment: .top)
                         }
                     } else {
-                        VStack(spacing: 16) { workColumn; slackPanel }
+                        VStack(spacing: 16) {
+                            if !slackExpanded { workColumn }
+                            slackPanel.frame(maxHeight: slackExpanded ? .infinity : nil, alignment: .top)
+                        }
                     }
                 }
                 .padding(.horizontal, 28)
                 .padding(.vertical, 24)
-                .frame(width: geo.size.width, alignment: .leading)
+                .frame(width: geo.size.width, height: slackExpanded ? geo.size.height : nil, alignment: .topLeading)
             }
+            .scrollDisabled(slackExpanded)
         }
         .background(Soot.ground)
         .navigationTitle(project.name)
         .windowTitleHidden()
         .task { await load() }
+        .onReceive(NotificationCenter.default.publisher(for: .toggleSlackWide)) { _ in
+            slackExpanded.toggle()
+            if slackExpanded { shownMessages = max(shownMessages, 30) }
+        }
         .onReceive(NotificationCenter.default.publisher(for: .openFirstIssue)) { _ in
             if let first = issues(in: currentIssueTab).first {
                 NotificationCenter.default.post(name: .openIssue, object: IssueRoute(project: project, issue: first))
@@ -319,19 +333,28 @@ struct ProjectDetailView: View {
                         .help("Open the channel in Slack")
                 }
                 if project.slack != nil {
+                    // Wide view: a labelled way back, not only a glyph, since the work column is gone.
                     Button {
-                        slackExpanded.toggle()
-                        if slackExpanded { shownMessages = max(shownMessages, 30) }
+                        withAnimation(reduceMotion ? nil : .snappy(duration: 0.3)) {
+                            slackExpanded.toggle()
+                            if slackExpanded { shownMessages = max(shownMessages, 30) }
+                        }
                     } label: {
-                        Image(systemName: slackExpanded ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right")
-                            .font(.system(size: 12, weight: .semibold)).foregroundStyle(Soot.ink)
-                            .frame(width: 28, height: 28).background(Soot.ground, in: Circle())
+                        HStack(spacing: 6) {
+                            Image(systemName: slackExpanded ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right")
+                                .font(.system(size: 11, weight: .semibold))
+                            if slackExpanded { Text("Back to project") }
+                        }
+                        .font(.system(size: 13, weight: .semibold)).foregroundStyle(Soot.ink)
+                        .padding(.horizontal, slackExpanded ? 12 : 0)
+                        .frame(minWidth: 30, minHeight: 30)
+                        .background(Soot.ground, in: Capsule())
                     }
                     .buttonStyle(.plain)
-                    .modifier(FocusOutline(radius: 14))
-                    .help(slackExpanded ? "Back to the project" : "Read the channel full width")
-                    .accessibilityLabel(slackExpanded ? "Back to the project" : "Expand the conversation")
-                    .keyboardShortcut(slackExpanded ? .cancelAction : KeyboardShortcut("e", modifiers: [.command, .shift]))
+                    .modifier(FocusOutline(radius: 15))
+                    .help(slackExpanded ? "Back to the project (⌘⇧E)" : "Read the conversation full width (⌘⇧E)")
+                    .accessibilityLabel(slackExpanded ? "Back to the project" : "Read the conversation full width")
+                    .keyboardShortcut("e", modifiers: [.command, .shift])
                 }
             }
             if project.slack == nil {
@@ -356,9 +379,9 @@ struct ProjectDetailView: View {
                 SlackThreadView(messages: messages, users: users, domain: app.slack?.domain,
                                 channelID: project.slack?.id, channelName: project.slack?.name, shown: shownMessages,
                                 hasEarlier: hasEarlier, loadingEarlier: loadingEarlier,
+                                wide: slackExpanded,
                                 showEarlier: { Task { await showEarlier() } },
                                 actions: slackActions)
-                    .frame(maxWidth: slackExpanded ? 760 : .infinity, alignment: .leading)
             }
         }
         .sootPanel()
