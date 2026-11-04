@@ -15,17 +15,48 @@ actor SlackMediaCache {
     private let memory = NSCache<NSString, CGImage>()
     private var inFlight: [String: Task<CGImage?, Never>] = [:]
     private let gate = Semaphore(limit: 4)
+    /// Avatars (small, long-lived) under Application Support; thumbnails and originals under
+    /// Caches, which macOS may clear and which `purge()` keeps under 200 MB and two weeks.
     private let root: URL = {
         let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("Dever", isDirectory: true)
-        for kind in [Kind.avatars, .files] {
-            try? FileManager.default.createDirectory(at: dir.appendingPathComponent(kind.rawValue, isDirectory: true),
-                                                     withIntermediateDirectories: true)
+        try? FileManager.default.createDirectory(at: dir.appendingPathComponent(Kind.avatars.rawValue, isDirectory: true),
+                                                 withIntermediateDirectories: true)
+        return dir
+    }()
+    static let cachesRoot: URL = {
+        let dir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("Dever", isDirectory: true)
+        for sub in ["files", "originals"] {
+            try? FileManager.default.createDirectory(at: dir.appendingPathComponent(sub, isDirectory: true), withIntermediateDirectories: true)
         }
         return dir
     }()
 
-    init() { memory.countLimit = 600 }
+    init() {
+        memory.countLimit = 600
+        Task.detached(priority: .background) { SlackMediaCache.purge() }
+    }
+
+    /// Oldest first, drop what is older than 14 days, then what exceeds 200 MB.
+    static func purge(maxBytes: Int = 200 * 1024 * 1024, maxAge: TimeInterval = 14 * 86_400) {
+        let fm = FileManager.default
+        var entries: [(url: URL, size: Int, date: Date)] = []
+        for sub in ["files", "originals"] {
+            let dir = cachesRoot.appendingPathComponent(sub, isDirectory: true)
+            for url in (try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: [.fileSizeKey, .contentAccessDateKey])) ?? [] {
+                let values = try? url.resourceValues(forKeys: [.fileSizeKey, .contentAccessDateKey, .contentModificationDateKey])
+                entries.append((url, values?.fileSize ?? 0, values?.contentAccessDate ?? values?.contentModificationDate ?? .distantPast))
+            }
+        }
+        entries.sort { $0.date < $1.date }
+        var total = entries.reduce(0) { $0 + $1.size }
+        let cutoff = Date().addingTimeInterval(-maxAge)
+        for e in entries where e.date < cutoff || total > maxBytes {
+            try? fm.removeItem(at: e.url)
+            total -= e.size
+        }
+    }
 
     /// The avatar of `user`, keyed by user id so a picture is fetched once per person.
     /// The URL's hash in the key makes a changed picture a new file.
@@ -57,7 +88,8 @@ actor SlackMediaCache {
         let memoryKey = "\(key)@\(maxPixels)" as NSString
         if let hit = memory.object(forKey: memoryKey) { return hit }
         if let running = inFlight[key] { return await running.value }
-        let file = root.appendingPathComponent(kind.rawValue, isDirectory: true).appendingPathComponent(Self.safe(key))
+        let file = (kind == .avatars ? root : Self.cachesRoot).appendingPathComponent(kind.rawValue, isDirectory: true)
+            .appendingPathComponent(Self.safe(key))
         let task = Task<CGImage?, Never> {
             if let data = try? Data(contentsOf: file), let decoded = Self.decode(data, maxPixels: maxPixels) {
                 return decoded
@@ -183,12 +215,10 @@ actor SlackDirectory {
 }
 
 extension SlackMediaCache {
-    /// The whole file on disk (for Quick Look), downloaded once with the token.
+    /// The whole file, downloaded once with the token into the purgeable cache (see `purge`).
     func localFile(for file: SlackFile, client: SlackClient) async throws -> URL {
         guard let urlString = file.url_private, let url = URL(string: urlString) else { throw AppError.message("File: no download URL") }
-        let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("Dever/files/originals", isDirectory: true)
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let dir = Self.cachesRoot.appendingPathComponent("originals", isDirectory: true)
         let ext = (file.name as NSString?)?.pathExtension ?? ""
         let name = Self.safe(file.id) + (ext.isEmpty ? "" : "." + ext)
         let target = dir.appendingPathComponent(name)

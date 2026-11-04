@@ -16,6 +16,7 @@ struct ProjectDetailView: View {
     @State private var slackExpanded = false
     @State private var slackFocus: String?
     @State private var customEmoji: [String: URL] = [:]
+    @State private var previewFile: SlackFile?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var pulls: [ProjectPullRequests.Match] = []
     @State private var pullsScoped = false
@@ -99,6 +100,7 @@ struct ProjectDetailView: View {
             .scrollDisabled(slackExpanded)
         }
         .background(Soot.ground)
+        .modifier(FilePreviewHost(preview: $previewFile))
         .navigationTitle(project.name)
         .windowTitleHidden()
         .task { await load() }

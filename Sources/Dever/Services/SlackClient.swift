@@ -23,6 +23,8 @@ struct SlackMessage: Codable, Identifiable {
     var user: String?
     var text: String?
     var reply_count: Int?
+    var reply_users: [String]?
+    var latest_reply: String?
     var subtype: String?
     var thread_ts: String?
     var files: [SlackFile]?
@@ -91,7 +93,16 @@ struct SlackAttachment: Codable, Identifiable {
     var thumb_url: String?
     var color: String?
     var is_app_unfurl: Bool?
+    var is_msg_unfurl: Bool?
+    var channel_id: String?
+    var channel_name: String?
+    var author_subname: String?
+    var footer: String?
     var isEmpty: Bool { title == nil && text == nil && pretext == nil && image_url == nil && fallback == nil }
+    /// A Slack message quoted in this one (shared or unfurled).
+    var isMessageUnfurl: Bool {
+        is_msg_unfurl == true || (from_url ?? "").range(of: #"slack\.com/archives/[A-Z0-9]+/p\d+"#, options: .regularExpression) != nil
+    }
 }
 
 /// Block Kit, as far as reading goes: `rich_text` blocks with their nested elements.

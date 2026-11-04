@@ -3,12 +3,33 @@ import PDFKit
 import Quartz
 import SwiftUI
 
-/// A Slack file read here, not in Slack: Quick Look over the original, downloaded once with
-/// the token and kept under Application Support. Pictures, PDFs, documents alike.
+/// A Slack file read here, not in Slack, over a dimmed page: a click outside or Escape closes.
+/// The original is downloaded once with the token into the purgeable cache; "Save…" copies it
+/// where you choose. Pictures, PDFs and anything Quick Look knows.
+struct FileLightbox: View {
+    let file: SlackFile
+    let close: () -> Void
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.55).ignoresSafeArea()
+                .contentShape(Rectangle())
+                .onTapGesture(perform: close)
+                .accessibilityHidden(true)
+            FilePreviewSheet(file: file, close: close)
+                .clipShape(RoundedRectangle(cornerRadius: 14))
+                .shadow(color: .black.opacity(0.45), radius: 30, y: 10)
+                .transition(reduceMotion ? .opacity : .opacity.combined(with: .scale(scale: 0.97)))
+        }
+        .accessibilityAddTraits(.isModal)
+    }
+}
+
 struct FilePreviewSheet: View {
     @EnvironmentObject var app: AppState
-    @Environment(\.dismiss) private var dismiss
     let file: SlackFile
+    let close: () -> Void
     @State private var local: URL?
     @State private var error: String?
 
@@ -29,15 +50,16 @@ struct FilePreviewSheet: View {
                 }
                 Spacer()
                 if let local {
-                    Button { NSWorkspace.shared.activateFileViewerSelecting([local]) } label: { Text("Show in Finder") }
+                    Button { save(local) } label: { Text("Save…") }
                         .buttonStyle(.plain).handCursor().font(.system(size: 12, weight: .semibold)).foregroundStyle(Soot.muted)
                         .modifier(FocusOutline(radius: 4))
+                        .help("Save a copy of the file")
                 }
                 if let url = file.permalink.flatMap(URL.init(string:)) {
                     Link(destination: url) { HStack(spacing: 4) { Text("Open in Slack"); Image(systemName: "arrow.up.right") } }
                         .handCursor().font(.system(size: 12, weight: .semibold)).foregroundStyle(Soot.lime)
                 }
-                Button { dismiss() } label: {
+                Button(action: close) {
                     Image(systemName: "xmark").font(.system(size: 12, weight: .semibold)).foregroundStyle(Soot.ink)
                         .frame(width: 30, height: 30).background(Soot.surface, in: Circle())
                 }
@@ -77,6 +99,86 @@ struct FilePreviewSheet: View {
             do { local = try await app.withSlack { try await SlackMediaCache.shared.localFile(for: file, client: $0) } }
             catch { self.error = error.localizedDescription }
         }
+    }
+
+    private func save(_ local: URL) {
+        let panel = NSSavePanel()
+        panel.nameFieldStringValue = file.name ?? local.lastPathComponent
+        panel.canCreateDirectories = true
+        panel.begin { response in
+            guard response == .OK, let target = panel.url else { return }
+            try? FileManager.default.removeItem(at: target)
+            do { try FileManager.default.copyItem(at: local, to: target) } catch { app.report(error) }
+        }
+    }
+}
+
+/// Message text as a native label: links get the pointing hand and open on click, text
+/// selects, and the field measures its own height for the width SwiftUI proposes.
+struct RichTextLabel: NSViewRepresentable {
+    let text: AttributedString
+    var size: CGFloat = 14
+    var color: Color = Soot.ink
+    var lineLimit: Int = 0
+    @Environment(\.colorScheme) private var colorScheme
+
+    func makeNSView(context: Context) -> NSTextField {
+        let field = NSTextField(wrappingLabelWithString: "")
+        field.isSelectable = true
+        field.allowsEditingTextAttributes = false
+        field.lineBreakMode = .byWordWrapping
+        field.cell?.truncatesLastVisibleLine = true
+        field.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        field.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        return field
+    }
+
+    func updateNSView(_ field: NSTextField, context: Context) {
+        field.attributedStringValue = Self.nsAttributed(text, size: size, color: color)
+        field.maximumNumberOfLines = lineLimit
+    }
+
+    func sizeThatFits(_ proposal: ProposedViewSize, nsView field: NSTextField, context: Context) -> CGSize? {
+        let width = proposal.width ?? 320
+        field.preferredMaxLayoutWidth = width
+        let height = field.cell?.cellSize(forBounds: NSRect(x: 0, y: 0, width: width, height: .greatestFiniteMagnitude)).height ?? 0
+        return CGSize(width: width, height: ceil(height))
+    }
+
+    /// SwiftUI's presentation intents and colours turned into AppKit fonts and attributes.
+    static func nsAttributed(_ text: AttributedString, size: CGFloat, color: Color) -> NSAttributedString {
+        let out = NSMutableAttributedString()
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.lineSpacing = 3
+        paragraph.lineBreakMode = .byWordWrapping
+        for run in text.runs {
+            let piece = String(text[run.range].characters)
+            var attrs: [NSAttributedString.Key: Any] = [.paragraphStyle: paragraph, .foregroundColor: NSColor(color)]
+            let intent = run.inlinePresentationIntent ?? []
+            var font = NSFont.systemFont(ofSize: size)
+            if intent.contains(.code) {
+                font = NSFont.monospacedSystemFont(ofSize: size - 1, weight: .regular)
+                attrs[.backgroundColor] = NSColor(Soot.ink).withAlphaComponent(0.08)
+            } else if intent.contains(.stronglyEmphasized) && intent.contains(.emphasized) {
+                font = NSFontManager.shared.convert(NSFont.boldSystemFont(ofSize: size), toHaveTrait: .italicFontMask)
+            } else if intent.contains(.stronglyEmphasized) {
+                font = NSFont.boldSystemFont(ofSize: size)
+            } else if intent.contains(.emphasized) {
+                font = NSFontManager.shared.convert(font, toHaveTrait: .italicFontMask)
+            }
+            attrs[.font] = font
+            if intent.contains(.strikethrough) { attrs[.strikethroughStyle] = NSUnderlineStyle.single.rawValue }
+            if let fg = run.foregroundColor { attrs[.foregroundColor] = NSColor(fg) }
+            if let bg = run.backgroundColor { attrs[.backgroundColor] = NSColor(bg) }
+            if let link = run.link {
+                attrs[.link] = link
+                attrs[.foregroundColor] = NSColor(run.foregroundColor ?? Soot.lime)
+                attrs[.underlineStyle] = 0
+                attrs[.cursor] = NSCursor.pointingHand
+            }
+            out.append(NSAttributedString(string: piece, attributes: attrs))
+        }
+        return out
     }
 }
 

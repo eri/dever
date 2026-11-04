@@ -347,7 +347,7 @@ struct SlackThreadView: View {
     var openWide: ((SlackMessage) -> Void)?
     var actions = SlackMessageActions()
     @State private var openThread: SlackMessage?
-    @State private var preview: SlackFile?
+    @AppStorage("slackThreadPaneWidth") private var paneWidth: Double = 320
 
     private var channels: [String: String] {
         guard let channelID, let channelName else { return [:] }
@@ -370,7 +370,7 @@ struct SlackThreadView: View {
                     .onChange(of: focus) { _, ts in if let ts { withAnimation { proxy.scrollTo(ts, anchor: .center) } } }
                 }
                 .frame(maxWidth: 1200, maxHeight: .infinity, alignment: .topLeading)
-                Rectangle().fill(Soot.line).frame(width: 1)
+                PaneHandle(width: $paneWidth)
                 // Beside the messages: the open thread, or what the channel holds when none is open.
                 Group {
                     if let parent = openThread {
@@ -378,20 +378,30 @@ struct SlackThreadView: View {
                                    users: users, channels: channels, permalink: permalink(parent), actions: actions) {
                             openThread = nil
                         }
+                        .id(parent.ts)
+                        .transition(.move(edge: .trailing).combined(with: .opacity))
                     } else {
                         ChannelAside(messages: messages, users: users, channels: channels)
+                            .transition(.opacity)
                     }
                 }
-                .frame(width: 300)
-                .transition(.opacity)
+                .frame(width: paneWidth)
             }
-            .modifier(FilePreviewHost(preview: $preview, firstFile: firstFile))
+            .animation(.snappy(duration: 0.25), value: openThread?.ts)
+            .onReceive(NotificationCenter.default.publisher(for: .previewFirstSlackFile)) { _ in
+                NotificationCenter.default.post(name: .previewSlackFile, object: firstFile())
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .openFirstSlackThread)) { _ in
+                openThread = openThread == nil ? messages.prefix(shown).first { ($0.reply_count ?? 0) > 0 } : nil
+            }
             .onChange(of: messages.map(\.ts)) { _, ts in
                 // The thread pane follows a message that scrolled out of the loaded range.
                 if let parent = openThread, !ts.contains(parent.ts) { openThread = nil }
             }
         } else {
-            list.modifier(FilePreviewHost(preview: $preview, firstFile: firstFile))
+            list.onReceive(NotificationCenter.default.publisher(for: .previewFirstSlackFile)) { _ in
+                NotificationCenter.default.post(name: .previewSlackFile, object: firstFile())
+            }
         }
     }
 
@@ -488,7 +498,8 @@ private struct ChannelAside: View {
     private var links: [(message: SlackMessage, card: SlackAttachment, url: URL)] {
         messages.flatMap { m in
             (m.attachments ?? []).compactMap { c -> (SlackMessage, SlackAttachment, URL)? in
-                guard !c.isEmpty, let u = (c.title_link ?? c.from_url ?? c.original_url).flatMap(URL.init(string:)) else { return nil }
+                guard !c.isEmpty, !c.isMessageUnfurl,
+                      let u = (c.title_link ?? c.from_url ?? c.original_url).flatMap(URL.init(string:)) else { return nil }
                 return (m, c, u)
             }
         }
@@ -626,16 +637,23 @@ private struct SystemRow: View {
     let channels: [String: String]
 
     var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 8) {
-            Image(systemName: symbol).font(.system(size: 11)).foregroundStyle(Soot.muted).frame(width: 32)
-            (Text(user?.name ?? "Slack").fontWeight(.semibold) + Text(" ") +
+        HStack(alignment: .center, spacing: 10) {
+            ZStack {
+                SlackAvatar(user: user, name: user?.name ?? "S", size: 22, radius: 6)
+                Image(systemName: symbol).font(.system(size: 8, weight: .bold)).foregroundStyle(Soot.limeInk)
+                    .frame(width: 13, height: 13).background(Soot.lime, in: Circle())
+                    .offset(x: 9, y: 9)
+            }
+            .frame(width: 32)
+            (Text(user?.name ?? "Slack").fontWeight(.semibold).foregroundColor(Soot.ink) + Text(" ") +
              Text(SlackMarkup.render(stripLeadingMention(message.text ?? ""), users: users.mapValues(\.name), channels: channels)))
-                .font(.system(size: 12)).foregroundStyle(Soot.muted).tint(Soot.muted)
+                .font(.system(size: 13)).foregroundStyle(Soot.muted).tint(Soot.muted)
                 .fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 0)
-            Text(message.date.formatted(date: .omitted, time: .shortened)).font(.system(size: 11)).foregroundStyle(Soot.muted.opacity(0.8))
+            Text(message.date.formatted(date: .omitted, time: .shortened)).font(.system(size: 11)).foregroundStyle(Soot.muted)
         }
         .padding(.horizontal, 8)
+        .padding(.vertical, 2)
         .accessibilityElement(children: .combine)
     }
 
@@ -658,17 +676,17 @@ private struct SystemRow: View {
 /// Presents a Slack file in a sheet when a thumbnail or file row asks for it.
 struct FilePreviewHost: ViewModifier {
     @Binding var preview: SlackFile?
-    /// For snapshots: the first readable file in view.
-    var firstFile: () -> SlackFile? = { nil }
     func body(content: Content) -> some View {
         content
             .onReceive(NotificationCenter.default.publisher(for: .previewSlackFile)) { note in
                 preview = note.object as? SlackFile   // nil closes it
             }
-            .onReceive(NotificationCenter.default.publisher(for: .previewFirstSlackFile)) { _ in
-                preview = firstFile()
+            .overlay {
+                if let file = preview {
+                    FileLightbox(file: file) { preview = nil }
+                }
             }
-            .sheet(item: $preview) { FilePreviewSheet(file: $0) }
+            .animation(.easeOut(duration: 0.18), value: preview?.id)
     }
 }
 
@@ -677,6 +695,56 @@ extension Notification.Name {
     static let previewSlackFile = Notification.Name("dever.previewSlackFile")
     /// Snapshots: previews the first readable file of the conversation.
     static let previewFirstSlackFile = Notification.Name("dever.previewFirstSlackFile")
+    /// Snapshots: opens (or closes) the first thread in the wide view.
+    static let openFirstSlackThread = Notification.Name("dever.openFirstSlackThread")
+}
+
+/// The divider between messages and the side pane: drag to resize, double-click to reset.
+private struct PaneHandle: View {
+    @Binding var width: Double
+    @State private var hovering = false
+    @State private var start: Double?
+
+    var body: some View {
+        Rectangle().fill(hovering || start != nil ? Soot.lime : Soot.line)
+            .frame(width: hovering || start != nil ? 2 : 1)
+            .padding(.horizontal, 5)
+            .contentShape(Rectangle())
+            .onHover { inside in
+                hovering = inside
+                if inside { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() }
+            }
+            .gesture(DragGesture(minimumDistance: 2)
+                .onChanged { value in
+                    if start == nil { start = width }
+                    width = min(560, max(260, (start ?? width) - value.translation.width))
+                }
+                .onEnded { _ in start = nil })
+            .onTapGesture(count: 2) { width = 320 }
+            .accessibilityElement()
+            .accessibilityLabel("Pane width")
+            .accessibilityValue("\(Int(width)) points")
+            .accessibilityAdjustableAction { direction in
+                width = min(560, max(260, width + (direction == .increment ? 20 : -20)))
+            }
+    }
+}
+
+/// The people who answered, as a short stack of small pictures.
+private struct ReplierAvatars: View {
+    let ids: [String]
+    let users: [String: SlackUser]
+    var size: CGFloat = 18
+
+    var body: some View {
+        HStack(spacing: -size * 0.3) {
+            ForEach(ids.prefix(4), id: \.self) { id in
+                SlackAvatar(user: users[id], name: users[id]?.name ?? "?", size: size, radius: size / 2)
+                    .overlay(Circle().strokeBorder(Soot.surface, lineWidth: 1.5))
+            }
+        }
+        .accessibilityHidden(true)
+    }
 }
 
 /// A thread beside the messages in the wide view: the parent, its replies, a composer.
@@ -697,10 +765,12 @@ private struct ThreadPane: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(spacing: 10) {
-                Text("Thread").font(.system(size: 15, weight: .semibold)).foregroundStyle(Soot.ink)
-                    .accessibilityAddTraits(.isHeader)
-                if let count = parent.reply_count {
-                    Text("^[\(count) reply](inflect: true)").font(.system(size: 12)).foregroundStyle(Soot.muted)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("Thread").font(.system(size: 15, weight: .semibold)).foregroundStyle(Soot.ink)
+                        .accessibilityAddTraits(.isHeader)
+                    (Text("Replies to \(user?.name ?? "a message")") +
+                     (parent.reply_count.map { Text(" · ") + Text("^[\($0) reply](inflect: true)") } ?? Text("")))
+                        .font(.system(size: 12)).foregroundStyle(Soot.muted)
                 }
                 Spacer()
                 if let permalink {
@@ -716,21 +786,30 @@ private struct ThreadPane: View {
                 .keyboardShortcut(.cancelAction)
                 .accessibilityLabel("Close the thread")
             }
-            HStack(alignment: .top, spacing: 10) {
-                SlackAvatar(user: user, name: user?.name ?? "App", size: 32)
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack(alignment: .firstTextBaseline, spacing: 8) {
-                        Text(user?.name ?? "App").font(.system(size: 14, weight: .bold)).foregroundStyle(Soot.ink)
-                        Text(parent.date.formatted(.relative(presentation: .named))).font(.system(size: 12)).foregroundStyle(Soot.muted)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 14) {
+                    HStack(alignment: .top, spacing: 10) {
+                        SlackAvatar(user: user, name: user?.name ?? "App", size: 32)
+                        VStack(alignment: .leading, spacing: 4) {
+                            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                                Text(user?.name ?? "App").font(.system(size: 14, weight: .bold)).foregroundStyle(Soot.ink)
+                                Text(parent.date.formatted(.relative(presentation: .named))).font(.system(size: 12)).foregroundStyle(Soot.muted)
+                            }
+                            MessageBody(message: parent, users: users, channels: channels, expanded: .constant(true))
+                            MessageExtras(message: parent, channels: channels)
+                        }
                     }
-                    MessageBody(message: parent, users: users, channels: channels, expanded: .constant(true))
-                    MessageExtras(message: parent)
+                    Rectangle().fill(Soot.line).frame(height: 1)
+                    ThreadReplies(replies: replies, failed: failed, users: users, channels: channels, bare: true)
                 }
             }
-            Rectangle().fill(Soot.line).frame(height: 1)
-            ThreadReplies(replies: replies, failed: failed, users: users, channels: channels, bare: true)
+            .frame(maxHeight: .infinity)
             ReplyComposer(draft: $draft, sending: sending, autofocus: false, send: { await send() }, cancel: { draft = "" })
         }
+        .padding(14)
+        .frame(maxHeight: .infinity, alignment: .top)
+        .background(Soot.ground, in: RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Soot.line))
         .task(id: parent.ts) { await load() }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Thread")
@@ -881,7 +960,7 @@ private struct MessageRow: View {
                     }
                 }
                 MessageBody(message: message, users: users, channels: channels, expanded: wide ? .constant(true) : $expanded)
-                MessageExtras(message: message)
+                MessageExtras(message: message, channels: channels)
                 if !reactions.isEmpty {
                     ReactionPills(reactions: reactions, me: me, customEmoji: customEmoji) { toggle($0) }
                 }
@@ -896,19 +975,29 @@ private struct MessageRow: View {
                             threadOpen.toggle()
                             if threadOpen, thread == nil { Task { await loadThread() } }
                         } label: {
-                            HStack(spacing: 4) {
-                                Image(systemName: threadOpen ? "chevron.down" : "bubble.left.and.bubble.right").font(.system(size: 11))
+                            HStack(spacing: 6) {
+                                if let ids = message.reply_users, !ids.isEmpty {
+                                    ReplierAvatars(ids: ids, users: users)
+                                } else {
+                                    Image(systemName: threadOpen ? "chevron.down" : "bubble.left.and.bubble.right").font(.system(size: 11))
+                                }
                                 Text("^[\(r) reply](inflect: true)")
+                                if let last = message.latest_reply.flatMap(Double.init), wide {
+                                    Text("Last reply \(Date(timeIntervalSince1970: last).formatted(.relative(presentation: .named)))")
+                                        .font(.system(size: 12, weight: .regular)).foregroundStyle(Soot.muted)
+                                }
                                 if openThread != nil { Image(systemName: "chevron.right").font(.system(size: 9, weight: .semibold)) }
                             }
                         }
                         .buttonStyle(.plain)
+                        .handCursor()
                         .font(.system(size: 12, weight: .semibold))
                         .foregroundStyle(Soot.lime)
                         .modifier(FocusOutline(radius: 4))
                         .accessibilityLabel(threadOpen ? "Hide replies" : "Show \(r) replies")
                     }
                 }
+                .padding(.top, 4)
                 if threadOpen, openThread == nil {
                     ThreadReplies(replies: thread, failed: threadFailed, users: users, channels: channels)
                 }
@@ -921,6 +1010,9 @@ private struct MessageRow: View {
         .padding(.horizontal, 8)
         .padding(.trailing, 4)
         .background(selected ? Soot.ground : (hovering ? Soot.ground.opacity(0.6) : Color.clear), in: RoundedRectangle(cornerRadius: 6))
+        .overlay(alignment: .leading) {
+            if selected { RoundedRectangle(cornerRadius: 2).fill(Soot.lime).frame(width: 3).padding(.vertical, 6) }
+        }
         .contentShape(Rectangle())
         .simultaneousGesture(TapGesture().onEnded { if let openWide { openWide(message) } }, including: openWide == nil ? .none : .all)
         .help(openWide == nil ? "" : "Open the conversation at this message")
@@ -1188,13 +1280,7 @@ private struct MessageBody: View {
         let text = SlackRichText.render(message.blocks, users: users, channels: channels)
             ?? SlackMarkup.render(message.text ?? "", users: users.mapValues(\.name), channels: channels)
         if !text.characters.isEmpty {
-            Text(text)
-                .font(.system(size: 14))
-                .foregroundStyle(Soot.ink.opacity(0.92))
-                .tint(Soot.lime)
-                .lineSpacing(3)
-                .lineLimit(expanded ? nil : 4)
-                .textSelection(.enabled)
+            RichTextLabel(text: text, size: 14, color: Soot.ink.opacity(0.92), lineLimit: expanded ? 0 : 4)
                 .fixedSize(horizontal: false, vertical: true)
         }
     }
@@ -1203,6 +1289,7 @@ private struct MessageBody: View {
 /// What a message carries besides its text: pictures, files, link previews.
 private struct MessageExtras: View {
     let message: SlackMessage
+    var channels: [String: String] = [:]
 
     var body: some View {
         let files = message.files ?? []
@@ -1212,7 +1299,7 @@ private struct MessageExtras: View {
                 ForEach(files) { file in
                     if file.isReadable, file.isImage { SlackImage(file: file) } else { FileRow(file: file) }
                 }
-                ForEach(Array(cards.enumerated()), id: \.offset) { _, card in LinkPreview(card: card) }
+                ForEach(Array(cards.enumerated()), id: \.offset) { _, card in LinkPreview(card: card, channels: channels) }
             }
             .padding(.top, 2)
         }
@@ -1319,9 +1406,15 @@ private struct FileRow: View {
 /// A link unfurl: the site, the title and a line of its text, with a bar in the site's colour.
 private struct LinkPreview: View {
     let card: SlackAttachment
+    var channels: [String: String] = [:]
     @State private var image: CGImage?
 
-    private var link: URL? { (card.title_link ?? card.from_url ?? card.original_url).flatMap(URL.init(string:)) }
+    /// Slack messages quoted from another channel are not linked: without access the link
+    /// only opens an error. The quote itself already carries the content.
+    private var link: URL? {
+        if card.isMessageUnfurl, card.channel_id.map({ channels[$0] == nil }) ?? true { return nil }
+        return (card.title_link ?? card.from_url ?? card.original_url).flatMap(URL.init(string:))
+    }
 
     /// Three lines at most, blank lines dropped: a clamp alone keeps the full height in a fixed-size stack.
     static func excerpt(_ text: String?, lines max: Int = 3) -> String? {
@@ -1336,7 +1429,14 @@ private struct LinkPreview: View {
         let body = HStack(alignment: .top, spacing: 10) {
             RoundedRectangle(cornerRadius: 2).fill(bar).frame(width: 4)
             VStack(alignment: .leading, spacing: 3) {
-                if let site = card.service_name ?? card.author_name {
+                if card.isMessageUnfurl {
+                    HStack(spacing: 5) {
+                        Image(systemName: "quote.opening").font(.system(size: 9, weight: .bold))
+                        Text([card.author_name, card.channel_name.map { "#\($0)" } ?? card.footer].compactMap { $0 }.joined(separator: " in "))
+                            .lineLimit(1)
+                    }
+                    .font(.system(size: 11, weight: .semibold)).foregroundStyle(Soot.muted)
+                } else if let site = card.service_name ?? card.author_name {
                     Text(site).font(.system(size: 11, weight: .semibold)).foregroundStyle(Soot.muted).lineLimit(1)
                 }
                 if let title = Self.excerpt(card.title ?? card.pretext ?? card.fallback, lines: 2) {
@@ -1394,7 +1494,7 @@ private struct ThreadReplies: View {
                                 Text(reply.date.formatted(.relative(presentation: .named))).font(.system(size: 11)).foregroundStyle(Soot.muted)
                             }
                             MessageBody(message: reply, users: users, channels: channels, expanded: .constant(true))
-                            MessageExtras(message: reply)
+                            MessageExtras(message: reply, channels: channels)
                             if let r = reply.reactions, !r.isEmpty {
                                 ReactionPills(reactions: r, me: nil) { _ in }
                             }
