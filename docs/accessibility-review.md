@@ -62,3 +62,26 @@ Hairlines between sections (`Soot.line`) are decorative and carry no information
 - VoiceOver reading of the radio groups and of the onboarding preview (4.1.2).
 - Text size: layouts use fixed point sizes; check with larger system text.
 - The connecting animation honours Reduce Motion; the skeleton pulse does too.
+
+## Issue page (Linear)
+
+Scope: the issue page reached from a project's Issues list, dark and light, checked on captures
+(`DEVER_SNAPSHOT_ISSUE=1`). Names, focus and keyboard verified in code; contrast computed.
+
+| Pair | Dark | Light | Need |
+|---|---|---|---|
+| Code accent (`MarkdownTheme.code`, teal) on ground / on surface | 7.63 / 6.93:1 | 5.44 / 5.99:1 | 4.5 |
+| Banner subtitle `Soot.muted` on the lime-tinted banner (8 %) | 4.99:1 | 4.89:1 | 4.5 |
+| Activity line (`Soot.ink` name, `Soot.muted` change) on surface | 17.4 / 5.38:1 | 17.5 / 6.05:1 | 4.5 |
+| Chip edge `Soot.edge` on surface (status, priority, assignee, branch) | 3.51:1 | 3.45:1 | 3 |
+| State dot ring (Linear's colour) | — | — | not relied on: the state name is always beside it |
+
+- Every chip and link is a button or a `Link` with a visible shape or underline and a 2px focus
+  ring (`FocusOutline`); hover adds a pill, nothing moves.
+- Targets: chips 30px, links 28px, rows 46px (WCAG 2.5.8 asks 24px).
+- Status changes are announced by the confirmation line (`updatesFrequently`), not by motion.
+- Icons in the activity thread are decorative (`accessibilityHidden`); the sentence carries the
+  change, with the state's dot as a second cue next to its name.
+- Truncated titles in linked-issue rows carry the full title in a tooltip and open the issue.
+- Text sizes: body 15, activity 14, secondary 13, captions 12; the title's inline code is set
+  at the title size minus 1.5.

@@ -380,6 +380,7 @@ struct HoverLink<Label: View>: View {
 struct CopyChip: View {
     let value: String
     let what: String
+    var maxWidth: CGFloat = 240
     @State private var copied = false
     @State private var hovering = false
 
@@ -395,7 +396,7 @@ struct CopyChip: View {
                     .font(.system(size: 12, weight: .semibold)).foregroundStyle(copied ? Soot.lime : Soot.muted)
                 Text(copied ? "Copied" : value)
                     .font(.system(size: 12, weight: .medium, design: copied ? .default : .monospaced))
-                    .foregroundStyle(Soot.ink).lineLimit(1).truncationMode(.middle).frame(maxWidth: 240)
+                    .foregroundStyle(Soot.ink).lineLimit(1).truncationMode(.middle).frame(maxWidth: maxWidth)
                 Image(systemName: "doc.on.doc").font(.system(size: 10, weight: .semibold)).foregroundStyle(Soot.muted)
                     .opacity(hovering && !copied ? 1 : 0)
             }
@@ -413,14 +414,19 @@ struct CopyChip: View {
     }
 }
 
-/// Inline styling of Linear's Markdown: code on a tinted ground in monospace, links in lime.
+/// Inline styling of Linear's Markdown: code in teal monospace on the ground tone, links in
+/// lime. Two accents, each with one job, both over 4.5:1 on ground and surface in both modes.
 enum MarkdownTheme {
+    /// Code, inline and in blocks: 8.0:1 on dark ground, 5.9:1 on light ground.
+    static let code = Theme.chart1
+
     static func style(_ text: AttributedString, size: CGFloat) -> AttributedString {
         var out = text
         for run in out.runs {
             if let intent = run.inlinePresentationIntent, intent.contains(.code) {
                 out[run.range].font = .system(size: size - 1.5, weight: .medium, design: .monospaced)
                 out[run.range].backgroundColor = Soot.ground
+                out[run.range].foregroundColor = code
             }
             if run.link != nil {
                 out[run.range].foregroundColor = Soot.lime
@@ -428,5 +434,11 @@ enum MarkdownTheme {
             }
         }
         return out
+    }
+
+    /// A one-line string (a title) with its inline Markdown rendered.
+    static func inline(_ raw: String, size: CGFloat) -> AttributedString {
+        let options = AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace)
+        return style((try? AttributedString(markdown: raw, options: options)) ?? AttributedString(raw), size: size)
     }
 }
