@@ -216,16 +216,22 @@ struct RichTextLabel: NSViewRepresentable {
                 // A bare URL (a chip) leads with a small link glyph instead of a highlight.
                 if piece.hasPrefix("\u{2009}"), let glyph = linkGlyph(size: size) {
                     // A faint wash of the link colour sets the URL apart without shouting.
+                    // The chip wraps as one block: narrow no-break spaces around it, no-break hyphens
+                    // and word joiners inside, so a line never ends on "pr-4714-".
                     attrs[.backgroundColor] = NSColor(Soot.lime).withAlphaComponent(0.09)
-                    out.append(NSAttributedString(string: "\u{2009}", attributes: attrs))
+                    out.append(NSAttributedString(string: "\u{202F}", attributes: attrs))
                     let icon = NSMutableAttributedString(attachment: glyph)
                     icon.addAttributes([.link: link, .cursor: NSCursor.pointingHand, .backgroundColor: attrs[.backgroundColor]!],
                                        range: NSRange(location: 0, length: icon.length))
                     out.append(icon)
-                    out.append(NSAttributedString(string: "\u{2009}", attributes: attrs))
+                    out.append(NSAttributedString(string: "\u{202F}", attributes: attrs))
                     let label = piece.trimmingCharacters(in: CharacterSet(charactersIn: "\u{2009}"))
+                        .replacingOccurrences(of: "-", with: "\u{2011}")
+                        .replacingOccurrences(of: "/", with: "/\u{2060}")
+                        .replacingOccurrences(of: ".", with: ".\u{2060}")
+                        .replacingOccurrences(of: " ", with: "\u{00A0}")
                     attrs[.font] = NSFont.systemFont(ofSize: size, weight: .medium)
-                    out.append(NSAttributedString(string: label + "\u{2009}", attributes: attrs))
+                    out.append(NSAttributedString(string: label + "\u{202F}", attributes: attrs))
                     continue
                 }
             }

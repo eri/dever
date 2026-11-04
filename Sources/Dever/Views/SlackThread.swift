@@ -393,7 +393,8 @@ struct SlackThreadView: View {
                 Group {
                     if let parent = openThread {
                         ThreadPane(parent: messages.first { $0.ts == parent.ts } ?? parent, user: parent.user.flatMap { users[$0] },
-                                   users: users, channels: channels, permalink: permalink(parent), actions: actions) {
+                                   users: users, channels: channels, customEmoji: customEmoji,
+                                   permalink: permalink(parent), actions: actions) {
                             openThread = nil
                         }
                         .id(parent.ts)
@@ -793,6 +794,7 @@ private struct ThreadPane: View {
     let user: SlackUser?
     let users: [String: SlackUser]
     let channels: [String: String]
+    var customEmoji: [String: URL] = [:]
     let permalink: URL?
     let actions: SlackMessageActions
     let close: () -> Void
@@ -837,10 +839,11 @@ private struct ThreadPane: View {
                             }
                             MessageBody(message: parent, users: users, channels: channels, expanded: .constant(true))
                             MessageExtras(message: parent, channels: channels, users: users)
+                    ReactionsBar(message: parent, customEmoji: customEmoji, actions: actions)
                         }
                     }
                     Rectangle().fill(Soot.line).frame(height: 1)
-                    ThreadReplies(replies: replies, failed: failed, users: users, channels: channels, bare: true)
+                    ThreadReplies(replies: replies, failed: failed, users: users, channels: channels, customEmoji: customEmoji, actions: actions, bare: true)
                 }
             }
             .frame(maxHeight: .infinity)
@@ -1039,7 +1042,7 @@ private struct MessageRow: View {
                 }
                 .padding(.top, 4)
                 if threadOpen, openThread == nil {
-                    ThreadReplies(replies: thread, failed: threadFailed, users: users, channels: channels)
+                    ThreadReplies(replies: thread, failed: threadFailed, users: users, channels: channels, customEmoji: customEmoji, actions: actions)
                 }
                 if replying, openThread == nil {
                     ReplyComposer(draft: $draft, sending: sending, send: { await send() }, cancel: { replying = false; draft = "" })
@@ -1526,12 +1529,53 @@ private struct LinkPreview: View {
     }
 }
 
+/// A message's reactions with their own optimistic state: click a pill to add or remove yours.
+private struct ReactionsBar: View {
+    @EnvironmentObject var app: AppState
+    let message: SlackMessage
+    let customEmoji: [String: URL]
+    let actions: SlackMessageActions
+    @State private var reactions: [SlackReaction] = []
+
+    private var me: String? { app.slack?.userID }
+
+    var body: some View {
+        Group {
+            if !reactions.isEmpty {
+                ReactionPills(reactions: reactions, me: me, customEmoji: customEmoji) { toggle($0) }
+            }
+        }
+        .onAppear { reactions = message.reactions ?? [] }
+        .onChange(of: message.reactions) { _, new in reactions = new ?? [] }
+    }
+
+    private func toggle(_ name: String) {
+        guard let me else { return }
+        let on = !(reactions.first { $0.name == name }?.users?.contains(me) ?? false)
+        if let i = reactions.firstIndex(where: { $0.name == name }) {
+            var r = reactions[i]
+            r.count += on ? 1 : -1
+            var users = r.users ?? []
+            if on { users.append(me) } else { users.removeAll { $0 == me } }
+            r.users = users
+            if r.count <= 0 { reactions.remove(at: i) } else { reactions[i] = r }
+        } else if on {
+            reactions.append(SlackReaction(name: name, count: 1, users: [me]))
+        }
+        Task {
+            do { try await actions.react(message, name, on) } catch { app.report(error); reactions = message.reactions ?? [] }
+        }
+    }
+}
+
 /// A thread's replies, under their parent and set off by a line.
 private struct ThreadReplies: View {
     let replies: [SlackMessage]?
     let failed: Bool
     let users: [String: SlackUser]
     var channels: [String: String] = [:]
+    var customEmoji: [String: URL] = [:]
+    var actions = SlackMessageActions()
     /// Without the indent and bar, for the thread pane.
     var bare = false
 
@@ -1551,9 +1595,7 @@ private struct ThreadReplies: View {
                             }
                             MessageBody(message: reply, users: users, channels: channels, expanded: .constant(true))
                             MessageExtras(message: reply, channels: channels, users: users)
-                            if let r = reply.reactions, !r.isEmpty {
-                                ReactionPills(reactions: r, me: nil) { _ in }
-                            }
+                            ReactionsBar(message: reply, customEmoji: customEmoji, actions: actions)
                         }
                     }
                 }
