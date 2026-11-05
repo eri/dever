@@ -74,7 +74,7 @@ struct ProjectEditorSheet: View {
     @State private var query = ""
 
     init(project: Project = Project(name: ""), isNew: Bool = true) {
-        _project = State(initialValue: project)
+        var project = project
         self.isNew = isNew
         // Snapshots: DEVER_SNAPSHOT_STEP=name|slack|linear|github|preview|ready opens that step.
         let snapshot = ProcessInfo.processInfo.environment["DEVER_SNAPSHOT_STEP"]
@@ -88,10 +88,11 @@ struct ProjectEditorSheet: View {
         }
         Self.openAt = nil
         // Snapshots of the preview step need a repository to list pull requests of.
-        if first == .preview, PreviewStore.simulation != nil, _project.wrappedValue.githubRepo == nil {
-            _project.wrappedValue.githubRepo = PreviewStore.sampleRepo
-            _project.wrappedValue.previewPullNumber = PreviewStore.samplePullNumber
+        if first == .preview, PreviewStore.simulation != nil, project.githubRepo == nil {
+            project.githubRepo = PreviewStore.sampleRepo
+            project.previewPullNumber = PreviewStore.samplePullNumber
         }
+        _project = State(initialValue: project)
         _step = State(initialValue: first)
     }
 
@@ -196,7 +197,8 @@ struct ProjectEditorSheet: View {
     private var previewStep: some View {
         toolStep(.github, title: "Preview environment", rows: pullItems,
                  selection: Binding(get: { project.previewPullNumber.map(String.init) },
-                                    set: { project.previewPullNumber = $0.flatMap(Int.init) }),
+                                    set: { project.previewPullNumber = $0.flatMap(Int.init)
+                                           if project.previewPullNumber != nil { project.previewDismissed = nil } }),
                  createTitle: nil, more: nil,
                  loading: project.githubRepo.map { catalog.pulls[$0] == nil } ?? false) { EmptyView() }
             .task(id: project.githubRepo) {
@@ -286,9 +288,10 @@ struct ProjectEditorSheet: View {
 
     /// The recap: one row per thing, each opening its step; then the one button.
     private var readyStep: some View {
-        VStack(alignment: .leading, spacing: 28) {
+        VStack(alignment: .leading, spacing: 20) {
             StepTitle(text: isNew ? "Ready?" : "Edit project")
-            VStack(spacing: 8) {
+            ScrollView {
+            VStack(spacing: 6) {
                 recapRow(icon: AnyView(Image(systemName: "textformat").font(.system(size: 15, weight: .medium)).foregroundStyle(Soot.ink)),
                          title: project.name, detail: "Name") { step = .name }
                 recapRow(icon: AnyView(BrandLogo(service: .slack, size: 18)), title: slackSummary, detail: "Slack") { step = .slack }
@@ -298,10 +301,13 @@ struct ProjectEditorSheet: View {
                          title: project.githubRepo ?? "No repository", detail: "GitHub") { step = .github }
                 if project.githubRepo != nil {
                     recapRow(icon: AnyView(Image(systemName: "globe").font(.system(size: 16, weight: .medium)).foregroundStyle(Soot.ink)),
-                             title: project.previewPullNumber.map { "Pull request #\($0)" } ?? "No preview", detail: "Preview") { step = .preview }
+                             title: project.previewPullNumber.map { "Pull request #\($0)" }
+                                ?? (project.previewDismissed == true ? "Not needed" : "No preview"), detail: "Preview") { step = .preview }
                 }
             }
             .frame(maxWidth: 420)
+            }
+            .frame(maxHeight: .infinity)
             VStack(alignment: .leading, spacing: 12) {
                 Button(saving ? "Saving…" : isNew ? "Create project" : "Save") { Task { await save() } }
                     .buttonStyle(LimeButton())
@@ -312,8 +318,26 @@ struct ProjectEditorSheet: View {
         }
     }
 
+    /// A recap line: the value, what it is underneath, and where it leads. Compact, so five fit.
     private func recapRow(icon: AnyView, title: String, detail: String, open: @escaping () -> Void) -> some View {
-        OptionRow(icon: icon, title: title, detail: detail, recommended: false, enabled: true, action: open)
+        Button(action: open) {
+            HStack(spacing: 12) {
+                icon.frame(width: 22).accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(title).font(.system(size: 14, weight: .medium)).foregroundStyle(Soot.ink).lineLimit(1)
+                    Text(detail).font(.system(size: 12)).foregroundStyle(Soot.muted)
+                }
+                Spacer()
+                Image(systemName: "arrow.right").font(.system(size: 12, weight: .semibold)).foregroundStyle(Soot.muted)
+            }
+            .padding(.horizontal, 14)
+            .frame(height: 50)
+            .background(Soot.surface, in: RoundedRectangle(cornerRadius: Soot.fieldRadius))
+            .contentShape(RoundedRectangle(cornerRadius: Soot.fieldRadius))
+            .modifier(FocusOutline(radius: Soot.fieldRadius))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(detail): \(title)")
     }
 
     private var slackSummary: String {
