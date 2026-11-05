@@ -245,18 +245,12 @@ struct ContentView: View {
     }
 
     private var addMenu: some View {
-        Menu {
-            Button("Add project…") { showNew = true }.keyboardShortcut("n")
-            Divider()
-            Button("From Slack channels…") { importSource = .slack }.disabled(app.slack == nil)
-            Button("From Linear projects…") { importSource = .linear }.disabled(app.linear == nil)
-        } label: {
+        Button { showNew = true } label: {
             Image(systemName: "plus").foregroundStyle(Theme.muted)
         }
-        .menuStyle(.borderlessButton)
-        .menuIndicator(.hidden)
-        .fixedSize()
-        .help("Create or import projects")
+        .buttonStyle(.plain)
+        .keyboardShortcut("n")
+        .help("Add a project")
         .accessibilityLabel("Add project")
     }
 
