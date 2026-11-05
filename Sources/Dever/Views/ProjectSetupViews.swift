@@ -7,8 +7,20 @@ final class Catalog: ObservableObject {
     @Published var linearProjects: [LinearProject] = []
     @Published var teams: [LinearTeam] = []
     @Published var repos: [GitHubRepo] = []
+    /// Open pull requests of the repositories the Preview step looked at.
+    @Published var pulls: [String: [GitHubPull]] = [:]
+    @Published var loadingPulls = false
     @Published var loading = false
     @Published var errors: [String] = []
+
+    /// Loads a repository's open pull requests once per sheet.
+    func loadPulls(_ repo: String, _ app: AppState) async {
+        guard pulls[repo] == nil, !loadingPulls else { return }
+        if PreviewStore.simulation != nil { pulls[repo] = PreviewStore.samplePulls; return }
+        loadingPulls = true
+        defer { loadingPulls = false }
+        do { pulls[repo] = try await app.githubClient().pulls(repo) } catch { errors.append(error.localizedDescription) }
+    }
 
     func load(_ app: AppState) async {
         loading = true
@@ -38,8 +50,10 @@ struct ProjectEditorSheet: View {
     @State var project: Project
     let isNew: Bool
 
-    enum Step: Hashable { case start, pick(ImportSheet.Source), name, slack, linear, github, hub }
+    enum Step: Hashable { case start, pick(ImportSheet.Source), name, slack, linear, github, preview, hub }
     @State private var step: Step
+    /// The step the next editor opens on ("Add a preview" from the project page), consumed once.
+    static var openAt: Step?
 
     enum Mode: Hashable { case undecided, none, existing, create }
     @State private var slackMode: Mode = .undecided
@@ -55,20 +69,27 @@ struct ProjectEditorSheet: View {
     init(project: Project = Project(name: ""), isNew: Bool = true) {
         _project = State(initialValue: project)
         self.isNew = isNew
-        // Snapshots: DEVER_SNAPSHOT_STEP=name|slack|linear|github opens that step.
+        // Snapshots: DEVER_SNAPSHOT_STEP=name|slack|linear|github|preview opens that step.
         let snapshot = ProcessInfo.processInfo.environment["DEVER_SNAPSHOT_STEP"]
         let first: Step = switch snapshot {
         case "name": .name
         case "slack": .slack
         case "linear": .linear
         case "github": .github
-        default: isNew ? .start : .hub
+        case "preview": .preview
+        default: Self.openAt ?? (isNew ? .start : .hub)
         }
+        Self.openAt = nil
         _step = State(initialValue: first)
+        // Snapshots of the preview step need a repository to list pull requests of.
+        if first == .preview, PreviewStore.simulation != nil, _project.wrappedValue.githubRepo == nil {
+            _project.wrappedValue.githubRepo = PreviewStore.sampleRepo
+            _project.wrappedValue.previewPullNumber = PreviewStore.samplePullNumber
+        }
     }
 
-    /// The adding path, for the marks at the bottom.
-    private let path: [Step] = [.start, .name, .slack, .linear, .github]
+    /// The adding path, for the marks at the bottom; the preview step exists once a repository is linked.
+    private var path: [Step] { [.start, .name, .slack, .linear, .github] + (project.githubRepo != nil ? [.preview] : []) }
 
     var body: some View {
         Group {
@@ -79,6 +100,7 @@ struct ProjectEditorSheet: View {
             case .slack: slackStep
             case .linear: linearStep
             case .github: githubStep
+            case .preview: previewStep
             case .hub: hubStep
             }
         }
@@ -254,9 +276,61 @@ struct ProjectEditorSheet: View {
                     }
                     .frame(maxWidth: 420)
                 }
+                if isNew && project.githubRepo == nil { finishRow } else { nextButton(ok: true) { step = isNew ? .preview : .hub } }
+            }
+        }
+    }
+
+    /// Which pull request's preview environment the project follows. Only with a repository.
+    private var previewStep: some View {
+        frame(.preview, back: { step = isNew ? .github : .hub }) {
+            VStack(alignment: .leading, spacing: 28) {
+                VStack(alignment: .leading, spacing: 8) {
+                    StepTitle(text: "Preview environment")
+                    Text("Optional · the preview of one pull request, deployed and followed from the project page")
+                        .font(.system(size: 14)).foregroundStyle(Soot.muted).fixedSize(horizontal: false, vertical: true)
+                }
+                if app.github == nil {
+                    connectHint(.github)
+                } else if let repo = project.githubRepo, catalog.pulls[repo] == nil {
+                    Skeleton(height: Soot.fieldHeight, radius: Soot.fieldRadius).frame(maxWidth: 420)
+                } else {
+                    SearchPicker(label: "Pull request", placeholder: "Pick a pull request",
+                                 actions: [PickerItem(id: Self.noneItem, title: "No preview", symbol: "minus.circle")],
+                                 items: pullItems,
+                                 selection: Binding<String?>(
+                                    get: { project.previewPullNumber.map(String.init) ?? Self.noneItem },
+                                    set: { project.previewPullNumber = $0.flatMap(Int.init) }))
+                        .frame(maxWidth: 420)
+                }
                 if isNew { finishRow } else { nextButton(ok: true) { step = .hub } }
             }
         }
+        .task(id: project.githubRepo) {
+            if let repo = project.githubRepo, app.github != nil { await catalog.loadPulls(repo, app) }
+        }
+    }
+
+    /// The repository's open pull requests, the project's own (citing one of its issues) first,
+    /// then by number, newest first; the one already linked stays listed even when closed.
+    private var pullItems: [PickerItem] {
+        guard let repo = project.githubRepo else { return [] }
+        let pulls = catalog.pulls[repo] ?? []
+        let identifiers = project.linear.map { Set(IssueStore.shared.issues(project: $0.id).map(\.identifier)) } ?? []
+        func isMine(_ p: GitHubPull) -> Bool {
+            identifiers.contains { p.title.localizedCaseInsensitiveContains($0) || p.head.ref.localizedCaseInsensitiveContains($0) }
+        }
+        var items = pulls
+            .sorted { (isMine($0) ? 0 : 1, -$0.number) < (isMine($1) ? 0 : 1, -$1.number) }
+            .map { p in
+                PickerItem(id: String(p.number), title: "#\(p.number) \(PullTitle.split(p.title).title)",
+                           subtitle: [isMine(p) ? "This project" : nil, p.draft == true ? "Draft" : nil, p.user.login].compactMap { $0 }.joined(separator: " · "),
+                           symbol: p.draft == true ? "pencil.line" : "arrow.triangle.pull")
+            }
+        if let n = project.previewPullNumber, !pulls.contains(where: { $0.number == n }) {
+            items.insert(PickerItem(id: String(n), title: "#\(n)", subtitle: "Not open any more", symbol: "arrow.triangle.pull"), at: 0)
+        }
+        return items
     }
 
     /// Editing: what is linked, one row each; a row opens its step.
@@ -273,6 +347,10 @@ struct ProjectEditorSheet: View {
                            value: linearSummary) { step = .linear }
                     hubRow(icon: AnyView(BrandLogo(service: .github, size: 18).foregroundStyle(Soot.ink)), title: "GitHub",
                            value: project.githubRepo ?? "Not linked") { step = .github }
+                    if project.githubRepo != nil {
+                        hubRow(icon: AnyView(Image(systemName: "globe").font(.system(size: 16, weight: .medium)).foregroundStyle(Soot.ink)),
+                               title: "Preview", value: project.previewPullNumber.map { "Pull request #\($0)" } ?? "No preview") { step = .preview }
+                    }
                 }
                 .frame(maxWidth: 420)
                 finishRow
@@ -424,6 +502,8 @@ struct ProjectEditorSheet: View {
             case .none, .undecided:
                 p.linear = nil
             }
+            if p.githubRepo == nil { p.previewPullNumber = nil }
+            if p.previewPullNumber != project.previewPullNumber || p.githubRepo != project.githubRepo { PreviewStore.shared.forget(p.id) }
             app.upsert(p)
             dismiss()
         } catch {
@@ -445,16 +525,21 @@ struct ImportSheet: View {
     /// From the guided "Add a project" sheet: a way back to its first step.
     var back: (() -> Void)? = nil
     @State private var selection = Set<String>()
-    @State private var onlyPrefixed = true
-    @State private var onlyMine = true
+    /// Channels start narrowed to the likely ones (your channels, with the prefix); searching
+    /// or "Find more channels" widens to every channel.
+    @State private var narrowed = true
     @State private var search = ""
 
-    private struct Candidate: Identifiable {
+    struct Candidate: Identifiable {
         var id: String
         var title: String
         var projectName: String
         var match: String?
+        /// Why the row was hidden while narrowed; shown quietly on hover.
+        var aside: String? = nil
     }
+
+    private var isNarrowed: Bool { source == .slack && narrowed && search.isEmpty }
 
     private var candidates: [Candidate] {
         let rows: [Candidate]
@@ -462,12 +547,13 @@ struct ImportSheet: View {
         case .slack:
             rows = catalog.channels
                 .filter { !app.linkedSlackIDs.contains($0.id) }
-                .filter { !onlyPrefixed || channelPrefix.isEmpty || $0.name.hasPrefix(channelPrefix) }
-                .filter { !onlyMine || $0.is_member == true }
+                .filter { !isNarrowed || fitsPrefix($0) && $0.is_member == true }
                 .map { ch in
                     let name = Naming.projectName(fromChannel: ch.name, prefix: channelPrefix)
+                    let aside = ch.is_member != true ? "You're not in this channel yet"
+                              : !fitsPrefix(ch) ? "Doesn't start with \(channelPrefix)" : nil
                     return Candidate(id: ch.id, title: "#\(ch.name)", projectName: name,
-                                     match: linearMatch(for: name)?.name)
+                                     match: linearMatch(for: name)?.name, aside: aside)
                 }
         case .linear:
             rows = catalog.linearProjects
@@ -481,6 +567,14 @@ struct ImportSheet: View {
         return rows.filter { $0.title.localizedCaseInsensitiveContains(search) }
     }
 
+    private func fitsPrefix(_ ch: SlackChannel) -> Bool { channelPrefix.isEmpty || ch.name.hasPrefix(channelPrefix) }
+
+    /// Channels hidden by the narrowing, so "Find more" says how many.
+    private var hiddenCount: Int {
+        guard isNarrowed else { return 0 }
+        return catalog.channels.filter { !app.linkedSlackIDs.contains($0.id) && !(fitsPrefix($0) && $0.is_member == true) }.count
+    }
+
     /// The other side of each pair: Linear for channels, Slack for Linear projects.
     private var counterpart: ServiceKind { source == .slack ? .linear : .slack }
 
@@ -488,18 +582,8 @@ struct ImportSheet: View {
         StepSheet(back: back, close: { dismiss() }) {
             VStack(alignment: .leading, spacing: 20) {
                 StepTitle(text: source == .slack ? "Pick channels" : "Pick projects")
-                HStack(spacing: 10) {
-                    SootField(label: "", placeholder: "Search", text: $search, leadingSymbol: "magnifyingglass")
-                        .accessibilityLabel(source == .slack ? "Search channels" : "Search projects")
-                    if source == .slack {
-                        if !channelPrefix.isEmpty {
-                            FilterChip(label: channelPrefix + "…", on: $onlyPrefixed)
-                                .help("Only channels starting with \(channelPrefix)")
-                        }
-                        FilterChip(label: "I'm in", on: $onlyMine)
-                            .help("Only channels you're a member of")
-                    }
-                }
+                SootField(label: "", placeholder: "Search", text: $search, leadingSymbol: "magnifyingglass")
+                    .accessibilityLabel(source == .slack ? "Search channels" : "Search projects")
                 ForEach(catalog.errors, id: \.self) { ErrorLabel($0) }
                 ScrollView { list }
                     .frame(maxHeight: .infinity)
@@ -526,44 +610,14 @@ struct ImportSheet: View {
                 } else if candidates.isEmpty {
                     emptyState
                 } else {
-                    ForEach(candidates) { c in row(c) }
+                    ForEach(candidates) { c in ImportRow(candidate: c, counterpart: counterpart,
+                                                        on: selection.contains(c.id)) { toggle(c.id) } }
                 }
         }
     }
 
-    private func row(_ c: Candidate) -> some View {
-        let on = selection.contains(c.id)
-        return Button {
-            if on { selection.remove(c.id) } else { selection.insert(c.id) }
-        } label: {
-            HStack(spacing: 12) {
-                CheckCircle(on: on)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(c.title).font(.system(size: 14, weight: .medium)).foregroundStyle(Soot.ink).lineLimit(1)
-                    if c.projectName != c.title {
-                        Text(c.projectName).font(.system(size: 12)).foregroundStyle(Soot.muted).lineLimit(1)
-                    }
-                }
-                Spacer(minLength: 12)
-                HStack(spacing: 6) {
-                    BrandLogo(service: counterpart, size: 12)
-                        .foregroundStyle(c.match == nil ? Soot.muted : Soot.ink)
-                        .opacity(c.match == nil ? 0.5 : 1)
-                    Text(c.match ?? "No match").font(.system(size: 12))
-                        .foregroundStyle(c.match == nil ? Soot.muted : Soot.ink).lineLimit(1)
-                }
-                .help(c.match == nil ? "Link it later from the project" : "Linked automatically")
-            }
-            .padding(.horizontal, 16)
-            .frame(height: 52)
-            .background(Soot.surface, in: RoundedRectangle(cornerRadius: Soot.fieldRadius))
-            .overlay(RoundedRectangle(cornerRadius: Soot.fieldRadius)
-                .strokeBorder(on ? Soot.lime : .clear, lineWidth: 1.5))
-            .contentShape(RoundedRectangle(cornerRadius: Soot.fieldRadius))
-            .modifier(FocusOutline(radius: Soot.fieldRadius))
-        }
-        .buttonStyle(.plain)
-        .accessibilityAddTraits(on ? .isSelected : [])
+    private func toggle(_ id: String) {
+        if selection.contains(id) { selection.remove(id) } else { selection.insert(id) }
     }
 
     private var emptyState: some View {
@@ -571,8 +625,8 @@ struct ImportSheet: View {
             Text(search.isEmpty ? (source == .slack ? "No channel to import" : "No project to import")
                                 : "No result for \u{201C}\(search)\u{201D}")
                 .font(.system(size: 15, weight: .medium)).foregroundStyle(Soot.ink)
-            if source == .slack && search.isEmpty && (onlyPrefixed || onlyMine) {
-                Button("Show all channels") { onlyPrefixed = false; onlyMine = false }
+            if isNarrowed {
+                Button("Find more channels") { narrowed = false }
                     .buttonStyle(.plain).font(.system(size: 13, weight: .semibold)).foregroundStyle(Soot.lime)
             } else if !search.isEmpty {
                 Button("Clear search") { search = "" }
@@ -584,7 +638,7 @@ struct ImportSheet: View {
     }
 
     private var footer: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 20) {
             if !candidates.isEmpty {
                 Button(selection.count == candidates.count ? "Select none" : "Select all") {
                     selection = selection.count == candidates.count ? [] : Set(candidates.map(\.id))
@@ -592,6 +646,13 @@ struct ImportSheet: View {
                 .buttonStyle(.plain).font(.system(size: 13, weight: .semibold)).foregroundStyle(Soot.lime)
                 .frame(minHeight: 28)
                 .modifier(FocusOutline(radius: 6))
+            }
+            if hiddenCount > 0 {
+                Button("Find more channels") { narrowed = false }
+                    .buttonStyle(.plain).font(.system(size: 13, weight: .semibold)).foregroundStyle(Soot.lime)
+                    .frame(minHeight: 28)
+                    .modifier(FocusOutline(radius: 6))
+                    .help(Plural.text("^[\(hiddenCount) more channel](inflect: true) you're not in or without the prefix"))
             }
             Spacer()
             Button(selection.isEmpty ? "Add" : "Add ^[\(selection.count) project](inflect: true)") { importSelected() }
@@ -630,27 +691,48 @@ struct ImportSheet: View {
     }
 }
 
-/// A filter that can be switched off: lime when on.
-private struct FilterChip: View {
-    let label: String
-    @Binding var on: Bool
+/// One channel or project to pick; hovering a row that was hidden while narrowed says why.
+private struct ImportRow: View {
+    let candidate: ImportSheet.Candidate
+    let counterpart: ServiceKind
+    let on: Bool
+    let toggle: () -> Void
+    @State private var hovering = false
+
     var body: some View {
-        Button { on.toggle() } label: {
-            HStack(spacing: 6) {
-                if on { Image(systemName: "checkmark").font(.system(size: 10, weight: .bold)) }
-                Text(label)
+        let c = candidate
+        Button(action: toggle) {
+            HStack(spacing: 12) {
+                CheckCircle(on: on)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(c.title).font(.system(size: 14, weight: .medium)).foregroundStyle(Soot.ink).lineLimit(1)
+                    if hovering, let aside = c.aside {
+                        Text(aside).font(.system(size: 12)).foregroundStyle(Soot.muted).lineLimit(1)
+                    } else if c.projectName != c.title {
+                        Text(c.projectName).font(.system(size: 12)).foregroundStyle(Soot.muted).lineLimit(1)
+                    }
+                }
+                Spacer(minLength: 12)
+                HStack(spacing: 6) {
+                    BrandLogo(service: counterpart, size: 12)
+                        .foregroundStyle(c.match == nil ? Soot.muted : Soot.ink)
+                        .opacity(c.match == nil ? 0.5 : 1)
+                    Text(c.match ?? "No match").font(.system(size: 12))
+                        .foregroundStyle(c.match == nil ? Soot.muted : Soot.ink).lineLimit(1)
+                }
+                .help(c.match == nil ? "Link it later from the project" : "Linked automatically")
             }
-            .font(.system(size: 12, weight: .semibold))
-            .foregroundStyle(on ? Soot.limeInk : Soot.ink)
-            .padding(.horizontal, 12)
-            .frame(height: 28)
-            .background(on ? Soot.lime : Soot.surface, in: Capsule())
-            .overlay(Capsule().strokeBorder(on ? Color.clear : Soot.edge))
-            .contentShape(Capsule())
-            .modifier(FocusOutline(radius: 14))
+            .padding(.horizontal, 16)
+            .frame(height: 52)
+            .background(Soot.surface, in: RoundedRectangle(cornerRadius: Soot.fieldRadius))
+            .overlay(RoundedRectangle(cornerRadius: Soot.fieldRadius)
+                .strokeBorder(on ? Soot.lime : .clear, lineWidth: 1.5))
+            .contentShape(RoundedRectangle(cornerRadius: Soot.fieldRadius))
+            .modifier(FocusOutline(radius: Soot.fieldRadius))
         }
         .buttonStyle(.plain)
-        .fixedSize()
+        .onHover { hovering = $0 }
         .accessibilityAddTraits(on ? .isSelected : [])
+        .accessibilityHint(c.aside ?? "")
     }
 }
