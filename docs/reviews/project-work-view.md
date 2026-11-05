@@ -221,7 +221,7 @@ foot, the skeleton of the same shape. The accessibility table of revision 2 appl
 column headings; the chip's name reads "Pull request #4872, merged, pipeline passing", its hint
 "Opens on GitHub".
 
-Capture: not taken for this revision. During the session the Keychain credentials item was
-emptied by another process (all three tools came up "Not connected" on the capture run, and
-`security find-generic-password` returned `{}`), so the loaded state could not be photographed.
-Revision 1's `after/` captures show the rows; `ledger/` shows the headline line.
+Capture: `rev3/project-{dark,light}.png`, taken once the tools were reconnected (the Keychain
+credentials item had been emptied by another process during the session). Full titles on one line,
+the merged chip at 26px with 3.5:1 edge, the GitHub line in the headline, the whole panel above the
+fold; the dark capture also shows the row hover tile (`Soot.ground` at 70%).
