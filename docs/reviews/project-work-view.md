@@ -154,3 +154,52 @@ tooltip and the accessible name, so no state is carried by colour alone.
   projects have 15 merged / 0 open), a whole-repository project.
 
 Verdict (after): **Approve**. No `HIGH` findings remain; one `MEDIUM` kept on purpose and two `LOW` noted.
+
+## After, revision 2: the ledger
+
+Feedback on revision 1: GitHub must stay a visible presence on the page. Dever is sold as joined to
+GitHub, and a list where GitHub survived only as a 26px chip lost that. Revision 2 keeps the one
+list but gives each tool its own column.
+
+### Shape
+
+The Delivery panel is a **ledger**: a Linear column and a GitHub column, each headed by the
+tool's logo and name (`Issues` / `Pull requests`, with a hairline under the headings), one issue
+per line, its pull requests beside it. The GitHub column is 310px; each pull request in it is its
+own tile (state glyph, `#number`, what changed, then `merged · 3 days ago` or `passing · open ·
+author`), two at most, then "+N more". A started issue with no PR says "No PR yet"; a to-do or done
+issue without one shows an em dash. Each column cell is its own target: the left tile opens the
+issue page, the right tile opens the PR on GitHub. In the headline row, beside the shipped figure,
+a GitHub line (`[logo] 0 open · 15 merged`, plus the pipeline glyph and word when an open PR has a
+run) opens the repository's pull requests.
+
+Why this beats revision 1: the join is now visible as a shape, two sources on one line, not as a
+badge; GitHub is named three times on the panel (headline, column heading, every row) without a
+second list; and both cells keep the row language (46px tiles, hover lift, focus ring).
+
+Trade-off accepted: the issue title has ~300px less; it truncates sooner, with the full title in a
+tooltip and on the issue page. Without GitHub the ledger has one column and no heading row for it.
+
+Captures: `ledger/project-{dark,light}.png`, `ledger-loading/project-light.png` (skeleton of the
+same two-column shape), `ledger-github-off/project-dark.png` (empty GitHub column under its heading,
+`Connect GitHub` at the foot).
+
+### Accessibility pass (better-accessibility, by code and captures)
+
+| Check | Where | Result |
+| --- | --- | --- |
+| Accessible names on every control | left tile `"INA-1050, title. In review"`, right tile `"Pull request #4872, Sync tips…, merged, 3 days ago"`, GitHub headline link, stage tabs (text + count), Show all | Pass |
+| Visible focus indicator | `TileLink`, `TileRow`, `HoverLink`, `CountTabs`: `FocusOutline` 2px `Soot.ink`, 17:1 dark / 18:1 light against the surface | Pass |
+| Keyboard path for every pointer path | rows are `NavigationLink`s, PR tiles and the headline are `Link`s, tabs are `Button`s; nothing relies on hover | Pass |
+| Meaning not by colour alone | PR state: glyph shape + word ("merged", "open", "draft"); pipeline: check / cross / clock + word; stages: dot + name + count | Pass |
+| Text contrast 1.4.3 | ink 17.4 / 18.9:1, muted 5.4 / 6.1:1 on the surface; column headings ink 13pt semibold | Pass |
+| Non-text contrast 1.4.11 | tab edge 3.9 / 3.1:1 (on ground); glyphs 4.9–7.5:1 on the surface; the heading hairline is decorative | Pass |
+| Target size 2.5.8 (24px) | tiles 46px, tabs 30px, headline link 28px | Pass |
+| Headings as structure | panel title, column headings (`isHeader`, "Issues, from Linear") | Pass |
+| Loading announced once | skeleton is one element, "Loading the project's work"; empty GitHub cell hidden until GitHub has loaded | Pass |
+| Reduced motion | no new motion; skeleton pulse pauses under Reduce Motion | Pass |
+| Truncated content has a way back | tooltip on both titles (pointer), and the row opens the full issue or PR (keyboard) | Pass |
+| 200% text | fixed point sizes, as the rest of the app (`docs/accessibility-review.md` advisory) | Not verified |
+| VoiceOver reading order | by code: heading row, then left cell, right cell per line | Not verified |
+
+Verdict (revision 2): **Approve**; the two `Not verified` rows are runtime checks.
