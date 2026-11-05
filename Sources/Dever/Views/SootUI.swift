@@ -498,7 +498,7 @@ struct StepSheet<Content: View>: View {
                 .frame(height: 28)
                 Spacer(minLength: 16)
                 content()
-                Spacer(minLength: 16)
+                Spacer(minLength: 28)
                 if let step, count > 1 {
                     StepMarks(count: count, current: step)
                 }
