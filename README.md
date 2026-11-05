@@ -26,6 +26,13 @@ Tokens are stored in the macOS Keychain (`io.github.eri.dever`), projects in `~/
 - **Import from Slack**: lists channels following the naming convention and suggests the matching Linear project.
 - **Import from Linear**: lists projects and suggests the matching channel.
 - A project without both a Slack channel **and** a Linear project is flagged ⚠️ incomplete.
+- **Preview environment** (optional, needs a GitHub repository): the project follows the preview of one pull request,
+  chosen in the editor ("Preview" step). The project page shows the PR, the state (not deployed, deploying, updating,
+  live, failed, deleted), the deployed hosts (`pr-<N>-<target>.preview.mendo.cloud`, probed with a HEAD request) and
+  the `preview:keep` label. Deploy, update, protect and delete post the team's own commands as PR comments
+  (`/preview [--nb-api-pods=N] [--nb-app-pods=N] [--prod] [--autoscale] [--keep]`, `/delete-preview`); the state is
+  read back from the workflows' result comments and runs, refreshed with the overview every 5 minutes and every 30 s
+  after a command until the workflow answers.
 
 ## Screenshots for development
 
@@ -45,6 +52,9 @@ Connection states, without touching the Keychain: `DEVER_SNAPSHOT_DISCONNECTED=s
 tools had never been connected, `DEVER_SNAPSHOT_UNAUTHORIZED=linear` as if the service rejected the token,
 `DEVER_SNAPSHOT_FAILING=github,slack=offline` as if calls failed (a 503, or no network), and
 `DEVER_SNAPSHOT_CONNECTING=linear` shows that tool mid-connection on the project page.
+Preview panel states from sample data (PR #4714, no network): `DEVER_SNAPSHOT_PREVIEW=live|deploying|failed|deleted|notdeployed|none`
+(`none`: no pull request linked); add `DEVER_SNAPSHOT_PREVIEW_OPTIONS=1` for the deploy options row, and
+`DEVER_SNAPSHOT_SHEETS=1 DEVER_SNAPSHOT_SCREENS=0 DEVER_SNAPSHOT_STEP=preview DEVER_SNAPSHOT_PICKER="Pull request"` for the editor's step.
 
 ## Onboarding
 

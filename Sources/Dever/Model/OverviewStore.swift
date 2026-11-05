@@ -174,6 +174,8 @@ final class OverviewStore: ObservableObject {
         let ids = Set(projects.map(\.id))
         snapshots = snapshots.filter { ids.contains($0.key) }
         Notifier.shared.process(projects: projects, snapshots: snapshots)
+        // Previews ride the same cycle, after the snapshots so the rows fill in first.
+        await PreviewStore.shared.refreshAll(projects, app: app)
     }
 
     private static func load(_ p: Project, _ app: AppState, _ repos: Result<RepoCache, Error>) async -> ProjectSnapshot {

@@ -72,6 +72,8 @@ struct Project: Codable, Identifiable, Hashable {
     var githubRepo: String?
     /// nil/false: only PRs linked to the project's Linear issues (shared repositories).
     var githubWholeRepo: Bool?
+    /// The pull request whose preview environment this project follows (needs `githubRepo`).
+    var previewPullNumber: Int?
     var createdAt = Date()
 
     /// Whether to show every PR of the repository rather than those of the project's issues.
@@ -147,6 +149,7 @@ final class AppState: ObservableObject {
     private let simulatedFailing = simulated("DEVER_SNAPSHOT_FAILING")
     private var isSimulating: Bool {
         !simulatedMissing.isEmpty || !simulatedFailing.isEmpty || !Self.simulated("DEVER_SNAPSHOT_UNAUTHORIZED").isEmpty
+            || PreviewStore.simulation != nil
     }
 
     private let projectsURL: URL = {
@@ -176,6 +179,12 @@ final class AppState: ObservableObject {
         if simulatedMissing.contains(.slack) { slack = nil }
         if simulatedMissing.contains(.linear) { linear = nil }
         if simulatedMissing.contains(.github) { github = nil }
+        // DEVER_SNAPSHOT_PREVIEW=live|deploying|failed|deleted|none: the first project follows the
+        // sample pull request (none: no preview linked). Nothing is written back.
+        if let mode = PreviewStore.simulation, !projects.isEmpty {
+            projects[0].previewPullNumber = mode == "none" ? nil : PreviewStore.samplePullNumber
+            projects[0].githubRepo = projects[0].githubRepo ?? PreviewStore.sampleRepo
+        }
         expired = Set(Self.simulated("DEVER_SNAPSHOT_UNAUTHORIZED").keys.compactMap(ServiceKind.init(rawValue:)))
     }
 
@@ -330,6 +339,7 @@ final class AppState: ObservableObject {
     }
 
     private func saveProjects() {
+        guard PreviewStore.simulation == nil else { return }
         if let data = try? JSONEncoder().encode(projects) {
             try? data.write(to: projectsURL, options: .atomic)
         }

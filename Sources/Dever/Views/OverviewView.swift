@@ -242,6 +242,7 @@ private struct ProjectRow: View {
     let project: Project
     let status: ProjectStatus
     let snapshot: ProjectSnapshot?
+    @ObservedObject private var previews = PreviewStore.shared
 
     var body: some View {
         HStack(alignment: .center, spacing: Column.spacing) {
@@ -271,7 +272,19 @@ private struct ProjectRow: View {
                     StatusBadge(status: status)
                 }
             }
-            Text(links).font(Theme.small).foregroundStyle(Theme.muted).lineLimit(1).help(links)
+            HStack(spacing: 8) {
+                Text(links).font(Theme.small).foregroundStyle(Theme.muted).lineLimit(1).help(links)
+                if let phase = previews.state(for: project)?.status?.phase, phase == .live || phase.busy {
+                    HStack(spacing: 3) {
+                        PreviewPhaseGlyph(phase: phase, size: 10)
+                        Text(phase == .live ? "Preview" : phase.word).font(Theme.small).foregroundStyle(Theme.muted)
+                    }
+                    .fixedSize()
+                    .help("Preview of pull request #\(project.previewPullNumber ?? 0): \(phase.word.lowercased())")
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel("Preview \(phase.word.lowercased())")
+                }
+            }
         }
     }
 
