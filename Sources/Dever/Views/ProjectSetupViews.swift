@@ -493,13 +493,14 @@ struct AddProjectButton: View {
             } label: {
                 Image(systemName: "chevron.down").font(.system(size: 10, weight: .bold)).foregroundStyle(Theme.sheet)
                     .frame(width: 26, height: 32)
-                    .background(Theme.text, in: UnevenRoundedRectangle(bottomTrailingRadius: Theme.radiusControl,
-                                                                        topTrailingRadius: Theme.radiusControl))
                     .contentShape(Rectangle())
             }
-            .menuStyle(.borderlessButton)
+            .menuStyle(.button)
+            .buttonStyle(.plain)
             .menuIndicator(.hidden)
-            .fixedSize()
+            .frame(width: 26, height: 32)
+            .background(Theme.text, in: UnevenRoundedRectangle(bottomTrailingRadius: Theme.radiusControl,
+                                                                topTrailingRadius: Theme.radiusControl))
             .accessibilityLabel("Add many projects")
         }
     }
