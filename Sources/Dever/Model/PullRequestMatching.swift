@@ -19,13 +19,15 @@ struct ProjectPullRequests {
 
     var branches: Set<String> { Set(matches.map(\.pull.head.ref)) }
 
+    /// A whole-repository project keeps every pull request, matched to an issue where one
+    /// cites it (so its row can still show the PR) and unmatched otherwise.
     init(pulls: [GitHubPull], issues: [IssueReference]?, wholeRepository: Bool) {
-        guard let issues, !wholeRepository else {
+        guard let issues else {
             matches = pulls.map { Match(pull: $0, issue: nil) }
             scoped = false
             return
         }
-        scoped = true
+        scoped = !wholeRepository
 
         var byIdentifier: [String: String] = [:]
         var byBranch: [String: String] = [:]
@@ -43,7 +45,7 @@ struct ProjectPullRequests {
             for token in Self.identifierTokens(in: pull.head.ref + " " + pull.title) {
                 if let id = byIdentifier[token] { return Match(pull: pull, issue: id) }
             }
-            return nil
+            return wholeRepository ? Match(pull: pull, issue: nil) : nil
         }
     }
 

@@ -13,7 +13,9 @@ enum Snapshotter {
     static func run(in dir: URL, projects: [Project]) async {
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         var screens: [(String, SidebarItem)] = [("overview", .overview)]
-        if let first = projects.first { screens.append(("project", .project(first.id))) }
+        // DEVER_SNAPSHOT_PROJECT=<index> picks another project than the first.
+        let index = ProcessInfo.processInfo.environment["DEVER_SNAPSHOT_PROJECT"].flatMap(Int.init) ?? 0
+        if projects.indices.contains(index) { screens.append(("project", .project(projects[index].id))) }
         screens.append(("settings", .settings))
 
         // Let the first refresh land before the first picture; DEVER_SNAPSHOT_WAIT=0 captures

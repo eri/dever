@@ -21,6 +21,9 @@ struct Delivery: Equatable {
     enum Stage: CaseIterable {
         case done, merged, review, building, todo
 
+        /// For a list: what needs a hand first, what is finished last.
+        static let attentionOrder: [Stage] = [.merged, .review, .building, .todo, .done]
+
         var label: String {
             switch self {
             case .done: "Done"
@@ -55,23 +58,38 @@ struct Delivery: Equatable {
         merged && !["completed", "canceled"].contains(stateType) && !isReviewState(stateName)
     }
 
+    /// The stage of one issue, joining its Linear state with its pull requests; nil when
+    /// canceled. The counts and the rows of the project page both come from here, so
+    /// they cannot disagree.
+    static func stage(stateType: String, stateName: String, openPR: Bool, mergedPR: Bool) -> Stage? {
+        switch stateType {
+        case "canceled": nil
+        case "completed": .done
+        default:
+            if isReviewState(stateName) { .review }
+            else if mergedPR { .merged }
+            else if openPR { .review }
+            else if stateType == "started" { .building }
+            else { .todo }
+        }
+    }
+
     /// - Parameters:
     ///   - issues: identifier, Linear state type and state name of each issue.
     ///   - openPR: identifiers with an open pull request.
     ///   - mergedPR: identifiers with a merged pull request.
     init(issues: [(identifier: String, stateType: String, stateName: String)], openPR: Set<String>, mergedPR: Set<String>) {
         for issue in issues {
-            if issue.stateType != "canceled",
-               issue.stateType == "completed" || mergedPR.contains(issue.identifier) { shipped += 1 }
-            switch issue.stateType {
-            case "canceled": continue
-            case "completed": done += 1
-            default:
-                if Self.isReviewState(issue.stateName) { review += 1 }
-                else if mergedPR.contains(issue.identifier) { merged += 1 }
-                else if openPR.contains(issue.identifier) { review += 1 }
-                else if issue.stateType == "started" { building += 1 }
-                else { todo += 1 }
+            let hasMerged = mergedPR.contains(issue.identifier)
+            guard let stage = Self.stage(stateType: issue.stateType, stateName: issue.stateName,
+                                         openPR: openPR.contains(issue.identifier), mergedPR: hasMerged) else { continue }
+            if stage == .done || hasMerged { shipped += 1 }
+            switch stage {
+            case .done: done += 1
+            case .merged: merged += 1
+            case .review: review += 1
+            case .building: building += 1
+            case .todo: todo += 1
             }
         }
     }

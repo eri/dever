@@ -30,8 +30,7 @@ struct ProjectDetailView: View {
     @State private var loading = false
     @State private var loaded = false
     @State private var expanded: Set<String> = []
-    @State private var issueTab: IssueTab = .active
-    @State private var pullTab: PullTab = .merged
+    @State private var workFilter: WorkFilter = .all
 
     private var status: ProjectStatus { project.status(store.snapshots[project.id]) }
 
@@ -51,16 +50,6 @@ struct ProjectDetailView: View {
         Delivery(issues: issues.map { ($0.identifier, $0.state.type, $0.state.name) },
                  openPR: Set(pulls.compactMap(\.issue)),
                  mergedPR: Set(merged.compactMap(\.issue)))
-    }
-
-    /// Issues whose code is merged while the ticket still says work is ongoing (review
-    /// and QA states excluded): the screen's finding and its action.
-    private var toClose: [(issue: LinearIssue, pull: MergedPull)] {
-        issues.compactMap { issue in
-            guard let pull = merged.first(where: { $0.issue == issue.identifier }),
-                  Delivery.isBehind(stateType: issue.state.type, stateName: issue.state.name, merged: true) else { return nil }
-            return (issue, pull)
-        }
     }
 
     var body: some View {
@@ -111,18 +100,14 @@ struct ProjectDetailView: View {
             if slackExpanded { shownMessages = max(shownMessages, 30) }
         }
         .onReceive(NotificationCenter.default.publisher(for: .openFirstIssue)) { _ in
-            if let first = issues(in: currentIssueTab).first {
+            if let first = workList.first?.issue {
                 NotificationCenter.default.post(name: .openIssue, object: IssueRoute(project: project, issue: first))
             }
         }
     }
 
     private var workColumn: some View {
-        VStack(spacing: 16) {
-            if project.linear != nil { deliveryPanel }
-            issuesPanel
-            if project.githubRepo != nil { githubPanel }
-        }
+        workPanel
     }
 
     // MARK: Title row
@@ -205,54 +190,170 @@ struct ProjectDetailView: View {
         .frame(height: 28)
     }
 
-    // MARK: Delivery (the signature block)
+    // MARK: Work (the signature block)
 
     private var linearURL: URL? { project.linear.flatMap { URL(string: $0.url) } }
+    private var repoURL: URL? { project.githubRepo.flatMap { URL(string: "https://github.com/\($0)") } }
 
-    private var deliveryPanel: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            PanelHeader(service: .linear, title: "Delivery", subtitle: "Issues joined with their pull requests")
-            if states[.linear] == .notConnected {
-                if missing.count > 1 {
-                    ConnectPlaceholder(service: .linear, widths: [90, 320])
-                } else {
-                    ConnectPanelBody(service: .linear, project: project, flow: flow)
-                }
-            } else if let state = states[.linear] {
-                failure(.linear, state)
-            } else if !loaded {
-                HStack(alignment: .lastTextBaseline, spacing: 10) { Skeleton(width: 90, height: 34); Skeleton(width: 120) }
-                Skeleton(height: 10, radius: 5)
-            } else if delivery.total == 0 {
-                QuietEmpty(symbol: "tray", text: "No issues in this project yet")
+    /// The list's filter: every issue, or one delivery stage.
+    private enum WorkFilter: Hashable { case all, stage(Delivery.Stage) }
+
+    /// An issue with its stage and the pull requests matched to it: one row of the list.
+    private struct WorkItem: Identifiable {
+        var issue: LinearIssue
+        var stage: Delivery.Stage
+        var merged: [MergedPull]
+        var open: [ProjectPullRequests.Match]
+        var id: String { issue.id }
+    }
+
+    private var workItems: [WorkItem] {
+        let openByIssue = Dictionary(grouping: pulls.filter { $0.issue != nil }, by: { $0.issue! })
+        let mergedByIssue = Dictionary(grouping: merged.filter { $0.issue != nil }, by: { $0.issue! })
+        return issues.compactMap { issue in
+            let open = openByIssue[issue.identifier] ?? []
+            let merged = mergedByIssue[issue.identifier] ?? []
+            guard let stage = Delivery.stage(stateType: issue.state.type, stateName: issue.state.name,
+                                             openPR: !open.isEmpty, mergedPR: !merged.isEmpty) else { return nil }
+            return WorkItem(issue: issue, stage: stage, merged: merged, open: open)
+        }
+    }
+
+    /// The chosen filter, or everything when its stage has emptied.
+    private var currentFilter: WorkFilter {
+        if case .stage(let s) = workFilter, delivery.count(s) == 0 { return .all }
+        return workFilter
+    }
+
+    /// Under "All", what needs a hand comes first (merged but not moved, then in review…)
+    /// and what is done last; within a stage, Linear's own order.
+    private var workList: [WorkItem] {
+        let items = workItems
+        switch currentFilter {
+        case .all: return Delivery.Stage.attentionOrder.flatMap { stage in items.filter { $0.stage == stage } }
+        case .stage(let stage): return items.filter { $0.stage == stage }
+        }
+    }
+
+    private var workTabs: [(label: String, count: Int, tab: WorkFilter)] {
+        [("All", delivery.total, WorkFilter.all)]
+            + Delivery.Stage.allCases.map { ($0.label, delivery.count($0), WorkFilter.stage($0)) }.filter { $0.1 > 0 }
+    }
+
+    /// Pull requests of the repository that no issue of the project cites (whole-repository
+    /// projects, or a project with no Linear): they keep their own list under the issues.
+    private var unlinkedOpen: [ProjectPullRequests.Match] { pulls.filter { $0.issue == nil } }
+    private var unlinkedMerged: [MergedPull] { merged.filter { $0.issue == nil } }
+
+    /// The latest run of each branch, newest first in `runs`.
+    private var runByBranch: [String: GitHubRun] {
+        var out: [String: GitHubRun] = [:]
+        for run in runs { if let b = run.head_branch, out[b] == nil { out[b] = run } }
+        return out
+    }
+
+    private func pipeline(of pull: GitHubPull) -> ProjectSnapshot.PipelineState? {
+        runByBranch[pull.head.ref].map(ProjectSnapshot.PipelineState.init(run:))
+    }
+
+    /// One line for the open pull requests' pipelines: failing wins, then running, then passing.
+    private var pipelineSummary: (state: ProjectSnapshot.PipelineState, text: String)? {
+        let states = pulls.compactMap { pipeline(of: $0.pull) }
+        let failing = states.filter { $0 == .failing }.count
+        if failing > 0 { return (.failing, failing == 1 ? "1 pipeline failing" : "\(failing) pipelines failing") }
+        if states.contains(.running) { return (.running, "Pipeline running") }
+        if states.contains(.passing) { return (.passing, "Pipelines passing") }
+        return nil
+    }
+
+    private var githubReady: Bool { project.githubRepo != nil && states[.github] == nil && loaded }
+
+    private var workPanel: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            PanelHeader(title: project.linear == nil ? "Pull requests" : "Delivery",
+                        subtitle: project.linear == nil ? project.githubRepo : "Issues joined with their pull requests")
+            if project.linear == nil && project.githubRepo == nil {
+                QuietEmpty(symbol: "link", text: "Link a Linear project or a GitHub repository to see the work here")
+            } else if !loaded, states[.linear] == nil, states[.github] == nil {
+                workSkeleton
             } else {
-                // Headline figure and the stage counts on one line, the bar under them.
-                HStack(alignment: .lastTextBaseline, spacing: 10) {
-                    Text(Double(delivery.shipped) / Double(delivery.total), format: .percent.precision(.fractionLength(0)))
-                        .font(.system(size: 34, weight: .semibold)).tracking(-1).foregroundStyle(Soot.ink).monospacedDigit()
-                    Text("\(delivery.shipped) of \(delivery.total) shipped").font(.system(size: 14)).foregroundStyle(Soot.muted)
-                        .monospacedDigit()
-                    Spacer(minLength: 16)
-                    HStack(spacing: 20) {
-                        ForEach(Delivery.Stage.allCases.filter { delivery.count($0) > 0 }, id: \.self) { stage in
-                            HStack(spacing: 6) {
-                                Circle().fill(DeliveryStrip.color(stage)).frame(width: 7, height: 7)
-                                Text("\(delivery.count(stage))").font(.system(size: 14, weight: .semibold))
-                                    .foregroundStyle(Soot.ink).monospacedDigit()
-                                Text(stage.label).font(.system(size: 12)).foregroundStyle(Soot.muted)
-                            }
-                            .accessibilityElement(children: .combine)
-                        }
-                    }
-                }
-                deliveryBar
-                if !toClose.isEmpty { toCloseList }
+                if project.linear != nil { linearPart }
+                if project.githubRepo != nil { githubPart }
             }
         }
         .sootPanel()
     }
 
-    /// Rounded segments with gaps, one per stage, proportional to its issues.
+    /// Headline, bar, the stages as the filter, then the issues.
+    @ViewBuilder
+    private var linearPart: some View {
+        if states[.linear] == .notConnected {
+            if missing.count > 1 {
+                ConnectPlaceholder(service: .linear, widths: [90, 320, 220, 280])
+            } else {
+                ConnectPanelBody(service: .linear, project: project, flow: flow)
+            }
+        } else if let state = states[.linear] {
+            failure(.linear, state)
+        } else if delivery.total == 0 {
+            QuietEmpty(symbol: "tray", text: "No issues in this project yet")
+        } else {
+            HStack(alignment: .lastTextBaseline, spacing: 10) {
+                Text(Double(delivery.shipped) / Double(delivery.total), format: .percent.precision(.fractionLength(0)))
+                    .font(.system(size: 34, weight: .semibold)).tracking(-1).foregroundStyle(Soot.ink).monospacedDigit()
+                Text("\(delivery.shipped) of \(delivery.total) shipped").font(.system(size: 14)).foregroundStyle(Soot.muted)
+                    .monospacedDigit()
+                Spacer(minLength: 16)
+                if let summary = pipelineSummary, let repo = project.githubRepo,
+                   let url = URL(string: "https://github.com/\(repo)/actions") {
+                    HoverLink(destination: url) {
+                        HStack(spacing: 5) {
+                            PipelineGlyph(state: summary.state)
+                            Text(summary.text).font(.system(size: 13, weight: .semibold)).foregroundStyle(Soot.ink)
+                        }
+                    }
+                    .help("Open the repository's workflow runs")
+                    .accessibilityLabel("\(summary.text). Opens the workflow runs on GitHub")
+                }
+            }
+            deliveryBar
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .center, spacing: 12) { stageTabs; Spacer(minLength: 0); updateInLinear }
+                VStack(alignment: .leading, spacing: 10) { stageTabs; updateInLinear }
+            }
+            VStack(alignment: .leading, spacing: 2) {
+                ForEach(capped(workList, key: "work")) { item in workRow(item) }
+                showAll(workList.count, key: "work")
+                if githubReady, pulls.isEmpty, merged.isEmpty {
+                    QuietEmpty(symbol: "arrow.triangle.pull", text: "No pull request cites one of these issues yet")
+                }
+            }
+        }
+    }
+
+    private var stageTabs: some View {
+        CountTabs(tabs: workTabs, selection: Binding(get: { currentFilter }, set: { workFilter = $0 })) { filter in
+            if case .stage(let s) = filter { DeliveryStrip.color(s) } else { nil }
+        }
+    }
+
+    /// The action on the merged-but-not-moved issues, shown while they are in the list.
+    @ViewBuilder
+    private var updateInLinear: some View {
+        let behind = delivery.count(.merged)
+        if behind > 0, let url = linearURL, currentFilter == .all || currentFilter == .stage(.merged) {
+            HoverLink(destination: url) {
+                HStack(spacing: 4) { Text("Update \(behind) in Linear"); Image(systemName: "arrow.up.right") }
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(Soot.lime)
+            }
+            .help("Open the project in Linear to move the merged issues forward")
+            .accessibilityLabel("Update \(behind) merged issues in Linear")
+        }
+    }
+
+    /// Rounded segments with gaps, one per stage, proportional to its issues. The stages
+    /// not selected step back.
     private var deliveryBar: some View {
         GeometryReader { geo in
             let stages = Delivery.Stage.allCases.filter { delivery.count($0) > 0 }
@@ -262,6 +363,7 @@ struct ProjectDetailView: View {
                 ForEach(stages, id: \.self) { stage in
                     Capsule().fill(DeliveryStrip.color(stage))
                         .frame(width: max(10, usable * CGFloat(delivery.count(stage)) / CGFloat(max(delivery.total, 1))))
+                        .opacity(currentFilter == .all || currentFilter == .stage(stage) ? 1 : 0.3)
                 }
             }
         }
@@ -269,101 +371,156 @@ struct ProjectDetailView: View {
         .accessibilityHidden(true)
     }
 
-    private var toCloseList: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(alignment: .center, spacing: 12) {
-                Text("Merged, still in progress in Linear").font(.system(size: 13, weight: .semibold)).foregroundStyle(Soot.ink)
-                Spacer(minLength: 12)
-                if let url = linearURL {
-                    HoverLink(destination: url, hoverTint: Soot.surface) {
-                        HStack(spacing: 4) { Text("Update \(toClose.count) in Linear"); Image(systemName: "arrow.up.right") }
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundStyle(Soot.lime)
+    /// One issue: priority, key, title, then its pull requests, due date and assignee. The row
+    /// opens the issue; each pull request chip opens the PR on GitHub.
+    private func workRow(_ item: WorkItem) -> some View {
+        let issue = item.issue
+        let chips = HStack(spacing: 6) {
+            ForEach(item.open.prefix(2)) { m in
+                PullChip(number: m.pull.number, kind: m.pull.draft == true ? .draft : .open,
+                         pipeline: pipeline(of: m.pull), title: m.pull.title, url: URL(string: m.pull.html_url)!)
+            }
+            ForEach(item.merged.prefix(max(0, 2 - min(item.open.count, 2)))) { m in
+                PullChip(number: m.number, kind: .merged, title: m.title, url: URL(string: m.url)!)
+            }
+            if item.open.count + item.merged.count > 2 {
+                Text("+\(item.open.count + item.merged.count - 2)").font(.system(size: 12, weight: .medium)).foregroundStyle(Soot.muted)
+                    .monospacedDigit()
+                    .accessibilityLabel("\(item.open.count + item.merged.count - 2) more pull requests")
+            }
+            if githubReady, item.stage == .building {
+                Text("No PR yet").font(.system(size: 12)).foregroundStyle(Soot.muted)
+            }
+        }
+        let meta = HStack(spacing: 12) {
+            DueDateText(dueDate: issue.dueDate)
+            if let person = issue.assignee {
+                LinearAvatar(name: person.name, avatarURL: person.avatarUrl).help(person.name)
+                    .accessibilityLabel("Assigned to \(person.name)")
+            } else {
+                Image(systemName: "person.crop.circle.badge.questionmark").foregroundStyle(Soot.muted)
+                    .help("Unassigned").accessibilityLabel("Unassigned")
+            }
+        }
+        let summary = [item.open.isEmpty ? nil : "\(item.open.count) open pull request\(item.open.count == 1 ? "" : "s")",
+                       item.merged.isEmpty ? nil : "\(item.merged.count) merged"].compactMap { $0 }.joined(separator: ", ")
+        return WorkTile(value: IssueRoute(project: project, issue: issue), trailing: { chips; meta }) {
+            PriorityGlyph(priority: issue.priority, dimmed: issue.priority == nil || issue.priority == 0)
+                .help(LinearPriority.label(issue.priority))
+            IDPill(text: issue.identifier)
+            Text(MarkdownTheme.inline(issue.title, size: 14)).font(.system(size: 14)).foregroundStyle(Soot.ink).lineLimit(1)
+                .help(issue.title)
+                .layoutPriority(1)
+            Spacer(minLength: 12)
+        }
+        .accessibilityLabel("\(issue.identifier), \(issue.title). \(item.stage.label)\(summary.isEmpty ? "" : ", " + summary)")
+        .accessibilityHint("Opens the issue")
+    }
+
+    /// Pull requests, with their states inside the panel: an invitation to connect, a failure,
+    /// or the ones no issue cites.
+    @ViewBuilder
+    private var githubPart: some View {
+        if states[.github] == .notConnected {
+            if missing.count > 1 {
+                ConnectPlaceholder(service: .github, widths: [300, 240, 280])
+            } else {
+                ConnectPanelBody(service: .github, project: project, flow: flow)
+            }
+        } else if let state = states[.github] {
+            failure(.github, state, compact: project.linear != nil && states[.linear] != nil)
+        } else if !unlinkedOpen.isEmpty || !unlinkedMerged.isEmpty {
+            VStack(alignment: .leading, spacing: 2) {
+                if project.linear != nil {
+                    Text(states[.linear] == nil ? "Pull requests without an issue" : "Pull requests")
+                        .font(.system(size: 13, weight: .semibold)).foregroundStyle(Soot.ink)
+                        .padding(.horizontal, 12).padding(.top, 8).padding(.bottom, 6)
+                        .accessibilityAddTraits(.isHeader)
+                }
+                let rows: [UnlinkedPull] = unlinkedOpen.map { .open($0) } + unlinkedMerged.map { .merged($0) }
+                ForEach(capped(rows, key: "unlinked")) { row in
+                    switch row {
+                    case .open(let m):
+                        pullRow(kind: m.pull.draft == true ? .draft : .open, pipeline: pipeline(of: m.pull), title: m.pull.title,
+                                number: m.pull.number, url: m.pull.html_url, trailing: m.pull.user.login)
+                    case .merged(let m):
+                        pullRow(kind: .merged, pipeline: nil, title: m.title ?? "Pull request #\(m.number)", number: m.number,
+                                url: m.url, trailing: m.mergedAt.map { $0.formatted(.relative(presentation: .named)) })
                     }
-                    .help("Open the project in Linear to move these merged issues forward")
-                    .accessibilityLabel("Update \(toClose.count) issues in Linear")
                 }
+                showAll(rows.count, key: "unlinked")
             }
-            .padding(.leading, 12)
-            .padding(.trailing, 4)
-            ForEach(capped(toClose, key: "close"), id: \.issue.id) { item in
-                TileRow(url: URL(string: item.issue.url)) {
-                    IDPill(text: item.issue.identifier)
-                    Text(MarkdownTheme.inline(item.issue.title, size: 14)).font(.system(size: 14)).foregroundStyle(Soot.ink).lineLimit(1)
-                    Spacer(minLength: 12)
-                    Text(item.pull.mergedAt.map { "merged \($0.formatted(.relative(presentation: .named)))" } ?? "merged")
-                        .font(.system(size: 12)).foregroundStyle(Soot.muted)
-                }
-            }
-            showAll(toClose.count, key: "close")
-        }
-        .padding(8)
-        .background(Soot.ground.opacity(0.5), in: RoundedRectangle(cornerRadius: 10))
-    }
-
-    // MARK: Issues
-
-    private var activeIssues: [LinearIssue] { issues.filter { $0.state.type == "started" && !Delivery.isReviewState($0.state.name) } }
-    private var reviewIssues: [LinearIssue] { issues.filter { $0.state.type == "started" && Delivery.isReviewState($0.state.name) } }
-    private var todoIssues: [LinearIssue] { issues.filter { ["unstarted", "backlog", "triage"].contains($0.state.type) } }
-    private var doneIssues: [LinearIssue] { issues.filter { $0.state.type == "completed" } }
-
-    private enum IssueTab: Hashable { case active, review, todo, done }
-
-    private var issueTabs: [(label: String, count: Int, tab: IssueTab)] {
-        [("In progress", activeIssues.count, IssueTab.active), ("In review", reviewIssues.count, .review),
-         ("To do", todoIssues.count, .todo), ("Done", doneIssues.count, .done)].filter { $0.1 > 0 }
-    }
-
-    /// The chosen tab, or the first one that has issues.
-    private var currentIssueTab: IssueTab { issueTabs.contains { $0.tab == issueTab } ? issueTab : (issueTabs.first?.tab ?? .active) }
-
-    private func issues(in tab: IssueTab) -> [LinearIssue] {
-        switch tab {
-        case .active: activeIssues
-        case .review: reviewIssues
-        case .todo: todoIssues
-        case .done: doneIssues
+        } else if project.linear == nil {
+            QuietEmpty(symbol: "arrow.triangle.pull", text: "No pull requests")
         }
     }
 
-    private var issuesPanel: some View {
+    private enum UnlinkedPull: Identifiable {
+        case open(ProjectPullRequests.Match), merged(MergedPull)
+        var id: String {
+            switch self {
+            case .open(let m): "open-\(m.pull.number)"
+            case .merged(let m): "merged-\(m.number)"
+            }
+        }
+    }
+
+    /// Two lines for a pull request on its own: what changed, then number and kind.
+    private func pullRow(kind: PullChip.Kind, pipeline: ProjectSnapshot.PipelineState?, title: String, number: Int,
+                         url: String, trailing: String?) -> some View {
+        let parts = PullTitle.split(title)
+        let (symbol, tint, word): (String, Color, String) = switch kind {
+        case .merged: ("arrow.triangle.merge", Theme.chart1, "merged")
+        case .open: ("arrow.triangle.pull", Theme.chart2, "open")
+        case .draft: ("pencil.line", Soot.muted, "draft")
+        }
+        return TileRow(url: URL(string: url)) {
+            Image(systemName: symbol).font(.system(size: 14, weight: .semibold)).foregroundStyle(tint).frame(width: 18)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(parts.title).font(.system(size: 14)).foregroundStyle(Soot.ink).lineLimit(1).help(title)
+                HStack(spacing: 6) {
+                    Text(verbatim: "#\(number)")
+                    Text("·"); Text(word)
+                    if let kind = parts.kind { Text("·"); Text(kind) }
+                }
+                .font(.system(size: 12)).foregroundStyle(Soot.muted)
+            }
+            Spacer(minLength: 12)
+            if let pipeline { PipelineGlyph(state: pipeline) }
+            if let trailing {
+                Text(trailing).font(.system(size: 12)).foregroundStyle(Soot.muted).frame(minWidth: 70, alignment: .trailing)
+            }
+        }
+        .frame(minHeight: 56)
+        .accessibilityElement(children: .combine)
+        .accessibilityHint("Opens on GitHub")
+    }
+
+    /// Rows of the same shape as the list, while it loads.
+    private var workSkeleton: some View {
         VStack(alignment: .leading, spacing: 16) {
-            PanelHeader(service: .linear, title: "Issues", subtitle: project.linear?.name, link: linearURL)
-            if project.linear == nil {
-                QuietEmpty(symbol: "link", text: "Link a Linear project to see its issues")
-            } else if states[.linear] == .notConnected {
-                ConnectPlaceholder(service: .linear, widths: [280, 220, 320, 250])
-            } else if let state = states[.linear] {
-                // The Delivery panel above carries the action; this one just says why it is empty.
-                failure(.linear, state, compact: true)
-            } else if !loaded {
-                HStack(spacing: 6) { ForEach(0..<3, id: \.self) { _ in Skeleton(width: 96, height: 30, radius: 15) } }
+            if project.linear != nil {
+                HStack(alignment: .lastTextBaseline, spacing: 10) { Skeleton(width: 90, height: 34); Skeleton(width: 120) }
+                Skeleton(height: 10, radius: 5)
+                HStack(spacing: 6) { ForEach(0..<4, id: \.self) { _ in Skeleton(width: 96, height: 30, radius: 15) } }
+            }
+            VStack(spacing: 2) {
                 ForEach(0..<5, id: \.self) { i in
                     HStack(spacing: 12) {
+                        Skeleton(width: 12, height: 12, radius: 2)
                         Skeleton(width: 64, height: 20, radius: 5)
                         Skeleton(width: [280, 220, 320, 250, 200][i], height: 12)
                         Spacer()
+                        Skeleton(width: 66, height: 26, radius: 13)
                         Skeleton(width: 22, height: 22, radius: 11)
                     }
                     .padding(.horizontal, 12).frame(height: 46)
                 }
-            } else if issues.isEmpty {
-                QuietEmpty(symbol: "tray", text: "No issues in this project yet")
-            } else {
-                CountTabs(tabs: issueTabs, selection: Binding(get: { currentIssueTab }, set: { issueTab = $0 }))
-                let list = issues(in: currentIssueTab)
-                VStack(alignment: .leading, spacing: 2) {
-                    ForEach(capped(list, key: "issues")) { issue in
-                        TileLink(value: IssueRoute(project: project, issue: issue)) { IssueRow(issue: issue) }
-                            .accessibilityElement(children: .combine)
-                            .accessibilityHint("Opens the issue")
-                    }
-                    showAll(list.count, key: "issues")
-                }
             }
         }
-        .sootPanel()
+        .accessibilityElement()
+        .accessibilityLabel("Loading the project's work")
     }
 
     // MARK: Slack
@@ -462,106 +619,6 @@ struct ProjectDetailView: View {
             }
         }
         .sootPanel()
-    }
-
-    // MARK: GitHub
-
-    private enum PullTab: Hashable { case merged, open, pipeline }
-
-    private var pullTabs: [(label: String, count: Int, tab: PullTab)] {
-        [("Merged", merged.count, PullTab.merged), ("Open", pulls.count, .open), ("Pipeline", runs.count, .pipeline)]
-    }
-
-    private var githubPanel: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            PanelHeader(service: .github, title: "Pull requests",
-                        subtitle: loaded ? (pullsScoped ? "Linked to this project's issues" : "Whole repository") : nil,
-                        link: project.githubRepo.flatMap { URL(string: "https://github.com/\($0)") })
-            if states[.github] == .notConnected {
-                if missing.count > 1 {
-                    ConnectPlaceholder(service: .github, widths: [300, 240, 280])
-                } else {
-                    ConnectPanelBody(service: .github, project: project, flow: flow)
-                }
-            } else if let state = states[.github] {
-                failure(.github, state)
-            } else if !loaded {
-                HStack(spacing: 6) { ForEach(0..<3, id: \.self) { _ in Skeleton(width: 90, height: 30, radius: 15) } }
-                ForEach(0..<4, id: \.self) { i in
-                    HStack(spacing: 12) {
-                        Skeleton(width: 18, height: 18, radius: 9)
-                        VStack(alignment: .leading, spacing: 6) {
-                            Skeleton(width: [300, 240, 280, 220][i], height: 12)
-                            Skeleton(width: 140, height: 9)
-                        }
-                        Spacer()
-                    }
-                    .padding(.horizontal, 12).frame(height: 56)
-                }
-            } else {
-                CountTabs(tabs: pullTabs, selection: $pullTab)
-                VStack(alignment: .leading, spacing: 2) {
-                    switch pullTab {
-                    case .merged:
-                        if merged.isEmpty { QuietEmpty(symbol: "arrow.triangle.merge", text: "Nothing merged yet") }
-                        ForEach(capped(merged, key: "merged")) { item in
-                            pullRow(symbol: "arrow.triangle.merge", tint: Soot.lime,
-                                    title: item.title ?? "Pull request #\(item.number)", number: item.number,
-                                    issue: item.issue, url: item.url,
-                                    trailing: item.mergedAt.map { $0.formatted(.relative(presentation: .named)) })
-                        }
-                        showAll(merged.count, key: "merged")
-                    case .open:
-                        if pulls.isEmpty {
-                            QuietEmpty(symbol: "arrow.triangle.pull",
-                                       text: pullsScoped ? "No open pull request on this project's issues" : "No open pull requests")
-                        }
-                        ForEach(capped(pulls, key: "open")) { match in
-                            pullRow(symbol: "arrow.triangle.pull", tint: Theme.chart2, title: match.pull.title,
-                                    number: match.pull.number, issue: match.issue, url: match.pull.html_url,
-                                    trailing: match.pull.draft == true ? "Draft" : match.pull.user.login)
-                        }
-                        showAll(pulls.count, key: "open")
-                    case .pipeline:
-                        if runs.isEmpty { QuietEmpty(symbol: "bolt.horizontal", text: "No runs to show") }
-                        ForEach(runs.prefix(8)) { run in
-                            TileRow(url: URL(string: run.html_url)) {
-                                PipelineBadge(state: .init(run: run)).font(.system(size: 13)).frame(width: 90, alignment: .leading)
-                                Text(run.name ?? "Workflow run").font(.system(size: 14)).foregroundStyle(Soot.ink).lineLimit(1)
-                                Spacer(minLength: 12)
-                                Text(run.head_branch ?? "").font(.system(size: 12)).foregroundStyle(Soot.muted).lineLimit(1)
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        .sootPanel()
-    }
-
-    /// Two lines: what changed, then number, kind and linked issue.
-    private func pullRow(symbol: String, tint: Color, title: String, number: Int, issue: String?,
-                         url: String, trailing: String?) -> some View {
-        let parts = PullTitle.split(title)
-        return TileRow(url: URL(string: url)) {
-            Image(systemName: symbol).font(.system(size: 14, weight: .semibold)).foregroundStyle(tint).frame(width: 18)
-                .accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 3) {
-                Text(parts.title).font(.system(size: 14)).foregroundStyle(Soot.ink).lineLimit(1).help(title)
-                HStack(spacing: 6) {
-                    Text(verbatim: "#\(number)")
-                    if let kind = parts.kind { Text("·"); Text(kind) }
-                }
-                .font(.system(size: 12)).foregroundStyle(Soot.muted)
-            }
-            Spacer(minLength: 12)
-            if let issue { IDPill(text: issue) }
-            if let trailing {
-                Text(trailing).font(.system(size: 12)).foregroundStyle(Soot.muted).frame(minWidth: 70, alignment: .trailing)
-            }
-        }
-        .frame(minHeight: 56)
-        .accessibilityElement(children: .combine)
     }
 
     // MARK: Capped lists
