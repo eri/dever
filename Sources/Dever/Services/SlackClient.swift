@@ -208,7 +208,7 @@ enum SlackAuth {
     static let userScopes = [
         "channels:read", "groups:read", "channels:history", "groups:history",
         "channels:write", "groups:write", "users:read", "team:read", "files:read",
-        "chat:write", "reactions:read", "reactions:write",
+        "chat:write", "reactions:read", "reactions:write", "emoji:read",
     ].joined(separator: ",")
 
     static func connect() async throws -> SlackCredentials {

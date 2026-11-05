@@ -33,7 +33,7 @@ Manual alternative:
    - *Redirect URLs*: the GitHub Pages URL above.
    - *User Token Scopes*: `channels:read`, `groups:read`, `channels:history`, `groups:history`,
      `channels:write`, `groups:write`, `users:read`, `team:read`, `files:read`, `chat:write`,
-     `reactions:read`, `reactions:write`.
+     `reactions:read`, `reactions:write`, `emoji:read`.
    - Do **not** enable *Token Rotation* (tokens would then expire every 12 h).
 3. **Basic Information** → *Client ID* and *Client Secret* → `slack.clientID` / `slack.clientSecret`.
 
