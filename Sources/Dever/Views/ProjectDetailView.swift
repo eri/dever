@@ -267,10 +267,7 @@ struct ProjectDetailView: View {
     }
 
     /// "3 open · 15 merged": the repository's part of the project, in the headline.
-    private var githubLine: String {
-        let open = pulls.count, done = merged.count
-        return "\(open) open · \(done) merged"
-    }
+    private var githubLine: String { "\(pulls.count) open · \(merged.count) merged" }
 
     private var githubReady: Bool { project.githubRepo != nil && states[.github] == nil && loaded }
 
@@ -331,7 +328,6 @@ struct ProjectDetailView: View {
                 VStack(alignment: .leading, spacing: 10) { stageTabs; updateInLinear }
             }
             VStack(alignment: .leading, spacing: 2) {
-                ledgerHeadings
                 ForEach(capped(workList, key: "work")) { item in workRow(item) }
                 showAll(workList.count, key: "work")
                 if githubReady, pulls.isEmpty, merged.isEmpty {
@@ -381,154 +377,50 @@ struct ProjectDetailView: View {
         .accessibilityHidden(true)
     }
 
-    /// Width of the GitHub column of the ledger.
-    private static let pullColumn: CGFloat = 310
-
-    /// The ledger's column headings: the tool each column comes from, with its logo.
-    private var ledgerHeadings: some View {
-        HStack(spacing: 12) {
-            columnHeading(.linear, "Issues").frame(maxWidth: .infinity, alignment: .leading)
-            if project.githubRepo != nil {
-                columnHeading(.github, "Pull requests").frame(width: Self.pullColumn, alignment: .leading)
-            }
-        }
-        .padding(.horizontal, 12)
-        .padding(.top, 4)
-        .overlay(alignment: .bottom) { Rectangle().fill(Soot.line).frame(height: 1).padding(.horizontal, 12).offset(y: 6) }
-        .padding(.bottom, 8)
-    }
-
-    private func columnHeading(_ service: ServiceKind, _ title: String) -> some View {
-        HStack(spacing: 6) {
-            BrandLogo(service: service, size: 14).foregroundStyle(Soot.ink).accessibilityHidden(true)
-            Text(title).font(.system(size: 13, weight: .semibold)).foregroundStyle(Soot.ink)
-        }
-        .frame(height: 24)
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(title), from \(service.label)")
-        .accessibilityAddTraits(.isHeader)
-    }
-
-    /// One line of the ledger: the issue on the left (opens the issue page), its pull requests
-    /// on the right (each opens on GitHub). Two targets, each its own tile.
+    /// One issue: priority, key, title, then its pull requests, due date and assignee. The row
+    /// opens the issue; each pull request chip opens the PR on GitHub.
     private func workRow(_ item: WorkItem) -> some View {
         let issue = item.issue
-        return HStack(alignment: .top, spacing: 12) {
-            TileLink(value: IssueRoute(project: project, issue: issue)) {
-                PriorityGlyph(priority: issue.priority, dimmed: issue.priority == nil || issue.priority == 0)
-                    .help(LinearPriority.label(issue.priority))
-                    .fixedSize()
-                IDPill(text: issue.identifier).fixedSize()
-                Text(MarkdownTheme.inline(issue.title, size: 14)).font(.system(size: 14)).foregroundStyle(Soot.ink).lineLimit(1)
-                    .help(issue.title)
-                Spacer(minLength: 12)
-                DueDateText(dueDate: issue.dueDate).fixedSize()
-                if let person = issue.assignee {
-                    LinearAvatar(name: person.name, avatarURL: person.avatarUrl).help(person.name)
-                        .accessibilityLabel("Assigned to \(person.name)")
-                } else {
-                    Image(systemName: "person.crop.circle.badge.questionmark").foregroundStyle(Soot.muted)
-                        .help("Unassigned").accessibilityLabel("Unassigned")
-                }
+        let chips = HStack(spacing: 6) {
+            ForEach(item.open.prefix(2)) { m in
+                PullChip(number: m.pull.number, kind: m.pull.draft == true ? .draft : .open,
+                         pipeline: pipeline(of: m.pull), title: m.pull.title, url: URL(string: m.pull.html_url)!)
             }
-            .frame(maxWidth: .infinity)
-            .accessibilityElement(children: .combine)
-            .accessibilityLabel("\(issue.identifier), \(issue.title). \(item.stage.label)")
-            .accessibilityHint("Opens the issue")
-            if project.githubRepo != nil {
-                pullCell(item).frame(width: Self.pullColumn)
+            ForEach(item.merged.prefix(max(0, 2 - min(item.open.count, 2)))) { m in
+                PullChip(number: m.number, kind: .merged, title: m.title, url: URL(string: m.url)!)
+            }
+            if item.open.count + item.merged.count > 2 {
+                Text("+\(item.open.count + item.merged.count - 2)").font(.system(size: 12, weight: .medium)).foregroundStyle(Soot.muted)
+                    .monospacedDigit()
+                    .accessibilityLabel("\(item.open.count + item.merged.count - 2) more pull requests")
+            }
+            if githubReady, item.stage == .building {
+                Text("No PR yet").font(.system(size: 12)).foregroundStyle(Soot.muted)
             }
         }
-    }
-
-    /// The GitHub side of a row: each pull request as its own tile, or one quiet word.
-    @ViewBuilder
-    private func pullCell(_ item: WorkItem) -> some View {
-        let entries: [PullEntry] = item.open.map { .open($0) } + item.merged.map { .merged($0) }
-        if entries.isEmpty {
-            let word = !githubReady ? "" : item.stage == .building || item.stage == .review ? "No PR yet" : "—"
-            Text(word).font(.system(size: 13)).foregroundStyle(Soot.muted)
-                .frame(maxWidth: .infinity, minHeight: 46, alignment: .leading)
-                .padding(.horizontal, 12)
-                .accessibilityLabel("No pull request")
-                .accessibilityHidden(!githubReady)
-        } else {
-            VStack(spacing: 2) {
-                ForEach(entries.prefix(2)) { entry in
-                    switch entry {
-                    case .open(let m):
-                        pullTile(kind: m.pull.draft == true ? .draft : .open, pipeline: pipeline(of: m.pull), title: m.pull.title,
-                                 number: m.pull.number, url: m.pull.html_url, trailing: m.pull.user.login)
-                    case .merged(let m):
-                        pullTile(kind: .merged, pipeline: nil, title: m.title ?? "Pull request #\(m.number)", number: m.number,
-                                 url: m.url, trailing: m.mergedAt.map { $0.formatted(.relative(presentation: .named)) })
-                    }
-                }
-                if entries.count > 2 {
-                    Text("+\(entries.count - 2) more").font(.system(size: 12, weight: .medium)).foregroundStyle(Soot.muted)
-                        .monospacedDigit()
-                        .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 12).padding(.bottom, 4)
-                        .accessibilityLabel("\(entries.count - 2) more pull requests")
-                }
+        let meta = HStack(spacing: 12) {
+            DueDateText(dueDate: issue.dueDate)
+            if let person = issue.assignee {
+                LinearAvatar(name: person.name, avatarURL: person.avatarUrl).help(person.name)
+                    .accessibilityLabel("Assigned to \(person.name)")
+            } else {
+                Image(systemName: "person.crop.circle.badge.questionmark").foregroundStyle(Soot.muted)
+                    .help("Unassigned").accessibilityLabel("Unassigned")
             }
         }
-    }
-
-    private enum PullEntry: Identifiable {
-        case open(ProjectPullRequests.Match), merged(MergedPull)
-        var id: String {
-            switch self {
-            case .open(let m): "open-\(m.pull.number)"
-            case .merged(let m): "merged-\(m.number)"
-            }
+        let summary = [item.open.isEmpty ? nil : "\(item.open.count) open pull request\(item.open.count == 1 ? "" : "s")",
+                       item.merged.isEmpty ? nil : "\(item.merged.count) merged"].compactMap { $0 }.joined(separator: ", ")
+        return WorkTile(value: IssueRoute(project: project, issue: issue), trailing: { chips; meta }) {
+            PriorityGlyph(priority: issue.priority, dimmed: issue.priority == nil || issue.priority == 0)
+                .help(LinearPriority.label(issue.priority))
+            IDPill(text: issue.identifier)
+            Text(MarkdownTheme.inline(issue.title, size: 14)).font(.system(size: 14)).foregroundStyle(Soot.ink).lineLimit(1)
+                .help(issue.title)
+                .layoutPriority(1)
+            Spacer(minLength: 12)
         }
-    }
-
-    private enum PullKind { case merged, open, draft }
-
-    private func pullGlyph(_ kind: PullKind) -> (symbol: String, tint: Color, word: String) {
-        switch kind {
-        case .merged: ("arrow.triangle.merge", Theme.chart1, "merged")
-        case .open: ("arrow.triangle.pull", Theme.chart2, "open")
-        case .draft: ("pencil.line", Soot.muted, "draft")
-        }
-    }
-
-    /// A pull request in the ledger: state glyph, number and what changed on one line, then
-    /// the pipeline run and when, in the project's own order (number first, so rows scan).
-    private func pullTile(kind: PullKind, pipeline: ProjectSnapshot.PipelineState?, title: String, number: Int,
-                          url: String, trailing: String?) -> some View {
-        let parts = PullTitle.split(title)
-        let glyph = pullGlyph(kind)
-        return TileRow(url: URL(string: url)) {
-            Image(systemName: glyph.symbol).font(.system(size: 13, weight: .semibold)).foregroundStyle(glyph.tint).frame(width: 16)
-                .accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 6) {
-                    Text(verbatim: "#\(number)").font(.system(size: 12, weight: .medium, design: .monospaced)).foregroundStyle(Soot.muted)
-                    Text(parts.title).font(.system(size: 13)).foregroundStyle(Soot.ink).lineLimit(1).help(title)
-                }
-                HStack(spacing: 5) {
-                    if let pipeline { PipelineGlyph(state: pipeline); Text(pipelineWord(pipeline)) }
-                    Text(glyph.word)
-                    if let trailing { Text("·"); Text(trailing) }
-                }
-                .font(.system(size: 12)).foregroundStyle(Soot.muted).lineLimit(1)
-            }
-            Spacer(minLength: 0)
-        }
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("Pull request #\(number), \(parts.title), \(glyph.word)\(pipeline.map { ", pipeline \(pipelineWord($0))" } ?? "")\(trailing.map { ", \($0)" } ?? "")")
-        .accessibilityHint("Opens on GitHub")
-    }
-
-    private func pipelineWord(_ state: ProjectSnapshot.PipelineState) -> String {
-        switch state {
-        case .passing: "passing"
-        case .failing: "failing"
-        case .running: "running"
-        case .unknown: "no runs"
-        }
+        .accessibilityLabel("\(issue.identifier), \(issue.title). \(item.stage.label)\(summary.isEmpty ? "" : ", " + summary)")
+        .accessibilityHint("Opens the issue")
     }
 
     /// Pull requests, with their states inside the panel: an invitation to connect, a failure,
@@ -555,11 +447,11 @@ struct ProjectDetailView: View {
                 ForEach(capped(rows, key: "unlinked")) { row in
                     switch row {
                     case .open(let m):
-                        pullTile(kind: m.pull.draft == true ? .draft : .open, pipeline: pipeline(of: m.pull), title: m.pull.title,
-                                 number: m.pull.number, url: m.pull.html_url, trailing: m.pull.user.login)
+                        pullRow(kind: m.pull.draft == true ? .draft : .open, pipeline: pipeline(of: m.pull), title: m.pull.title,
+                                number: m.pull.number, url: m.pull.html_url, trailing: m.pull.user.login)
                     case .merged(let m):
-                        pullTile(kind: .merged, pipeline: nil, title: m.title ?? "Pull request #\(m.number)", number: m.number,
-                                 url: m.url, trailing: m.mergedAt.map { $0.formatted(.relative(presentation: .named)) })
+                        pullRow(kind: .merged, pipeline: nil, title: m.title ?? "Pull request #\(m.number)", number: m.number,
+                                url: m.url, trailing: m.mergedAt.map { $0.formatted(.relative(presentation: .named)) })
                     }
                 }
                 showAll(rows.count, key: "unlinked")
@@ -579,6 +471,38 @@ struct ProjectDetailView: View {
         }
     }
 
+    /// Two lines for a pull request on its own: what changed, then number and kind.
+    private func pullRow(kind: PullChip.Kind, pipeline: ProjectSnapshot.PipelineState?, title: String, number: Int,
+                         url: String, trailing: String?) -> some View {
+        let parts = PullTitle.split(title)
+        let (symbol, tint, word): (String, Color, String) = switch kind {
+        case .merged: ("arrow.triangle.merge", Theme.chart1, "merged")
+        case .open: ("arrow.triangle.pull", Theme.chart2, "open")
+        case .draft: ("pencil.line", Soot.muted, "draft")
+        }
+        return TileRow(url: URL(string: url)) {
+            Image(systemName: symbol).font(.system(size: 14, weight: .semibold)).foregroundStyle(tint).frame(width: 18)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(parts.title).font(.system(size: 14)).foregroundStyle(Soot.ink).lineLimit(1).help(title)
+                HStack(spacing: 6) {
+                    Text(verbatim: "#\(number)")
+                    Text("·"); Text(word)
+                    if let kind = parts.kind { Text("·"); Text(kind) }
+                }
+                .font(.system(size: 12)).foregroundStyle(Soot.muted)
+            }
+            Spacer(minLength: 12)
+            if let pipeline { PipelineGlyph(state: pipeline) }
+            if let trailing {
+                Text(trailing).font(.system(size: 12)).foregroundStyle(Soot.muted).frame(minWidth: 70, alignment: .trailing)
+            }
+        }
+        .frame(minHeight: 56)
+        .accessibilityElement(children: .combine)
+        .accessibilityHint("Opens on GitHub")
+    }
+
     /// Rows of the same shape as the list, while it loads.
     private var workSkeleton: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -590,27 +514,14 @@ struct ProjectDetailView: View {
             VStack(spacing: 2) {
                 ForEach(0..<5, id: \.self) { i in
                     HStack(spacing: 12) {
-                        HStack(spacing: 12) {
-                            Skeleton(width: 12, height: 12, radius: 2)
-                            Skeleton(width: 64, height: 20, radius: 5)
-                            Skeleton(width: [280, 220, 320, 250, 200][i], height: 12)
-                            Spacer()
-                            Skeleton(width: 22, height: 22, radius: 11)
-                        }
-                        .padding(.horizontal, 12).frame(maxWidth: .infinity)
-                        if project.githubRepo != nil {
-                            HStack(spacing: 12) {
-                                Skeleton(width: 14, height: 14, radius: 7)
-                                VStack(alignment: .leading, spacing: 6) {
-                                    Skeleton(width: [200, 160, 220, 180, 140][i], height: 12)
-                                    Skeleton(width: 110, height: 9)
-                                }
-                                Spacer()
-                            }
-                            .padding(.horizontal, 12).frame(width: Self.pullColumn)
-                        }
+                        Skeleton(width: 12, height: 12, radius: 2)
+                        Skeleton(width: 64, height: 20, radius: 5)
+                        Skeleton(width: [280, 220, 320, 250, 200][i], height: 12)
+                        Spacer()
+                        Skeleton(width: 66, height: 26, radius: 13)
+                        Skeleton(width: 22, height: 22, radius: 11)
                     }
-                    .frame(height: 50)
+                    .padding(.horizontal, 12).frame(height: 46)
                 }
             }
         }

@@ -179,6 +179,89 @@ enum PullTitle {
     }
 }
 
+/// A pull request on an issue's row: its state as a glyph (merged, open, draft), its number,
+/// and the latest pipeline run of its branch when there is one. Opens the PR on GitHub.
+struct PullChip: View {
+    enum Kind { case merged, open, draft }
+    let number: Int
+    let kind: Kind
+    var pipeline: ProjectSnapshot.PipelineState? = nil
+    var title: String? = nil
+    let url: URL
+    @State private var hovering = false
+
+    private var glyph: (symbol: String, tint: Color, word: String) {
+        switch kind {
+        case .merged: ("arrow.triangle.merge", Theme.chart1, "merged")
+        case .open: ("arrow.triangle.pull", Theme.chart2, "open")
+        case .draft: ("pencil.line", Soot.muted, "draft")
+        }
+    }
+
+    private var run: (symbol: String, tint: Color, word: String)? {
+        switch pipeline {
+        case .passing: ("checkmark.circle.fill", Theme.positive, "pipeline passing")
+        case .failing: ("xmark.circle.fill", Theme.negative, "pipeline failing")
+        case .running: ("clock.fill", Theme.chart2, "pipeline running")
+        default: nil
+        }
+    }
+
+    var body: some View {
+        Link(destination: url) {
+            HStack(spacing: 5) {
+                Image(systemName: glyph.symbol).font(.system(size: 11, weight: .bold)).foregroundStyle(glyph.tint)
+                Text(verbatim: "#\(number)").font(.system(size: 12, weight: .medium, design: .monospaced)).foregroundStyle(Soot.ink)
+                if let run {
+                    Image(systemName: run.symbol).font(.system(size: 11, weight: .semibold)).foregroundStyle(run.tint)
+                }
+            }
+            .padding(.horizontal, 8)
+            .frame(height: 26)
+            .background(hovering ? Soot.ground : Soot.surface, in: Capsule())
+            .overlay(Capsule().strokeBorder(Soot.edge))
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .handCursor()
+        .modifier(FocusOutline(radius: 13))
+        .onHover { hovering = $0 }
+        .help([title.map { "#\(number) \($0)" } ?? "Pull request #\(number)", glyph.word, run?.word].compactMap { $0 }.joined(separator: " · ") + " · Opens on GitHub")
+        .accessibilityLabel(["Pull request #\(number)", glyph.word, run?.word].compactMap { $0 }.joined(separator: ", "))
+        .accessibilityHint("Opens on GitHub")
+    }
+}
+
+/// A tile that pushes a destination and carries its own links at the trailing end (the pull
+/// request chips). The navigation link spans the whole row, with room reserved for the
+/// trailing content; the real trailing content sits on top of it so its links take the
+/// click, while the rest of it lets the click fall through to the row.
+struct WorkTile<Value: Hashable, Content: View, Trailing: View>: View {
+    let value: Value
+    @ViewBuilder var trailing: () -> Trailing
+    @ViewBuilder var content: () -> Content
+    @State private var hovering = false
+
+    var body: some View {
+        NavigationLink(value: value) {
+            HStack(spacing: 12) {
+                content()
+                HStack(spacing: 12) { trailing() }.hidden()
+            }
+            .padding(.horizontal, 12)
+            .frame(minHeight: 46)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .modifier(FocusOutline(radius: 8))
+        .overlay(alignment: .trailing) {
+            HStack(spacing: 12) { trailing() }.padding(.trailing, 12)
+        }
+        .background(hovering ? Soot.ground.opacity(0.7) : Color.clear, in: RoundedRectangle(cornerRadius: 8))
+        .onHover { hovering = $0 }
+    }
+}
+
 /// The state of a pipeline run as a glyph with its word: shape and colour together.
 struct PipelineGlyph: View {
     let state: ProjectSnapshot.PipelineState

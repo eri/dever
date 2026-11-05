@@ -203,3 +203,25 @@ same two-column shape), `ledger-github-off/project-dark.png` (empty GitHub colum
 | VoiceOver reading order | by code: heading row, then left cell, right cell per line | Not verified |
 
 Verdict (revision 2): **Approve**; the two `Not verified` rows are runtime checks.
+
+## After, revision 3: back to one line per issue
+
+Feedback on revision 2: too crowded. The ledger put two lines of text per row and a heading row
+over the list; the airiness of the rows was the thing worth keeping.
+
+Revision 3 is revision 1's list (one 46px line per issue: priority, key, title, its pull request as
+a 26px chip with state glyph, number and pipeline run, due date, assignee) with one addition kept
+from revision 2: the GitHub line in the headline row (`[GitHub mark] 0 open · 15 merged`, plus the
+pipeline glyph and word when an open PR has a run), which opens the repository's pull requests.
+That is where GitHub is named on the panel, beside the shipped figure, without a second column.
+
+Everything else from revision 1 stands: the stages as the filter, the dimming bar, "Update N in
+Linear ↗", the "No PR yet" word, the list of pull requests no issue cites, the GitHub states at the
+foot, the skeleton of the same shape. The accessibility table of revision 2 applies minus the
+column headings; the chip's name reads "Pull request #4872, merged, pipeline passing", its hint
+"Opens on GitHub".
+
+Capture: not taken for this revision. During the session the Keychain credentials item was
+emptied by another process (all three tools came up "Not connected" on the capture run, and
+`security find-generic-password` returned `{}`), so the loaded state could not be photographed.
+Revision 1's `after/` captures show the rows; `ledger/` shows the headline line.
