@@ -279,7 +279,7 @@ struct GitHubLoginSheet: View {
         } footer: {
             HStack {
                 if let code {
-                    Text("Code expires in \(code.expires_in / 60) min")
+                    Text("This code works for \(code.expires_in / 60) minutes.")
                         .font(.system(size: 13)).foregroundStyle(Soot.muted)
                     Spacer()
                     Link(destination: URL(string: code.verification_uri)!) { Text("Link this device on GitHub") }

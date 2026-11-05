@@ -63,7 +63,7 @@ struct ProjectEditorSheet: View {
                     .font(.system(size: 14)).foregroundStyle(Soot.muted)
             }
         } content: {
-            VStack(alignment: .leading, spacing: 32) {
+            VStack(alignment: .leading, spacing: 28) {
                 VStack(alignment: .leading, spacing: 8) {
                     SootField(label: "Name in Dever", placeholder: "e.g. Checkout redesign", text: $project.name)
                     if let nameError { ErrorLabel(nameError) }
@@ -122,7 +122,7 @@ struct ProjectEditorSheet: View {
     private func toolSection<Control: View, Extra: View>(_ service: ServiceKind, title: String,
                                                          @ViewBuilder control: () -> Control,
                                                          @ViewBuilder extra: () -> Extra) -> some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: 12) {
             SectionHeading(title: title) { BrandLogo(service: service, size: 18).foregroundStyle(Soot.ink) }
             if app.isConnected(service) {
                 if catalog.loading {
@@ -167,7 +167,7 @@ struct ProjectEditorSheet: View {
                             }))
         } extra: {
             if slackMode == .create && app.slack != nil {
-                VStack(alignment: .leading, spacing: 16) {
+                NestedGroup {
                     SootField(label: "Channel name",
                               placeholder: Naming.channelName(for: project.name.isEmpty ? "project" : project.name,
                                                               prefix: channelPrefix),
@@ -175,7 +175,6 @@ struct ProjectEditorSheet: View {
                         .accessibilityLabel("New channel name")
                     SwitchRow(title: "Private channel", detail: "Only invited people can see it", isOn: $privateChannel)
                 }
-                .padding(.top, 6)
             }
         }
     }
@@ -200,13 +199,14 @@ struct ProjectEditorSheet: View {
                             }))
         } extra: {
             if linearMode == .create && app.linear != nil && !catalog.loading {
-                VStack(alignment: .leading, spacing: 8) {
-                    FieldLabel(text: "In team")
-                    SearchPicker(label: "Team", placeholder: "Pick a team",
-                                 items: catalog.teams.map { PickerItem(id: $0.id, title: $0.name) },
-                                 selection: $teamPick)
+                NestedGroup {
+                    VStack(alignment: .leading, spacing: 8) {
+                        FieldLabel(text: "In team")
+                        SearchPicker(label: "Team", placeholder: "Pick a team",
+                                     items: catalog.teams.map { PickerItem(id: $0.id, title: $0.name) },
+                                     selection: $teamPick)
+                    }
                 }
-                .padding(.top, 6)
             }
         }
     }
@@ -223,11 +223,12 @@ struct ProjectEditorSheet: View {
                             set: { project.githubRepo = ($0 == Self.noneItem) ? nil : $0 }))
         } extra: {
             if project.githubRepo != nil && app.github != nil {
-                SwitchRow(title: "Count every pull request",
-                          detail: "Not only those linked to this project's issues",
-                          isOn: Binding(get: { project.githubWholeRepo == true },
-                                        set: { project.githubWholeRepo = $0 }))
-                    .padding(.top, 6)
+                NestedGroup {
+                    SwitchRow(title: "Count every pull request",
+                              detail: "Not only those linked to this project's issues",
+                              isOn: Binding(get: { project.githubWholeRepo == true },
+                                            set: { project.githubWholeRepo = $0 }))
+                }
             }
         }
     }
@@ -483,13 +484,13 @@ struct ImportSheet: View {
                 Button(selection.count == candidates.count ? "Select none" : "Select all") {
                     selection = selection.count == candidates.count ? [] : Set(candidates.map(\.id))
                 }
-                .buttonStyle(.plain).font(.system(size: 14, weight: .medium)).foregroundStyle(Soot.ink)
+                .buttonStyle(.plain).font(.system(size: 14, weight: .semibold)).foregroundStyle(Soot.lime)
                 .frame(minHeight: 32)
                 .modifier(FocusOutline(radius: 6))
             }
             Spacer()
             Button("Cancel") { dismiss() }.buttonStyle(QuietButton())
-            Button("Import ^[\(selection.count) project](inflect: true)") { importSelected() }
+            Button(selection.isEmpty ? "Import" : "Import ^[\(selection.count) project](inflect: true)") { importSelected() }
                 .buttonStyle(LimeButton())
                 .keyboardShortcut(.defaultAction)
                 .disabled(selection.isEmpty)

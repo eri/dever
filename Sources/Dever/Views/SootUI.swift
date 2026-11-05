@@ -43,11 +43,12 @@ struct LimeButton: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(.system(size: 15, weight: .semibold))
-            .foregroundStyle(Soot.limeInk)
+            .foregroundStyle(isEnabled ? Soot.limeInk : Soot.muted)
             .padding(.horizontal, 18)
             .frame(height: 40)
-            .background(Soot.lime.opacity(isEnabled ? (configuration.isPressed ? 0.8 : 1) : 0.3),
+            .background(isEnabled ? Soot.lime.opacity(configuration.isPressed ? 0.8 : 1) : Soot.surface,
                         in: RoundedRectangle(cornerRadius: Soot.radius))
+            .overlay(RoundedRectangle(cornerRadius: Soot.radius).strokeBorder(isEnabled ? Color.clear : Soot.edge))
             .modifier(FocusOutline(radius: Soot.radius))
     }
 }
@@ -335,7 +336,7 @@ struct RadioRow: View {
 struct FieldLabel: View {
     let text: String
     var body: some View {
-        Text(text).font(.system(size: 13, weight: .semibold)).foregroundStyle(Soot.ink)
+        Text(text).font(.system(size: 12, weight: .semibold)).tracking(0.2).foregroundStyle(Soot.ink)
     }
 }
 
@@ -366,7 +367,7 @@ struct SootField: View {
                     .onSubmit(onSubmit)
                     .accessibilityLabel(label)
             }
-            .padding(.horizontal, 14)
+            .padding(.horizontal, 16)
             .frame(height: Soot.fieldHeight)
             .background(Soot.surface, in: RoundedRectangle(cornerRadius: Soot.fieldRadius))
             .overlay(RoundedRectangle(cornerRadius: Soot.fieldRadius)
@@ -411,6 +412,19 @@ struct SwitchRow: View {
         .accessibilityAddTraits(.isToggle)
         .accessibilityValue(isOn ? "On" : "Off")
         .accessibilityHint(detail ?? "")
+    }
+}
+
+/// Controls that exist only because of the choice above them: hung off a thin left rule.
+struct NestedGroup<Content: View>: View {
+    @ViewBuilder var content: () -> Content
+    var body: some View {
+        HStack(alignment: .top, spacing: 16) {
+            RoundedRectangle(cornerRadius: 1).fill(Soot.edge).frame(width: 2)
+            VStack(alignment: .leading, spacing: 16) { content() }
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(.top, 4)
     }
 }
 
@@ -508,7 +522,7 @@ struct SearchPicker: View {
                     .font(.system(size: 11, weight: .semibold)).foregroundStyle(Soot.muted)
             }
             .font(.system(size: 15))
-            .padding(.horizontal, 14)
+            .padding(.horizontal, 16)
             .frame(height: Soot.fieldHeight)
             .background(Soot.surface, in: RoundedRectangle(cornerRadius: Soot.fieldRadius))
             .overlay(RoundedRectangle(cornerRadius: Soot.fieldRadius)
@@ -558,7 +572,7 @@ private struct SearchPickerList: View {
                     .accessibilityLabel("Search \(label)")
             }
             .padding(.horizontal, 16)
-            .frame(height: 50)
+            .frame(height: 48)
             Rectangle().fill(Soot.line).frame(height: 1)
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 2) {

@@ -32,6 +32,8 @@ the focused one gets a 2px lime edge. Measured:
 | Placeholder `Soot.muted` on surface | 5.38:1 | 6.05:1 | 4.5 |
 | Field label `Soot.ink` on ground | 18.4:1 | 17.5:1 | 4.5 |
 
+Disabled primary buttons use the surface fill with muted text (5.4:1) instead of a dimmed lime,
+whose label measured 2.3:1.
 Targets: fields and selects 44px, list rows 40–60px, chips and footer links 32px, close 32px.
 Hairlines between sections (`Soot.line`) are decorative and carry no information.
 
