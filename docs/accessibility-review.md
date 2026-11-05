@@ -45,7 +45,8 @@ Hairlines between sections (`Soot.line`) are decorative and carry no information
   relied on placeholders; each now has a visible label (`FieldLabel`) or an icon plus an
   accessible name.
 - **2.4.7 Focus visible** — custom buttons, option rows and radio rows drew no focus ring;
-  they now show a 2px white ring (`FocusOutline`), 17:1 against the ground.
+  they now show a 2px lime ring (`FocusOutline`), 16.6:1 dark / 6.4:1 light against the ground —
+  the same colour as a focused field's edge.
 - **1.3.1 / 4.1.2** — the project editor's mode chips ("New / Existing / Later") were not
   understandable as a choice; they are now radio groups with full sentences
   ("Use an existing channel", "Create a new channel", "Don't link a channel for now"),

@@ -282,7 +282,8 @@ struct SheetTitle<Mark: View>: View {
     }
 }
 
-/// A visible keyboard-focus ring for custom controls (WCAG 2.4.7): white, 2px, 3px outside.
+/// A visible keyboard-focus ring for custom controls (WCAG 2.4.7): lime, 2px, 3px outside —
+/// the same colour a focused text field shows, so focus looks the same everywhere.
 struct FocusOutline: ViewModifier {
     var radius: CGFloat
     @Environment(\.isFocused) private var isFocused
@@ -290,7 +291,7 @@ struct FocusOutline: ViewModifier {
     func body(content: Content) -> some View {
         content.overlay(
             RoundedRectangle(cornerRadius: radius + 3)
-                .strokeBorder(Soot.ink, lineWidth: 2)
+                .strokeBorder(Soot.lime, lineWidth: 2)
                 .padding(-3)
                 .opacity(isFocused ? 1 : 0)
         )
@@ -405,7 +406,7 @@ struct SwitchRow: View {
                 .tint(Soot.lime)
                 .controlSize(.regular)
         }
-        .frame(minHeight: 32)
+        .frame(maxWidth: 420, minHeight: 32, alignment: .leading)
         .contentShape(Rectangle())
         .onTapGesture { isOn.toggle() }
         .accessibilityElement(children: .combine)
