@@ -63,7 +63,7 @@ Highest-leverage change made: the closed-PR case became a sentence instead of a 
 ## Verification
 
 Captures (sample data, `DEVER_SNAPSHOT_PREVIEW=…`, both modes) in
-`/private/tmp/claude-501/-Users-eri-Documents-work-dever/a517bb30-bf5f-4acf-aea3-ddec34aee239/scratchpad/shots2/`:
+`/private/tmp/claude-501/-Users-eri-Documents-work-dever/a517bb30-bf5f-4acf-aea3-ddec34aee239/scratchpad/shots3/`:
 `{live,deploying,failed,deleted,notdeployed,none}/project-{dark,light}.png`, `options/project-{dark,light}.png`
 (deploy options open), `editor/sheet-new-project{,-popover}.png` (the Preview step and its picker), and
 `live/overview-{dark,light}.png` (the row glyph).

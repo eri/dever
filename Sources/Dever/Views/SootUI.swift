@@ -747,7 +747,8 @@ private struct SearchPickerList: View {
                     }
                     ForEach(filtered) { row($0) }
                     if filtered.isEmpty {
-                        Text("No match for \u{201C}\(query)\u{201D}").font(.system(size: 14)).foregroundStyle(Soot.muted)
+                        Text(query.isEmpty ? "Nothing to pick yet" : "No match for \u{201C}\(query)\u{201D}")
+                            .font(.system(size: 14)).foregroundStyle(Soot.muted)
                             .padding(.horizontal, 12).padding(.vertical, 16)
                     }
                 }

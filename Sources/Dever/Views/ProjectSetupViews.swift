@@ -67,7 +67,7 @@ struct ProjectEditorSheet: View {
     @State private var error: String?
 
     init(project: Project = Project(name: ""), isNew: Bool = true) {
-        _project = State(initialValue: project)
+        var project = project
         self.isNew = isNew
         // Snapshots: DEVER_SNAPSHOT_STEP=name|slack|linear|github|preview opens that step.
         let snapshot = ProcessInfo.processInfo.environment["DEVER_SNAPSHOT_STEP"]
@@ -82,10 +82,11 @@ struct ProjectEditorSheet: View {
         Self.openAt = nil
         _step = State(initialValue: first)
         // Snapshots of the preview step need a repository to list pull requests of.
-        if first == .preview, PreviewStore.simulation != nil, _project.wrappedValue.githubRepo == nil {
-            _project.wrappedValue.githubRepo = PreviewStore.sampleRepo
-            _project.wrappedValue.previewPullNumber = PreviewStore.samplePullNumber
+        if first == .preview, PreviewStore.simulation != nil, project.githubRepo == nil {
+            project.githubRepo = PreviewStore.sampleRepo
+            project.previewPullNumber = PreviewStore.samplePullNumber
         }
+        _project = State(initialValue: project)
     }
 
     /// The adding path, for the marks at the bottom; the preview step exists once a repository is linked.
