@@ -354,7 +354,7 @@ struct SootField: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            FieldLabel(text: label)
+            if !label.isEmpty { FieldLabel(text: label) }
             HStack(spacing: 10) {
                 if let leadingSymbol {
                     Image(systemName: leadingSymbol).font(.system(size: 13, weight: .medium))
@@ -474,6 +474,78 @@ struct ChoiceCard<Nested: View>: View {
         .background(Soot.surface, in: RoundedRectangle(cornerRadius: Soot.fieldRadius))
         .overlay(RoundedRectangle(cornerRadius: Soot.fieldRadius)
             .strokeBorder(selected ? Soot.lime : .clear, lineWidth: 1.5))
+    }
+}
+
+/// A sheet that asks one thing at a time, in the onboarding's frame: a headline, one control,
+/// one button; close top-right, back top-left, progress marks bottom-left. Same size every step.
+struct StepSheet<Content: View>: View {
+    var step: Int? = nil
+    var count: Int = 0
+    var back: (() -> Void)? = nil
+    let close: () -> Void
+    @ViewBuilder var content: () -> Content
+
+    static var size: CGSize { CGSize(width: 600, height: 560) }
+
+    var body: some View {
+        ZStack(alignment: .topTrailing) {
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(spacing: 0) {
+                    if let back { BackButton(action: back) }
+                    Spacer()
+                }
+                .frame(height: 28)
+                Spacer(minLength: 16)
+                content()
+                Spacer(minLength: 16)
+                if let step, count > 1 {
+                    StepMarks(count: count, current: step)
+                }
+            }
+            .padding(40)
+            .frame(width: Self.size.width, height: Self.size.height, alignment: .topLeading)
+            .background(Soot.ground)
+            Button(action: close) {
+                Image(systemName: "xmark").font(.system(size: 12, weight: .semibold)).foregroundStyle(Soot.ink)
+                    .frame(width: 28, height: 28).background(Soot.surface, in: Circle())
+                    .modifier(FocusOutline(radius: 14))
+            }
+            .buttonStyle(.plain)
+            .keyboardShortcut(.cancelAction)
+            .accessibilityLabel("Close")
+            .padding(40)
+        }
+    }
+}
+
+/// The step's one question, in the onboarding's voice but sized for a sheet.
+struct StepTitle: View {
+    let text: String
+    var body: some View {
+        Text(text)
+            .font(.system(size: 32, weight: .semibold))
+            .tracking(-1)
+            .foregroundStyle(Soot.ink)
+            .fixedSize(horizontal: false, vertical: true)
+            .accessibilityAddTraits(.isHeader)
+    }
+}
+
+/// Where you are: marks in a row, the current one long (as in onboarding).
+struct StepMarks: View {
+    let count: Int
+    let current: Int
+    var body: some View {
+        HStack(spacing: 6) {
+            ForEach(0..<count, id: \.self) { i in
+                Capsule()
+                    .fill(i == current ? Soot.ink : i < current ? Soot.muted : Soot.surface)
+                    .frame(width: i == current ? 28 : 8, height: 8)
+            }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Step \(current + 1) of \(count)")
     }
 }
 
