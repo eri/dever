@@ -27,7 +27,8 @@ Tokens are stored in the macOS Keychain (`io.github.eri.dever`), projects in `~/
 - **Import from Linear**: lists projects and suggests the matching channel.
 - A project without both a Slack channel **and** a Linear project is flagged ⚠️ incomplete.
 - **Preview environment** (optional, needs a GitHub repository): the project follows the preview of one pull request,
-  chosen in the editor ("Preview" step). The project page shows the PR, the state (not deployed, deploying, updating,
+  chosen in the editor ("Preview" step); "No preview needed" on the project page hides the panel until one is picked.
+  The panel sits above Delivery and shows the PR, the state (not deployed, deploying, updating,
   live, failed, deleted), the deployed hosts (`pr-<N>-<target>.preview.mendo.cloud`, probed with a HEAD request) and
   the `preview:keep` label. Deploy, update, protect and delete post the team's own commands as PR comments
   (`/preview [--nb-api-pods=N] [--nb-app-pods=N] [--prod] [--autoscale] [--keep]`, `/delete-preview`); the state is

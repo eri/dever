@@ -11,6 +11,8 @@ struct PreviewPanel: View {
     @ObservedObject var flow: ConnectFlow
     /// Opens the editor on its Preview step.
     let addPreview: () -> Void
+    /// "No preview needed": hides the panel until a pull request is picked in the editor.
+    let dismiss: () -> Void
 
     @State private var options = PreviewOptions()
     @State private var optionsOpen = false
@@ -24,8 +26,8 @@ struct PreviewPanel: View {
     private var status: PreviewStatus? { state?.status }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            PanelHeader(title: "Preview", subtitle: subtitle)
+        VStack(alignment: .leading, spacing: 12) {
+            headline
             if project.previewPullNumber == nil {
                 nonePart
             } else if app.github == nil {
@@ -38,18 +40,30 @@ struct PreviewPanel: View {
                 ServiceFailureRow(service: .github, state: serviceState, lastLoaded: store.loadedAt[project.id],
                                   retry: { Task { await store.load(project, app: app, force: true) } }, flow: flow)
             } else if let status {
-                pullRow(status)
-                statusRow(status)
-                if status.phase.busy { progress(status) }
-                if status.phase == .live { targetChips(status) }
-                if let note = status.note { noteRow(note, failed: status.phase == .failed) }
-                if optionsOpen { optionsRow } else { actions(status) }
+                if optionsOpen {
+                    optionsRow
+                } else {
+                    // Second line: what there is to see or know on the left, what to do on the right.
+                    ViewThatFits(in: .horizontal) {
+                        HStack(alignment: .center, spacing: 12) {
+                            secondLine(status)
+                            Spacer(minLength: 0)
+                            actions(status)
+                        }
+                        VStack(alignment: .leading, spacing: 12) {
+                            secondLine(status)
+                            actions(status)
+                        }
+                    }
+                }
                 if let actionError { ErrorLabel(actionError) }
             } else {
                 skeleton
             }
         }
-        .sootPanel()
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .background(Soot.surface, in: RoundedRectangle(cornerRadius: 12))
         .task(id: "\(project.id)-\(project.previewPullNumber ?? 0)-\(app.github != nil)") {
             await store.load(project, app: app)
             if let o = status?.options { options = o }
@@ -73,77 +87,87 @@ struct PreviewPanel: View {
         }
     }
 
-    private var subtitle: String {
-        guard let number = project.previewPullNumber else { return "An environment for one pull request" }
-        return "preview.mendo.cloud · pull request #\(number)"
+    /// One line: the word "Preview", the pull request it follows (a link), then on the right
+    /// the phase as glyph and word, when it changed, the run, the shield.
+    private var headline: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "globe").font(.system(size: 14, weight: .semibold)).foregroundStyle(Soot.ink)
+                .accessibilityHidden(true)
+            Text("Preview").font(.system(size: 15, weight: .semibold)).foregroundStyle(Soot.ink)
+                .accessibilityAddTraits(.isHeader)
+            if let s = status {
+                HoverLink(destination: s.pull.url) {
+                    HStack(spacing: 6) {
+                        IDPill(text: "#\(s.pull.number)")
+                        Text(PullTitle.split(s.pull.title).title).font(.system(size: 13)).foregroundStyle(Soot.muted)
+                            .lineLimit(1).truncationMode(.tail)
+                        if s.pull.state != .open {
+                            Text(s.pull.state.word).font(.system(size: 12, weight: .medium)).foregroundStyle(Soot.muted)
+                        }
+                    }
+                }
+                .layoutPriority(-1)
+                .help("#\(s.pull.number) \(s.pull.title) · \(s.pull.state.word) · by \(s.pull.author) · Opens on GitHub")
+                .accessibilityLabel("Pull request #\(s.pull.number), \(s.pull.title), \(s.pull.state.word), by \(s.pull.author)")
+                .accessibilityHint("Opens on GitHub")
+            } else if let number = project.previewPullNumber {
+                IDPill(text: "#\(number)")
+            }
+            Spacer(minLength: 12)
+            if let s = status {
+                PreviewPhaseGlyph(phase: s.phase, size: 13)
+                Text(s.phase.word).font(.system(size: 13, weight: .semibold)).foregroundStyle(Soot.ink)
+                if let at = s.updatedAt {
+                    Text(verbatim: "·").foregroundStyle(Soot.muted).accessibilityHidden(true)
+                    Text(timeLine(s.phase, at)).font(.system(size: 12)).foregroundStyle(Soot.muted).lineLimit(1)
+                }
+                if let run = s.run {
+                    HoverLink(destination: run.url) {
+                        HStack(spacing: 4) { Text("Run"); Image(systemName: "arrow.up.right") }
+                            .font(.system(size: 13, weight: .semibold)).foregroundStyle(Soot.lime)
+                    }
+                    .help("Open the workflow run on GitHub")
+                    .accessibilityLabel("Open the workflow run on GitHub")
+                }
+                if s.keep { KeepPill() }
+            }
+        }
+        .frame(minHeight: 28)
     }
 
     // MARK: No preview
 
+    /// No pull request yet: one line, the way to add one, and the way to say none is wanted.
     private var nonePart: some View {
-        HStack(spacing: 14) {
-            Image(systemName: "globe").font(.system(size: 22, weight: .regular)).foregroundStyle(Soot.muted)
-                .frame(width: 28).accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 3) {
-                Text("No preview yet").font(.system(size: 15, weight: .semibold)).foregroundStyle(Soot.ink)
-                Text("Pick one of the repository's pull requests; Dever deploys and follows its preview.")
-                    .font(.system(size: 13)).foregroundStyle(Soot.muted).fixedSize(horizontal: false, vertical: true)
-            }
-            Spacer(minLength: 16)
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 12) { noneText; Spacer(minLength: 12); noneButtons }
+            VStack(alignment: .leading, spacing: 12) { noneText; noneButtons }
+        }
+    }
+
+    private var noneText: some View {
+        Text("Follow the preview of one of the repository's pull requests here: deploy, update and delete it without leaving Dever.")
+            .font(.system(size: 13)).foregroundStyle(Soot.muted).fixedSize(horizontal: false, vertical: true)
+    }
+
+    private var noneButtons: some View {
+        HStack(spacing: 8) {
             Button("Add a preview", action: addPreview).buttonStyle(QuietButton())
                 .help("Choose the pull request whose preview this project follows")
+            Button("No preview needed", action: dismiss).buttonStyle(.plain)
+                .font(.system(size: 13, weight: .semibold)).foregroundStyle(Soot.lime)
+                .padding(.horizontal, 8).frame(height: 36).contentShape(Rectangle())
+                .modifier(FocusOutline(radius: Soot.radius))
+                .help("Hides this panel; pick a pull request later in Edit project to bring it back")
         }
-        .padding(16)
-        .background(Soot.ground.opacity(0.6), in: RoundedRectangle(cornerRadius: 10))
+        .fixedSize()
     }
 
-    // MARK: Loaded
-
-    /// The pull request as a tile: glyph, number, title, then its state and author.
-    private func pullRow(_ s: PreviewStatus) -> some View {
-        let (symbol, tint): (String, Color) = switch s.pull.state {
-        case .merged: ("arrow.triangle.merge", Theme.chart1)
-        case .open: ("arrow.triangle.pull", Theme.chart2)
-        case .draft: ("pencil.line", Soot.muted)
-        case .closed: ("xmark.circle", Soot.muted)
-        }
-        let parts = PullTitle.split(s.pull.title)
-        return TileRow(url: s.pull.url) {
-            Image(systemName: symbol).font(.system(size: 14, weight: .semibold)).foregroundStyle(tint).frame(width: 18)
-                .accessibilityHidden(true)
-            IDPill(text: "#\(s.pull.number)")
-            Text(parts.title).font(.system(size: 14)).foregroundStyle(Soot.ink).lineLimit(1).help(s.pull.title)
-                .layoutPriority(1)
-            Spacer(minLength: 12)
-            Text("\(s.pull.state.word) · \(s.pull.author)").font(.system(size: 12)).foregroundStyle(Soot.muted).lineLimit(1)
-        }
-        .padding(.horizontal, -12)
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("Pull request #\(s.pull.number), \(s.pull.title), \(s.pull.state.word), by \(s.pull.author)")
-        .accessibilityHint("Opens on GitHub")
-    }
-
-    /// The state as a glyph and its word, when it last changed, the run, and the shield.
-    private func statusRow(_ s: PreviewStatus) -> some View {
-        HStack(spacing: 10) {
-            PreviewPhaseGlyph(phase: s.phase)
-            Text(s.phase.word).font(.system(size: 15, weight: .semibold)).foregroundStyle(Soot.ink)
-            if let at = s.updatedAt {
-                Text(verbatim: "·").foregroundStyle(Soot.muted).accessibilityHidden(true)
-                Text(timeLine(s.phase, at)).font(.system(size: 13)).foregroundStyle(Soot.muted)
-            }
-            if let run = s.run {
-                HoverLink(destination: run.url) {
-                    HStack(spacing: 4) { Text("Run"); Image(systemName: "arrow.up.right") }
-                        .font(.system(size: 13, weight: .semibold)).foregroundStyle(Soot.lime)
-                }
-                .help("Open the workflow run on GitHub")
-                .accessibilityLabel("Open the workflow run on GitHub")
-            }
-            Spacer(minLength: 8)
-            if s.keep { KeepPill() }
-        }
-        .accessibilityElement(children: .contain)
+    @ViewBuilder
+    private func secondLine(_ s: PreviewStatus) -> some View {
+        if s.phase == .live { targetChips(s) }
+        if s.phase.busy { progress(s) }
+        if let note = s.note { noteRow(note, failed: s.phase == .failed) }
     }
 
     private func timeLine(_ phase: PreviewStatus.Phase, _ at: Date) -> String {
@@ -155,13 +179,16 @@ struct PreviewPanel: View {
     }
 
     /// A deploy takes about ten minutes: a travelling line, and the step the run is on.
+    /// The step the run is on, with a short travelling light beside it: the light belongs to
+    /// the step, not to the panel, and says "still going" without a spinner or a percentage.
     private func progress(_ s: PreviewStatus) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            WaitingLine()
+        HStack(spacing: 10) {
+            WaitingLine().frame(width: 72)
             Text(s.run?.step ?? (s.run == nil ? "Waiting for the workflow to start…" : "Running…"))
                 .font(.system(size: 13)).foregroundStyle(Soot.muted).lineLimit(1)
         }
-        .accessibilityElement(children: .combine)
+        .frame(minHeight: 36)
+        .accessibilityElement(children: .ignore)
         .accessibilityLabel("\(s.phase.word). \(s.run?.step ?? "Waiting for the workflow")")
     }
 
@@ -203,20 +230,20 @@ struct PreviewPanel: View {
                         .buttonStyle(LimeButton()).disabled(sending)
                         .help("Choose the options, then post /preview on the pull request")
                 case .live:
-                    Button(sending ? "Sending…" : "Update preview") { Task { await send { try await store.deploy(project, app: app, options: options) } } }
-                        .buttonStyle(LimeButton()).disabled(sending)
-                        .help("Post /preview again: rebuilds the targets the diff touched")
+                    // The preview is there: nothing presses for attention, so no lime.
                     if let appURL = s.appURL {
                         Button(copied ? "Copied" : "Copy app URL") { copyAppURL(s) }
                             .buttonStyle(QuietButton())
                             .help(appURL.absoluteString)
                             .accessibilityValue(copied ? "Copied" : "")
                     }
+                    Button(sending ? "Sending…" : "Update preview") { Task { await send { try await store.deploy(project, app: app, options: options) } } }
+                        .buttonStyle(QuietButton()).disabled(sending)
+                        .help("Post /preview again: rebuilds the targets the diff touched")
                 case .deploying, .updating, .deleting:
                     EmptyView()
                 }
             }
-            Spacer(minLength: 0)
             Menu {
                 if s.phase == .live, !s.keep, canCommand {
                     Button("Protect from Saturday cleanup…") { confirmingProtect = true }
@@ -289,11 +316,9 @@ struct PreviewPanel: View {
     }
 
     private var skeleton: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            HStack(spacing: 12) { Skeleton(width: 18, height: 14); Skeleton(width: 54, height: 20, radius: 5); Skeleton(width: 280); Spacer(); Skeleton(width: 80) }
-                .frame(height: 46)
-            HStack(spacing: 10) { Skeleton(width: 14, height: 14, radius: 7); Skeleton(width: 48, height: 14); Skeleton(width: 120) }
-            HStack(spacing: 6) { ForEach(0..<3, id: \.self) { _ in Skeleton(width: 92, height: 28, radius: 14) } }
+        HStack(spacing: 6) {
+            ForEach(0..<3, id: \.self) { _ in Skeleton(width: 92, height: 30, radius: 15) }
+            Spacer()
             Skeleton(width: 120, height: 36, radius: Soot.radius)
         }
         .accessibilityElement()

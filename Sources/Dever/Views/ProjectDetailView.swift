@@ -60,7 +60,6 @@ struct ProjectDetailView: View {
             // In the wide view the page stops scrolling: the messages scroll inside their
             // panel and the thread pane stays put beside them. Same ScrollView either way,
             // so the panel's state (open thread, draft) survives the switch.
-            ScrollViewReader { proxy in
             ScrollView(.vertical) {
                 VStack(alignment: .leading, spacing: 24) {
                     titleRow
@@ -88,10 +87,6 @@ struct ProjectDetailView: View {
                 .frame(width: geo.size.width, height: slackExpanded ? geo.size.height : nil, alignment: .topLeading)
             }
             .scrollDisabled(slackExpanded)
-            .onReceive(NotificationCenter.default.publisher(for: .scrollToEnd)) { _ in
-                withAnimation(nil) { proxy.scrollTo("preview", anchor: .bottom) }
-            }
-            }
         }
         .background(Soot.ground)
         .modifier(FilePreviewHost(preview: $previewFile))
@@ -113,14 +108,20 @@ struct ProjectDetailView: View {
 
     private var workColumn: some View {
         VStack(spacing: 16) {
-            workPanel
-            if project.githubRepo != nil {
-                PreviewPanel(project: project, missing: missing, flow: flow, addPreview: {
-                    ProjectEditorSheet.openAt = .preview
-                    edit()
-                })
-                .id("preview")
+            // The preview first: it is the thing to open or to deploy, and it stays one or two lines.
+            if project.showsPreview {
+                PreviewPanel(project: project, missing: missing, flow: flow,
+                             addPreview: {
+                                 ProjectEditorSheet.openAt = .preview
+                                 edit()
+                             },
+                             dismiss: {
+                                 var p = project
+                                 p.previewDismissed = true
+                                 app.upsert(p)
+                             })
             }
+            workPanel
         }
     }
 

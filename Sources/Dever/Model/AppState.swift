@@ -74,6 +74,9 @@ struct Project: Codable, Identifiable, Hashable {
     var githubWholeRepo: Bool?
     /// The pull request whose preview environment this project follows (needs `githubRepo`).
     var previewPullNumber: Int?
+    /// True once the user said this project needs no preview: the panel stays away until a
+    /// pull request is picked in the editor.
+    var previewDismissed: Bool?
     var createdAt = Date()
 
     /// Whether to show every PR of the repository rather than those of the project's issues.
@@ -81,6 +84,10 @@ struct Project: Codable, Identifiable, Hashable {
 
     /// A project is trackable once both Slack and Linear are linked.
     var isComplete: Bool { slack != nil && linear != nil }
+
+    /// Whether the project page shows the Preview panel: a repository, and either a pull
+    /// request to follow or no word yet on whether one is wanted.
+    var showsPreview: Bool { githubRepo != nil && (previewPullNumber != nil || previewDismissed != true) }
 }
 
 /// Slack channel naming convention: `<prefix><slug>`.

@@ -30,11 +30,6 @@ enum Snapshotter {
                 NotificationCenter.default.post(name: .showScreen, object: item)
                 let settle: Double = wait == 0 ? 0.4 : (item == .overview ? 3 : 8)
                 try? await Task.sleep(nanoseconds: UInt64(settle * 1_000_000_000))
-                // DEVER_SNAPSHOT_PREVIEW=<state>: the project page shows the Preview panel in full.
-                if name == "project", PreviewStore.simulation != nil {
-                    NotificationCenter.default.post(name: .scrollToEnd, object: nil)
-                    try? await Task.sleep(nanoseconds: 800_000_000)
-                }
                 capture(to: dir.appendingPathComponent("\(name)-\(themeName).png"))
             }
         }

@@ -77,3 +77,36 @@ line against a real in-progress run; VoiceOver reading order; the probe against 
 ## Verdict
 
 Approve. No HIGH finding remains; every domain inspected.
+
+## Revision 2 (user feedback: panel at the top, quieter once set, "No preview needed")
+
+Scope: the same panel after the user's four points. Method as above (the `better-interface` orchestration
+applied by hand), on the captures in `…/scratchpad/shots6/`.
+
+What changed:
+- The panel is first in the work column: it is the thing to open or to deploy, and it is now one or two lines.
+- `Project.previewDismissed`: "No preview needed" hides the panel; picking a pull request in the editor brings it
+  back (`Project.showsPreview`).
+- Quieter once set: a `PanelHeader`-free headline (globe, "Preview", the PR as a link in the same line, the phase
+  with its time, Run ↗, Kept at the right), then one line with the hosts on the left and the actions on the right.
+  "Update preview" and "Copy app URL" are quiet buttons: a live preview asks nothing of the user. Lime stays on
+  "Deploy preview" only, when deploying is the one thing to do.
+- The travelling light no longer spans the panel (the user read it as a broken progress bar): it is a 72px light
+  beside the step name, so it belongs to "Build and push API image" and reads as "still going".
+- Failed: the note and "Deploy preview" share the second line.
+
+| Severity | Domain | Location | Before | After | Why |
+| --- | --- | --- | --- | --- | --- |
+| MEDIUM | Layout | `PreviewPanel.swift` body | Full-width `WaitingLine` between the headline and the step | 72px light beside the step name, on the second line | A line across the panel with nothing to anchor it read as a progress bar with no progress; the light now belongs to the running step |
+| MEDIUM | Colors | Live actions | "Update preview" in lime | Quiet buttons; lime only for "Deploy preview" | One lime action per view, and only where there is one thing to do; a live preview has none |
+| MEDIUM | Layout | Page order | Preview under Delivery, off-screen on most projects | First in the column, 2 lines tall | The panel carries the links the user comes for; its height no longer competes with the list |
+| LOW | Writing | Empty state | "No preview yet" title plus a line | One line and two choices: Add a preview · No preview needed | The user asked for a way out; the sentence says what following a preview gives |
+| LOW | Accessibility | Busy row | Step text and the More menu on two rows | One row | Keeps the panel at two lines in every state; reading order stays headline → step → actions |
+
+Not changed (belongs to the editor, handed to the sheets session): the hub/ready step overflowing at five rows
+with Save cut; the hub row reading "Not needed"; the editor's snapshot sample.
+
+Verification: `./scripts/build-app.sh`; captures `shots6/{live,deploying,failed,deleted,notdeployed,none,options}/
+project-{dark,light}.png`. Not verified: the live `/preview` round trip; the editor fix (other session).
+
+Verdict: Approve for the panel and page; the editor overflow remains open in the sheets session.
