@@ -215,22 +215,22 @@ struct GitHubLoginSheet: View {
     @State private var copied = false
 
     var body: some View {
-        SheetScaffold(width: 540) {
+        SheetScaffold(width: 500) {
             VStack(alignment: .leading, spacing: 8) {
                 SheetTitle(title: "Connect GitHub", mark: { ActionIcon(symbol: "link") },
                            close: { task?.cancel(); dismiss() })
                 Text(code == nil ? "Dever reads your pull requests. It never writes."
                                  : "Enter this code on GitHub, then approve Dever.")
-                    .font(.system(size: 14)).foregroundStyle(Soot.muted)
+                    .font(.system(size: 13)).foregroundStyle(Soot.muted)
             }
         } content: {
-            VStack(alignment: .leading, spacing: 28) {
+            VStack(alignment: .leading, spacing: 24) {
                 if let code {
                     VStack(alignment: .leading, spacing: 10) {
                         FieldLabel(text: "Your code")
                         HStack(spacing: 16) {
                             Text(code.user_code)
-                                .font(.system(size: 34, weight: .semibold, design: .monospaced))
+                                .font(.system(size: 30, weight: .semibold, design: .monospaced))
                                 .tracking(2)
                                 .foregroundStyle(Soot.lime)
                                 .textSelection(.enabled)
@@ -244,8 +244,8 @@ struct GitHubLoginSheet: View {
                             }
                             .buttonStyle(QuietButton())
                         }
-                        .padding(.horizontal, 20)
-                        .frame(height: 76)
+                        .padding(.horizontal, 18)
+                        .frame(height: 68)
                         .background(Soot.surface, in: RoundedRectangle(cornerRadius: Soot.fieldRadius))
                         .overlay(RoundedRectangle(cornerRadius: Soot.fieldRadius).strokeBorder(Soot.edge))
                     }
@@ -253,19 +253,19 @@ struct GitHubLoginSheet: View {
                     VStack(alignment: .leading, spacing: 8) {
                         HStack(spacing: 12) {
                             BrandLogo(service: .github, size: 18).foregroundStyle(Soot.ink)
-                            Text("Waiting for you to approve on GitHub").font(.system(size: 15)).foregroundStyle(Soot.ink)
+                            Text("Waiting for you to approve on GitHub").font(.system(size: 14)).foregroundStyle(Soot.ink)
                             Spacer()
                         }
-                        .padding(.horizontal, 20)
-                        .frame(height: 60)
+                        .padding(.horizontal, 18)
+                        .frame(height: 52)
                         .background(Soot.surface, in: RoundedRectangle(cornerRadius: Soot.fieldRadius))
                         .overlay(alignment: .bottom) { WaitingLine() }
                         .clipShape(RoundedRectangle(cornerRadius: Soot.fieldRadius))
                         .accessibilityElement(children: .combine)
-                        Text("Dever connects as soon as you approve.").font(.system(size: 13)).foregroundStyle(Soot.muted)
+                        Text("Dever connects as soon as you approve.").font(.system(size: 12)).foregroundStyle(Soot.muted)
                     }
                 } else {
-                    VStack(spacing: 10) {
+                    VStack(spacing: 8) {
                         OptionRow(icon: AnyView(BrandLogo(service: .github, size: 20).foregroundStyle(Soot.ink)),
                                   title: "Sign in with a code", detail: "Approve Dever on github.com",
                                   recommended: true, enabled: true) { startDeviceFlow() }
@@ -280,7 +280,7 @@ struct GitHubLoginSheet: View {
             HStack {
                 if let code {
                     Text("This code works for \(code.expires_in / 60) minutes.")
-                        .font(.system(size: 13)).foregroundStyle(Soot.muted)
+                        .font(.system(size: 12)).foregroundStyle(Soot.muted)
                     Spacer()
                     Link(destination: URL(string: code.verification_uri)!) { Text("Link this device on GitHub") }
                         .buttonStyle(LimeButton())

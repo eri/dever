@@ -25,21 +25,89 @@ final class Catalog: ObservableObject {
     }
 }
 
-// MARK: - New / edit project
+// MARK: - Add / edit project
 
+/// Adding a project is guided: first how to start (from Slack, from Linear, from scratch),
+/// then that one step. Editing opens the form directly.
 struct ProjectEditorSheet: View {
+    @EnvironmentObject var app: AppState
+    @Environment(\.dismiss) private var dismiss
+    @State var project: Project
+    var isNew: Bool
+
+    enum Step: Hashable { case start, pick(ImportSheet.Source), form }
+    @State private var step: Step
+
+    init(project: Project = Project(name: ""), isNew: Bool = true) {
+        _project = State(initialValue: project)
+        self.isNew = isNew
+        // Snapshots: DEVER_SNAPSHOT_STEP=form opens the form straight away.
+        let snapshotForm = ProcessInfo.processInfo.environment["DEVER_SNAPSHOT_STEP"] == "form"
+        _step = State(initialValue: isNew && !snapshotForm ? .start : .form)
+    }
+
+    var body: some View {
+        switch step {
+        case .start:
+            StartStep(choose: { step = $0 }, close: { dismiss() })
+        case .pick(let source):
+            ImportSheet(source: source, back: { step = .start })
+        case .form:
+            ProjectForm(project: project, isNew: isNew, back: isNew ? { step = .start } : nil)
+        }
+    }
+}
+
+/// "How do you want to start?": one recommended path first, the others under it, as in onboarding.
+private struct StartStep: View {
+    @EnvironmentObject var app: AppState
+    @AppStorage("slackChannelPrefix") private var channelPrefix = "proj-"
+    let choose: (ProjectEditorSheet.Step) -> Void
+    let close: () -> Void
+
+    var body: some View {
+        SheetScaffold(width: 520) {
+            VStack(alignment: .leading, spacing: 8) {
+                SheetTitle(title: "Add a project", mark: { ActionIcon(symbol: "plus") }, close: close)
+                Text("A project follows one Slack channel and one Linear project. Start from what you already have, or from nothing.")
+                    .font(.system(size: 13)).foregroundStyle(Soot.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        } content: {
+            VStack(spacing: 8) {
+                OptionRow(icon: AnyView(BrandLogo(service: .slack, size: 20)),
+                          title: "From Slack channels",
+                          detail: app.slack == nil ? "Connect Slack first"
+                              : channelPrefix.isEmpty ? "Pick channels; Dever links matching Linear projects"
+                              : "Starts with \(channelPrefix); matching Linear projects are linked",
+                          recommended: app.slack != nil, enabled: app.slack != nil) { choose(.pick(.slack)) }
+                OptionRow(icon: AnyView(BrandLogo(service: .linear, size: 20).foregroundStyle(Soot.ink)),
+                          title: "From Linear projects",
+                          detail: app.linear == nil ? "Connect Linear first" : "Pick projects; Dever links matching channels",
+                          recommended: false, enabled: app.linear != nil) { choose(.pick(.linear)) }
+                OptionRow(icon: AnyView(Image(systemName: "sparkles").font(.system(size: 16, weight: .medium)).foregroundStyle(Soot.ink)),
+                          title: "From scratch",
+                          detail: "Name it; create or pick its channel and project",
+                          recommended: app.slack == nil, enabled: true) { choose(.form) }
+            }
+        }
+    }
+}
+
+/// The form: a name, then for each tool a choice (create, use existing, skip) with what it needs.
+private struct ProjectForm: View {
     @EnvironmentObject var app: AppState
     @Environment(\.dismiss) private var dismiss
     @AppStorage("slackChannelPrefix") private var channelPrefix = "proj-"
     @StateObject private var catalog = Catalog()
 
     @State var project: Project
-    var isNew: Bool
+    let isNew: Bool
+    var back: (() -> Void)? = nil
 
-    enum SlackMode: Hashable { case none, existing, create }
-    enum LinearMode: Hashable { case none, existing, create }
-    @State private var slackMode: SlackMode = .create
-    @State private var linearMode: LinearMode = .create
+    enum Mode: Hashable { case undecided, none, existing, create }
+    @State private var slackMode: Mode = .undecided
+    @State private var linearMode: Mode = .undecided
     @State private var newChannelName = ""
     @State private var privateChannel = false
     @State private var slackPick: String?
@@ -49,18 +117,17 @@ struct ProjectEditorSheet: View {
     @State private var error: String?
     @State private var nameError: String?
 
-    init(project: Project = Project(name: ""), isNew: Bool = true) {
-        _project = State(initialValue: project)
-        self.isNew = isNew
-    }
-
     var body: some View {
-        SheetScaffold(width: 640) {
+        SheetScaffold(width: 560, height: 640) {
             VStack(alignment: .leading, spacing: 8) {
-                SheetTitle(title: isNew ? "New project" : "Edit project",
-                           mark: { ActionIcon(symbol: isNew ? "plus" : "pencil") }, close: { dismiss() })
-                Text("A Dever project follows one Slack channel and one Linear project.")
-                    .font(.system(size: 14)).foregroundStyle(Soot.muted)
+                HStack(spacing: 12) {
+                    if let back { BackButton(action: back) }
+                    SheetTitle(title: isNew ? "New project" : "Edit project",
+                               mark: { if back == nil { ActionIcon(symbol: "pencil") } }, close: { dismiss() })
+                }
+                Text(isNew ? "Name it, then decide what to do for each tool."
+                           : "Change what this project follows.")
+                    .font(.system(size: 13)).foregroundStyle(Soot.muted)
             }
         } content: {
             VStack(alignment: .leading, spacing: 28) {
@@ -68,18 +135,15 @@ struct ProjectEditorSheet: View {
                     SootField(label: "Name in Dever", placeholder: "e.g. Checkout redesign", text: $project.name)
                     if let nameError { ErrorLabel(nameError) }
                 }
-                // One section per tool: its name, then the one choice, then what that choice needs.
                 slackSection
-                Rectangle().fill(Soot.line).frame(height: 1)
                 linearSection
-                Rectangle().fill(Soot.line).frame(height: 1)
                 githubSection
                 ForEach(catalog.errors + [error].compactMap { $0 }, id: \.self) { ErrorLabel($0) }
             }
         } footer: {
             HStack(spacing: 12) {
                 Text(saving ? "Saving…" : consequence)
-                    .font(.system(size: 13)).foregroundStyle(Soot.muted).lineLimit(2)
+                    .font(.system(size: 12)).foregroundStyle(Soot.muted).lineLimit(2)
                 Spacer()
                 Button("Cancel") { dismiss() }.buttonStyle(QuietButton())
                 Button(isNew ? "Create project" : "Save") { Task { await save() } }
@@ -88,23 +152,28 @@ struct ProjectEditorSheet: View {
                     .disabled(saving)
             }
         }
-        .fixedSize(horizontal: false, vertical: true)
         .task {
-            // New projects default to creating what's missing; edits never create anything implicitly.
-            let defaultMode: SlackMode = isNew ? .create : .none
-            slackMode = project.slack != nil ? .existing : (app.slack == nil ? .none : defaultMode)
-            linearMode = project.linear != nil ? .existing : (app.linear == nil ? .none : (isNew ? .create : .none))
+            // Editing shows what is linked; adding asks. A connected tool with nothing linked is a question.
+            slackMode = project.slack != nil ? .existing : (app.slack == nil ? .none : (isNew ? .undecided : .none))
+            linearMode = project.linear != nil ? .existing : (app.linear == nil ? .none : (isNew ? .undecided : .none))
             slackPick = project.slack?.id
             linearPick = project.linear?.id
             await catalog.load(app)
             teamPick = teamPick ?? catalog.teams.first?.id
             autoMatch()
+            // Snapshots: DEVER_SNAPSHOT_CHOICE=create shows both "create" tiles open.
+            if ProcessInfo.processInfo.environment["DEVER_SNAPSHOT_CHOICE"] == "create" {
+                project.name = "Checkout redesign"; slackMode = .create; linearMode = .create
+            }
         }
         .onChange(of: project.name) { _, _ in autoMatch() }
     }
 
-    private static let newItem = "__new__"
-    private static let noneItem = "__none__"
+    // MARK: Sections
+
+    private var suggestedChannel: String {
+        Naming.channelName(for: project.name.isEmpty ? "project" : project.name, prefix: channelPrefix)
+    }
 
     /// Channels you're in first, then the rest, each with its member count.
     private var channelItems: [PickerItem] {
@@ -118,17 +187,16 @@ struct ProjectEditorSheet: View {
             }
     }
 
-    /// A tool's section: logo and name, then its control (or why there is none), then extras.
-    private func toolSection<Control: View, Extra: View>(_ service: ServiceKind, title: String,
-                                                         @ViewBuilder control: () -> Control,
-                                                         @ViewBuilder extra: () -> Extra) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            SectionHeading(title: title) { BrandLogo(service: service, size: 18).foregroundStyle(Soot.ink) }
+    /// A tool's section: its name, then the choice tiles (or a way to connect it).
+    private func toolSection<Choices: View>(_ service: ServiceKind, title: String,
+                                            @ViewBuilder choices: () -> Choices) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            SectionHeading(title: title) { BrandLogo(service: service, size: 16).foregroundStyle(Soot.ink) }
             if app.isConnected(service) {
                 if catalog.loading {
-                    Skeleton(height: Soot.fieldHeight, radius: Soot.fieldRadius)
+                    Skeleton(height: 48, radius: Soot.fieldRadius)
                 } else {
-                    control().labelsHidden().frame(maxWidth: .infinity, alignment: .leading)
+                    VStack(spacing: 6) { choices() }
                 }
             } else {
                 Button {
@@ -136,15 +204,14 @@ struct ProjectEditorSheet: View {
                     NotificationCenter.default.post(name: .showScreen, object: SidebarItem.settings)
                 } label: {
                     HStack(spacing: 6) { Text("Connect \(service.label)"); Image(systemName: "arrow.up.right") }
-                        .frame(minHeight: 32)
+                        .frame(minHeight: 28)
                 }
                 .buttonStyle(.plain)
-                .font(.system(size: 14, weight: .semibold))
+                .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(Soot.lime)
                 .help("Opens Settings, where you can connect \(service.label)")
                 .modifier(FocusOutline(radius: 6))
             }
-            extra()
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel(title)
@@ -152,78 +219,73 @@ struct ProjectEditorSheet: View {
 
     private var slackSection: some View {
         toolSection(.slack, title: "Slack channel") {
-            SearchPicker(label: "Slack channel", placeholder: "Not linked",
-                         actions: [PickerItem(id: Self.noneItem, title: "Not linked", symbol: "minus.circle"),
-                                   PickerItem(id: Self.newItem, title: "New channel…", symbol: "plus")],
-                         items: channelItems,
-                         selection: Binding<String?>(
-                            get: { slackMode == .create ? Self.newItem : slackMode == .existing ? slackPick : Self.noneItem },
-                            set: { v in
-                                switch v {
-                                case Self.newItem?: slackMode = .create
-                                case Self.noneItem?, nil: slackMode = .none
-                                case let id?: slackMode = .existing; slackPick = id
-                                }
-                            }))
-        } extra: {
-            if slackMode == .create && app.slack != nil {
-                NestedGroup {
-                    SootField(label: "Channel name",
-                              placeholder: Naming.channelName(for: project.name.isEmpty ? "project" : project.name,
-                                                              prefix: channelPrefix),
-                              text: $newChannelName)
-                        .accessibilityLabel("New channel name")
-                    SwitchRow(title: "Private channel", detail: "Only invited people can see it", isOn: $privateChannel)
-                }
+            ChoiceCard(title: project.name.isEmpty && newChannelName.isEmpty ? "Create a channel named after it"
+                                : "Create #\(newChannelName.isEmpty ? suggestedChannel : newChannelName)",
+                       detail: "A new channel in your workspace", tag: isNew ? "Recommended" : nil,
+                       selected: slackMode == .create, select: { slackMode = .create }) {
+                SootField(label: "Channel name", placeholder: suggestedChannel, text: $newChannelName)
+                    .accessibilityLabel("New channel name")
+                SwitchRow(title: "Private channel", detail: "Only invited people can see it", isOn: $privateChannel)
             }
+            ChoiceCard(title: "Use an existing channel", detail: channelDetail,
+                       selected: slackMode == .existing, select: { slackMode = .existing }) {
+                SearchPicker(label: "Slack channel", placeholder: "Pick a channel",
+                             items: channelItems, selection: $slackPick)
+            }
+            ChoiceCard(title: "No channel for now", selected: slackMode == .none, select: { slackMode = .none })
         }
+    }
+
+    private var channelDetail: String? {
+        guard slackMode != .existing, let id = slackPick,
+              let ch = catalog.channels.first(where: { $0.id == id }) else { return nil }
+        return "#\(ch.name)"
     }
 
     private var linearSection: some View {
         toolSection(.linear, title: "Linear project") {
-            SearchPicker(label: "Linear project", placeholder: "Not linked",
-                         actions: [PickerItem(id: Self.noneItem, title: "Not linked", symbol: "minus.circle"),
-                                   PickerItem(id: Self.newItem, title: "New project…", symbol: "plus")],
-                         items: availableLinear.map {
-                             PickerItem(id: $0.id, title: $0.name,
-                                        subtitle: $0.teams?.nodes.map(\.name).joined(separator: ", "))
-                         },
-                         selection: Binding<String?>(
-                            get: { linearMode == .create ? Self.newItem : linearMode == .existing ? linearPick : Self.noneItem },
-                            set: { v in
-                                switch v {
-                                case Self.newItem?: linearMode = .create
-                                case Self.noneItem?, nil: linearMode = .none
-                                case let id?: linearMode = .existing; linearPick = id
-                                }
-                            }))
-        } extra: {
-            if linearMode == .create && app.linear != nil && !catalog.loading {
-                NestedGroup {
-                    VStack(alignment: .leading, spacing: 8) {
-                        FieldLabel(text: "In team")
-                        SearchPicker(label: "Team", placeholder: "Pick a team",
-                                     items: catalog.teams.map { PickerItem(id: $0.id, title: $0.name) },
-                                     selection: $teamPick)
-                    }
+            ChoiceCard(title: project.name.isEmpty ? "Create a Linear project with this name"
+                                : "Create \u{201C}\(project.name)\u{201D} in Linear",
+                       detail: "A new project with the same name", tag: isNew ? "Recommended" : nil,
+                       selected: linearMode == .create, select: { linearMode = .create }) {
+                VStack(alignment: .leading, spacing: 8) {
+                    FieldLabel(text: "In team")
+                    SearchPicker(label: "Team", placeholder: "Pick a team",
+                                 items: catalog.teams.map { PickerItem(id: $0.id, title: $0.name) },
+                                 selection: $teamPick)
                 }
             }
+            ChoiceCard(title: "Use an existing project", detail: linearDetail,
+                       selected: linearMode == .existing, select: { linearMode = .existing }) {
+                SearchPicker(label: "Linear project", placeholder: "Pick a project",
+                             items: availableLinear.map {
+                                 PickerItem(id: $0.id, title: $0.name,
+                                            subtitle: $0.teams?.nodes.map(\.name).joined(separator: ", "))
+                             },
+                             selection: $linearPick)
+            }
+            ChoiceCard(title: "No Linear project for now", selected: linearMode == .none, select: { linearMode = .none })
         }
+    }
+
+    private var linearDetail: String? {
+        guard linearMode != .existing, let id = linearPick,
+              let lp = catalog.linearProjects.first(where: { $0.id == id }) else { return nil }
+        return lp.name
     }
 
     private var githubSection: some View {
         toolSection(.github, title: "GitHub repository") {
-            SearchPicker(label: "GitHub repository", placeholder: "Not linked",
-                         actions: [PickerItem(id: Self.noneItem, title: "Not linked", symbol: "minus.circle")],
-                         items: catalog.repos.map {
-                             PickerItem(id: $0.full_name, title: $0.full_name, subtitle: $0.private ? "Private" : "Public")
-                         },
-                         selection: Binding<String?>(
-                            get: { project.githubRepo ?? Self.noneItem },
-                            set: { project.githubRepo = ($0 == Self.noneItem) ? nil : $0 }))
-        } extra: {
-            if project.githubRepo != nil && app.github != nil {
-                NestedGroup {
+            VStack(alignment: .leading, spacing: 12) {
+                SearchPicker(label: "GitHub repository", placeholder: "Not linked",
+                             actions: [PickerItem(id: Self.noneItem, title: "Not linked", symbol: "minus.circle")],
+                             items: catalog.repos.map {
+                                 PickerItem(id: $0.full_name, title: $0.full_name, subtitle: $0.private ? "Private" : "Public")
+                             },
+                             selection: Binding<String?>(
+                                get: { project.githubRepo ?? Self.noneItem },
+                                set: { project.githubRepo = ($0 == Self.noneItem) ? nil : $0 }))
+                if project.githubRepo != nil {
                     SwitchRow(title: "Count every pull request",
                               detail: "Not only those linked to this project's issues",
                               isOn: Binding(get: { project.githubWholeRepo == true },
@@ -232,6 +294,8 @@ struct ProjectEditorSheet: View {
             }
         }
     }
+
+    private static let noneItem = "__none__"
 
     private var availableChannels: [SlackChannel] {
         let taken = app.linkedSlackIDs.subtracting([project.slack?.id].compactMap { $0 })
@@ -276,12 +340,20 @@ struct ProjectEditorSheet: View {
             nameError = "Enter a project name."
             return
         }
+        if slackMode == .undecided && app.slack != nil {
+            error = "Choose what to do for Slack."
+            return
+        }
+        if linearMode == .undecided && app.linear != nil {
+            error = "Choose what to do for Linear."
+            return
+        }
         if slackMode == .existing && slackPick == nil {
-            error = "Pick a Slack channel, or choose Later."
+            error = "Pick a Slack channel, or choose \u{201C}No channel for now\u{201D}."
             return
         }
         if linearMode == .existing && linearPick == nil {
-            error = "Pick a Linear project, or choose Later."
+            error = "Pick a Linear project, or choose \u{201C}No Linear project for now\u{201D}."
             return
         }
         saving = true
@@ -298,7 +370,7 @@ struct ProjectEditorSheet: View {
                 if let id = slackPick, let ch = catalog.channels.first(where: { $0.id == id }) {
                     p.slack = .init(id: ch.id, name: ch.name)
                 }
-            case .none:
+            case .none, .undecided:
                 p.slack = nil
             }
             switch linearMode {
@@ -310,7 +382,7 @@ struct ProjectEditorSheet: View {
                 if let id = linearPick, let lp = catalog.linearProjects.first(where: { $0.id == id }) {
                     p.linear = .init(id: lp.id, name: lp.name, url: lp.url)
                 }
-            case .none:
+            case .none, .undecided:
                 p.linear = nil
             }
             app.upsert(p)
@@ -331,6 +403,8 @@ struct ImportSheet: View {
     @AppStorage("slackChannelPrefix") private var channelPrefix = "proj-"
     @StateObject private var catalog = Catalog()
     let source: Source
+    /// From the guided "Add a project" sheet: a way back to its first step.
+    var back: (() -> Void)? = nil
     @State private var selection = Set<String>()
     @State private var onlyPrefixed = true
     @State private var onlyMine = true
@@ -372,12 +446,20 @@ struct ImportSheet: View {
     private var counterpart: ServiceKind { source == .slack ? .linear : .slack }
 
     var body: some View {
-        SheetScaffold(width: 680, height: 660) {
-            VStack(alignment: .leading, spacing: 24) {
-                SheetTitle(title: source == .slack ? "Import channels" : "Import projects", mark: {
-                    ActionIcon(symbol: "square.and.arrow.down")
-                }, close: { dismiss() })
-                VStack(alignment: .leading, spacing: 14) {
+        SheetScaffold(width: 600, height: 620) {
+            VStack(alignment: .leading, spacing: 20) {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 12) {
+                        if let back { BackButton(action: back) }
+                        SheetTitle(title: source == .slack ? "From Slack channels" : "From Linear projects",
+                                   mark: { if back == nil { ActionIcon(symbol: "plus") } }, close: { dismiss() })
+                    }
+                    Text(source == .slack ? "Each channel becomes a project. A Linear project with the same name is linked."
+                                          : "Each Linear project becomes a project. A channel with the same name is linked.")
+                        .font(.system(size: 13)).foregroundStyle(Soot.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                VStack(alignment: .leading, spacing: 12) {
                     SootField(label: source == .slack ? "Search channels" : "Search projects",
                               placeholder: source == .slack ? "Channel name" : "Project name",
                               text: $search, leadingSymbol: "magnifyingglass")
@@ -415,7 +497,7 @@ struct ImportSheet: View {
                             Spacer()
                             Skeleton(width: 110, height: 12)
                         }
-                        .padding(.horizontal, 18).frame(height: 60)
+                        .padding(.horizontal, 16).frame(height: 52)
                         .background(Soot.surface, in: RoundedRectangle(cornerRadius: Soot.fieldRadius))
                     }
                 } else if candidates.isEmpty {
@@ -431,26 +513,26 @@ struct ImportSheet: View {
         return Button {
             if on { selection.remove(c.id) } else { selection.insert(c.id) }
         } label: {
-            HStack(spacing: 14) {
+            HStack(spacing: 12) {
                 CheckCircle(on: on)
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(c.title).font(.system(size: 15, weight: .medium)).foregroundStyle(Soot.ink).lineLimit(1)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(c.title).font(.system(size: 14, weight: .medium)).foregroundStyle(Soot.ink).lineLimit(1)
                     if c.projectName != c.title {
-                        Text(c.projectName).font(.system(size: 13)).foregroundStyle(Soot.muted).lineLimit(1)
+                        Text(c.projectName).font(.system(size: 12)).foregroundStyle(Soot.muted).lineLimit(1)
                     }
                 }
                 Spacer(minLength: 12)
                 HStack(spacing: 6) {
-                    BrandLogo(service: counterpart, size: 13)
+                    BrandLogo(service: counterpart, size: 12)
                         .foregroundStyle(c.match == nil ? Soot.muted : Soot.ink)
                         .opacity(c.match == nil ? 0.5 : 1)
-                    Text(c.match ?? "No match").font(.system(size: 13))
+                    Text(c.match ?? "No match").font(.system(size: 12))
                         .foregroundStyle(c.match == nil ? Soot.muted : Soot.ink).lineLimit(1)
                 }
                 .help(c.match == nil ? "Link it later from the project" : "Linked automatically")
             }
-            .padding(.horizontal, 18)
-            .frame(height: 60)
+            .padding(.horizontal, 16)
+            .frame(height: 52)
             .background(Soot.surface, in: RoundedRectangle(cornerRadius: Soot.fieldRadius))
             .overlay(RoundedRectangle(cornerRadius: Soot.fieldRadius)
                 .strokeBorder(on ? Soot.lime : .clear, lineWidth: 1.5))
@@ -465,13 +547,13 @@ struct ImportSheet: View {
         VStack(spacing: 10) {
             Text(search.isEmpty ? (source == .slack ? "No channel to import" : "No project to import")
                                 : "No result for \u{201C}\(search)\u{201D}")
-                .font(.system(size: 16, weight: .medium)).foregroundStyle(Soot.ink)
+                .font(.system(size: 15, weight: .medium)).foregroundStyle(Soot.ink)
             if source == .slack && search.isEmpty && (onlyPrefixed || onlyMine) {
                 Button("Show all channels") { onlyPrefixed = false; onlyMine = false }
-                    .buttonStyle(.plain).font(.system(size: 14, weight: .semibold)).foregroundStyle(Soot.lime)
+                    .buttonStyle(.plain).font(.system(size: 13, weight: .semibold)).foregroundStyle(Soot.lime)
             } else if !search.isEmpty {
                 Button("Clear search") { search = "" }
-                    .buttonStyle(.plain).font(.system(size: 14, weight: .semibold)).foregroundStyle(Soot.lime)
+                    .buttonStyle(.plain).font(.system(size: 13, weight: .semibold)).foregroundStyle(Soot.lime)
             }
         }
         .frame(maxWidth: .infinity)
@@ -484,13 +566,13 @@ struct ImportSheet: View {
                 Button(selection.count == candidates.count ? "Select none" : "Select all") {
                     selection = selection.count == candidates.count ? [] : Set(candidates.map(\.id))
                 }
-                .buttonStyle(.plain).font(.system(size: 14, weight: .semibold)).foregroundStyle(Soot.lime)
-                .frame(minHeight: 32)
+                .buttonStyle(.plain).font(.system(size: 13, weight: .semibold)).foregroundStyle(Soot.lime)
+                .frame(minHeight: 28)
                 .modifier(FocusOutline(radius: 6))
             }
             Spacer()
             Button("Cancel") { dismiss() }.buttonStyle(QuietButton())
-            Button(selection.isEmpty ? "Import" : "Import ^[\(selection.count) project](inflect: true)") { importSelected() }
+            Button(selection.isEmpty ? "Add" : "Add ^[\(selection.count) project](inflect: true)") { importSelected() }
                 .buttonStyle(LimeButton())
                 .keyboardShortcut(.defaultAction)
                 .disabled(selection.isEmpty)
@@ -536,14 +618,14 @@ private struct FilterChip: View {
                 if on { Image(systemName: "checkmark").font(.system(size: 10, weight: .bold)) }
                 Text(label)
             }
-            .font(.system(size: 13, weight: .semibold))
+            .font(.system(size: 12, weight: .semibold))
             .foregroundStyle(on ? Soot.limeInk : Soot.ink)
-            .padding(.horizontal, 14)
-            .frame(height: 32)
+            .padding(.horizontal, 12)
+            .frame(height: 28)
             .background(on ? Soot.lime : Soot.surface, in: Capsule())
             .overlay(Capsule().strokeBorder(on ? Color.clear : Soot.edge))
             .contentShape(Capsule())
-            .modifier(FocusOutline(radius: 16))
+            .modifier(FocusOutline(radius: 14))
         }
         .buttonStyle(.plain)
         .fixedSize()

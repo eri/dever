@@ -246,10 +246,10 @@ struct ContentView: View {
 
     private var addMenu: some View {
         Menu {
-            Button("New project…") { showNew = true }.keyboardShortcut("n")
+            Button("Add project…") { showNew = true }.keyboardShortcut("n")
             Divider()
-            Button("Import from Slack…") { importSource = .slack }.disabled(app.slack == nil)
-            Button("Import from Linear…") { importSource = .linear }.disabled(app.linear == nil)
+            Button("From Slack channels…") { importSource = .slack }.disabled(app.slack == nil)
+            Button("From Linear projects…") { importSource = .linear }.disabled(app.linear == nil)
         } label: {
             Image(systemName: "plus").foregroundStyle(Theme.muted)
         }

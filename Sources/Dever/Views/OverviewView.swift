@@ -72,7 +72,7 @@ struct OverviewView: View {
             }
             Spacer(minLength: 16)
             freshness
-            Button("New project", action: newProject).buttonStyle(PrimaryButtonStyle())
+            Button("Add project", action: newProject).buttonStyle(PrimaryButtonStyle())
         }
     }
 
@@ -202,14 +202,10 @@ struct OverviewView: View {
         } description: {
             Text("A project joins a Slack channel, a Linear project and, if you like, a GitHub repository.")
         } actions: {
-            Button("New project", action: newProject).buttonStyle(PrimaryButtonStyle())
-            HStack(spacing: 16) {
-                Button("Import from Slack…") { importFrom(.slack) }.disabled(app.slack == nil)
-                Button("Import from Linear…") { importFrom(.linear) }.disabled(app.linear == nil)
-            }
-            .buttonStyle(.link)
+            Button("Add project", action: newProject).buttonStyle(PrimaryButtonStyle())
             if app.slack == nil || app.linear == nil {
-                Text("Connect Slack and Linear in Settings to import.").font(Theme.small).foregroundStyle(Theme.muted)
+                Text("Connect Slack and Linear in Settings to start from what you already have.")
+                    .font(Theme.small).foregroundStyle(Theme.muted)
             }
         }
     }

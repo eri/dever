@@ -22,7 +22,7 @@ enum Soot {
     static let radius: CGFloat = 8
     /// Inputs and selects: a little rounder than tiles so they read as controls.
     static let fieldRadius: CGFloat = 10
-    static let fieldHeight: CGFloat = 44
+    static let fieldHeight: CGFloat = 40
     static let margin: CGFloat = 40
 }
 
@@ -42,10 +42,10 @@ struct LimeButton: ButtonStyle {
     @Environment(\.isEnabled) private var isEnabled
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .font(.system(size: 15, weight: .semibold))
+            .font(.system(size: 14, weight: .semibold))
             .foregroundStyle(isEnabled ? Soot.limeInk : Soot.muted)
-            .padding(.horizontal, 18)
-            .frame(height: 40)
+            .padding(.horizontal, 16)
+            .frame(height: 36)
             .background(isEnabled ? Soot.lime.opacity(configuration.isPressed ? 0.8 : 1) : Soot.surface,
                         in: RoundedRectangle(cornerRadius: Soot.radius))
             .overlay(RoundedRectangle(cornerRadius: Soot.radius).strokeBorder(isEnabled ? Color.clear : Soot.edge))
@@ -56,10 +56,10 @@ struct LimeButton: ButtonStyle {
 struct QuietButton: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .font(.system(size: 15, weight: .medium))
+            .font(.system(size: 14, weight: .medium))
             .foregroundStyle(Soot.ink)
-            .padding(.horizontal, 18)
-            .frame(height: 40)
+            .padding(.horizontal, 16)
+            .frame(height: 36)
             .background(Soot.surface.opacity(configuration.isPressed ? 0.7 : 1),
                         in: RoundedRectangle(cornerRadius: Soot.radius))
             .overlay(RoundedRectangle(cornerRadius: Soot.radius).strokeBorder(Soot.edge))
@@ -267,13 +267,13 @@ struct SheetTitle<Mark: View>: View {
     var body: some View {
         HStack(alignment: .center, spacing: 14) {
             mark()
-            Text(title).font(.system(size: 24, weight: .semibold)).tracking(-0.5).foregroundStyle(Soot.ink)
+            Text(title).font(.system(size: 22, weight: .semibold)).tracking(-0.5).foregroundStyle(Soot.ink)
                 .accessibilityAddTraits(.isHeader)
             Spacer()
             Button(action: close) {
-                Image(systemName: "xmark").font(.system(size: 13, weight: .semibold)).foregroundStyle(Soot.ink)
-                    .frame(width: 32, height: 32).background(Soot.surface, in: Circle())
-                    .modifier(FocusOutline(radius: 16))
+                Image(systemName: "xmark").font(.system(size: 12, weight: .semibold)).foregroundStyle(Soot.ink)
+                    .frame(width: 28, height: 28).background(Soot.surface, in: Circle())
+                    .modifier(FocusOutline(radius: 14))
             }
             .buttonStyle(.plain)
             .keyboardShortcut(.cancelAction)
@@ -357,18 +357,18 @@ struct SootField: View {
             FieldLabel(text: label)
             HStack(spacing: 10) {
                 if let leadingSymbol {
-                    Image(systemName: leadingSymbol).font(.system(size: 14, weight: .medium))
+                    Image(systemName: leadingSymbol).font(.system(size: 13, weight: .medium))
                         .foregroundStyle(Soot.muted).accessibilityHidden(true)
                 }
                 TextField(label, text: $text, prompt: Text(placeholder).foregroundStyle(Soot.muted))
                     .textFieldStyle(.plain)
-                    .font(.system(size: 15))
+                    .font(.system(size: 14))
                     .foregroundStyle(Soot.ink)
                     .focused($focused)
                     .onSubmit(onSubmit)
                     .accessibilityLabel(label)
             }
-            .padding(.horizontal, 16)
+            .padding(.horizontal, 14)
             .frame(height: Soot.fieldHeight)
             .background(Soot.surface, in: RoundedRectangle(cornerRadius: Soot.fieldRadius))
             .overlay(RoundedRectangle(cornerRadius: Soot.fieldRadius)
@@ -376,7 +376,7 @@ struct SootField: View {
             .contentShape(RoundedRectangle(cornerRadius: Soot.fieldRadius))
             .onTapGesture { focused = true }
             if let hint {
-                Text(hint).font(.system(size: 13)).foregroundStyle(Soot.muted)
+                Text(hint).font(.system(size: 12)).foregroundStyle(Soot.muted)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
@@ -392,10 +392,10 @@ struct SwitchRow: View {
     var body: some View {
         HStack(alignment: .center, spacing: 16) {
             VStack(alignment: .leading, spacing: 2) {
-                Text(title).font(.system(size: 14, weight: .medium)).foregroundStyle(Soot.ink)
+                Text(title).font(.system(size: 13, weight: .medium)).foregroundStyle(Soot.ink)
                     .fixedSize(horizontal: false, vertical: true)
                 if let detail {
-                    Text(detail).font(.system(size: 13)).foregroundStyle(Soot.muted)
+                    Text(detail).font(.system(size: 12)).foregroundStyle(Soot.muted)
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
@@ -404,7 +404,7 @@ struct SwitchRow: View {
                 .labelsHidden()
                 .toggleStyle(.switch)
                 .tint(Soot.lime)
-                .controlSize(.regular)
+                .controlSize(.small)
         }
         .frame(maxWidth: 420, minHeight: 32, alignment: .leading)
         .contentShape(Rectangle())
@@ -413,6 +413,81 @@ struct SwitchRow: View {
         .accessibilityAddTraits(.isToggle)
         .accessibilityValue(isOn ? "On" : "Off")
         .accessibilityHint(detail ?? "")
+    }
+}
+
+/// One way to do a thing, as a tile: a check ring, a title, one line, and what it needs once chosen.
+/// Same language as the onboarding choices; the selected tile has a lime edge.
+struct ChoiceCard<Nested: View>: View {
+    let title: String
+    var detail: String? = nil
+    var tag: String? = nil
+    let selected: Bool
+    let select: () -> Void
+    @ViewBuilder var nested: () -> Nested
+
+    init(title: String, detail: String? = nil, tag: String? = nil, selected: Bool,
+         select: @escaping () -> Void, @ViewBuilder nested: @escaping () -> Nested) {
+        self.title = title; self.detail = detail; self.tag = tag
+        self.selected = selected; self.select = select; self.nested = nested
+    }
+
+    init(title: String, detail: String? = nil, tag: String? = nil, selected: Bool,
+         select: @escaping () -> Void) where Nested == EmptyView {
+        self.init(title: title, detail: detail, tag: tag, selected: selected, select: select) { EmptyView() }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Button(action: select) {
+                HStack(spacing: 12) {
+                    CheckCircle(on: selected).frame(width: 20)
+                    VStack(alignment: .leading, spacing: 2) {
+                        HStack(spacing: 8) {
+                            Text(title).font(.system(size: 14, weight: .medium)).foregroundStyle(Soot.ink)
+                            if let tag {
+                                Text(tag).font(.system(size: 11, weight: .semibold)).foregroundStyle(Soot.lime)
+                            }
+                        }
+                        if let detail {
+                            Text(detail).font(.system(size: 12)).foregroundStyle(Soot.muted).lineLimit(2)
+                                .multilineTextAlignment(.leading)
+                        }
+                    }
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 12)
+                .frame(minHeight: 48)
+                .contentShape(Rectangle())
+                .modifier(FocusOutline(radius: Soot.fieldRadius))
+            }
+            .buttonStyle(.plain)
+            .accessibilityAddTraits(selected ? [.isSelected] : [])
+            if selected && !(Nested.self == EmptyView.self) {
+                VStack(alignment: .leading, spacing: 12) { nested() }
+                    .padding(.leading, 46)
+                    .padding(.trailing, 14)
+                    .padding(.bottom, 14)
+            }
+        }
+        .background(Soot.surface, in: RoundedRectangle(cornerRadius: Soot.fieldRadius))
+        .overlay(RoundedRectangle(cornerRadius: Soot.fieldRadius)
+            .strokeBorder(selected ? Soot.lime : .clear, lineWidth: 1.5))
+    }
+}
+
+/// Back to the previous step of a sheet.
+struct BackButton: View {
+    let action: () -> Void
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: "chevron.left").font(.system(size: 12, weight: .semibold)).foregroundStyle(Soot.ink)
+                .frame(width: 28, height: 28).background(Soot.surface, in: Circle())
+                .modifier(FocusOutline(radius: 14))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Back")
     }
 }
 
@@ -438,9 +513,9 @@ struct SectionHeading<Mark: View>: View {
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 10) {
             mark().frame(width: 18, alignment: .center).accessibilityHidden(true)
-            Text(title).font(.system(size: 15, weight: .semibold)).foregroundStyle(Soot.ink)
+            Text(title).font(.system(size: 14, weight: .semibold)).foregroundStyle(Soot.ink)
             if let detail {
-                Text(detail).font(.system(size: 13)).foregroundStyle(Soot.muted)
+                Text(detail).font(.system(size: 12)).foregroundStyle(Soot.muted)
             }
             Spacer(minLength: 0)
         }
@@ -458,26 +533,43 @@ struct SheetScaffold<Header: View, Content: View, Footer: View>: View {
     @ViewBuilder var content: () -> Content
     @ViewBuilder var footer: () -> Footer
 
-    private let side: CGFloat = 36
+    init(width: CGFloat, height: CGFloat? = nil,
+         @ViewBuilder header: @escaping () -> Header,
+         @ViewBuilder content: @escaping () -> Content,
+         @ViewBuilder footer: @escaping () -> Footer) {
+        self.width = width; self.height = height
+        self.header = header; self.content = content; self.footer = footer
+    }
+
+    /// A sheet without a footer: the choices in the content are the actions.
+    init(width: CGFloat, height: CGFloat? = nil,
+         @ViewBuilder header: @escaping () -> Header,
+         @ViewBuilder content: @escaping () -> Content) where Footer == EmptyView {
+        self.init(width: width, height: height, header: header, content: content, footer: { EmptyView() })
+    }
+
+    private let side: CGFloat = 32
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             header()
                 .padding(.horizontal, side)
-                .padding(.top, 32)
-                .padding(.bottom, 28)
+                .padding(.top, 28)
+                .padding(.bottom, 24)
             if height != nil {
                 ScrollView {
-                    content().padding(.horizontal, side).padding(.bottom, 32)
+                    content().padding(.horizontal, side).padding(.bottom, 28)
                 }
                 .frame(maxHeight: .infinity)
             } else {
-                content().padding(.horizontal, side).padding(.bottom, 32)
+                content().padding(.horizontal, side).padding(.bottom, 28)
             }
-            Rectangle().fill(Soot.line).frame(height: 1)
-            footer()
-                .padding(.horizontal, side)
-                .padding(.vertical, 20)
+            if !(Footer.self == EmptyView.self) {
+                Rectangle().fill(Soot.line).frame(height: 1)
+                footer()
+                    .padding(.horizontal, side)
+                    .padding(.vertical, 16)
+            }
         }
         .frame(width: width, height: height, alignment: .topLeading)
         .background(Soot.ground)
@@ -513,7 +605,7 @@ struct SearchPicker: View {
         Button { open.toggle() } label: {
             HStack(spacing: 10) {
                 if let symbol = current?.symbol {
-                    Image(systemName: symbol).font(.system(size: 14, weight: .medium)).foregroundStyle(Soot.muted)
+                    Image(systemName: symbol).font(.system(size: 13, weight: .medium)).foregroundStyle(Soot.muted)
                 }
                 Text(current?.title ?? placeholder)
                     .foregroundStyle(current == nil ? Soot.muted : Soot.ink)
@@ -522,8 +614,8 @@ struct SearchPicker: View {
                 Image(systemName: "chevron.up.chevron.down")
                     .font(.system(size: 11, weight: .semibold)).foregroundStyle(Soot.muted)
             }
-            .font(.system(size: 15))
-            .padding(.horizontal, 16)
+            .font(.system(size: 14))
+            .padding(.horizontal, 14)
             .frame(height: Soot.fieldHeight)
             .background(Soot.surface, in: RoundedRectangle(cornerRadius: Soot.fieldRadius))
             .overlay(RoundedRectangle(cornerRadius: Soot.fieldRadius)
@@ -566,14 +658,14 @@ private struct SearchPickerList: View {
                 Image(systemName: "magnifyingglass").foregroundStyle(Soot.muted).accessibilityHidden(true)
                 TextField("Search", text: $query, prompt: Text("Search").foregroundStyle(Soot.muted))
                     .textFieldStyle(.plain)
-                    .font(.system(size: 15))
+                    .font(.system(size: 14))
                     .foregroundStyle(Soot.ink)
                     .focused($searchFocused)
                     .onSubmit { if let first = (query.isEmpty ? actions + filtered : filtered).first { choose(first) } }
                     .accessibilityLabel("Search \(label)")
             }
             .padding(.horizontal, 16)
-            .frame(height: 48)
+            .frame(height: 44)
             Rectangle().fill(Soot.line).frame(height: 1)
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 2) {
@@ -589,9 +681,9 @@ private struct SearchPickerList: View {
                 }
                 .padding(8)
             }
-            .frame(maxHeight: 340)
+            .frame(maxHeight: 320)
         }
-        .frame(width: 380)
+        .frame(width: 340)
         .background(Soot.ground)
         .onAppear { searchFocused = true }
     }
@@ -627,10 +719,10 @@ private struct PickerRow: View {
                 .frame(width: 18)
                 .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(item.title).font(.system(size: 14, weight: isAction ? .medium : .regular))
+                    Text(item.title).font(.system(size: 13, weight: isAction ? .medium : .regular))
                         .foregroundStyle(Soot.ink).lineLimit(1)
                     if let subtitle = item.subtitle {
-                        Text(subtitle).font(.system(size: 12)).foregroundStyle(Soot.muted).lineLimit(1)
+                        Text(subtitle).font(.system(size: 11)).foregroundStyle(Soot.muted).lineLimit(1)
                     }
                 }
                 Spacer(minLength: 8)
@@ -639,8 +731,8 @@ private struct PickerRow: View {
                 }
             }
             .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .frame(minHeight: 40)
+            .padding(.vertical, 6)
+            .frame(minHeight: 36)
             .background(hovering ? Soot.surface : Color.clear, in: RoundedRectangle(cornerRadius: Soot.radius))
             .contentShape(Rectangle())
             .modifier(FocusOutline(radius: Soot.radius))
@@ -656,9 +748,9 @@ struct ActionIcon: View {
     let symbol: String
     var body: some View {
         Image(systemName: symbol)
-            .font(.system(size: 16, weight: .semibold))
+            .font(.system(size: 15, weight: .semibold))
             .foregroundStyle(Soot.lime)
-            .frame(width: 38, height: 38)
+            .frame(width: 34, height: 34)
             .background(Soot.surface, in: Circle())
             .accessibilityHidden(true)
     }

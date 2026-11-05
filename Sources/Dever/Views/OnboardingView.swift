@@ -390,17 +390,17 @@ private struct ProjectControls: View {
             // Same row language as Connect: one recommended path first, the others under it.
             VStack(spacing: 8) {
                 OptionRow(icon: AnyView(BrandLogo(service: .slack, size: 20)),
-                          title: "Import from Slack",
+                          title: "From Slack channels",
                           detail: app.slack == nil ? "Connect Slack first"
                               : channelPrefix.isEmpty ? "Pick your project channels" : "Channels starting with \(channelPrefix)",
                           recommended: true, enabled: app.slack != nil) { finish(.importSlack) }
                 OptionRow(icon: AnyView(BrandLogo(service: .linear, size: 20).foregroundStyle(Soot.ink)),
-                          title: "Import from Linear",
+                          title: "From Linear projects",
                           detail: app.linear == nil ? "Connect Linear first" : "Your Linear projects",
                           recommended: false, enabled: app.linear != nil) { finish(.importLinear) }
                 OptionRow(icon: AnyView(Image(systemName: "plus").font(.system(size: 16, weight: .medium)).foregroundStyle(Soot.ink)),
-                          title: "Start a new project",
-                          detail: "Creates its channel and Linear project",
+                          title: "From scratch",
+                          detail: "Name it, then create or pick its channel and Linear project",
                           recommended: false, enabled: true) { finish(.newProject) }
             }
             .frame(maxWidth: 400)
