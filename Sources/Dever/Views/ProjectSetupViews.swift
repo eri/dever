@@ -493,18 +493,29 @@ private struct PickRow: View {
     }
 }
 
-/// "Add project" with a chevron beside it: the button opens the project sheet, the chevron
-/// offers adding many at once from Slack or Linear.
+/// "Add project" with a chevron in the same pill: the main part opens the project sheet, the
+/// chevron offers adding many at once from Slack or Linear. Each part has its own hover.
 struct AddProjectButton: View {
     @EnvironmentObject var app: AppState
     let add: () -> Void
     let addMany: (ImportSheet.Source) -> Void
+    @State private var hoverMain = false
+    @State private var hoverMore = false
 
     var body: some View {
-        HStack(spacing: 1) {
-            Button("Add project", action: add)
-                .buttonStyle(PrimaryButtonStyle())
-                .clipShape(UnevenRoundedRectangle(topLeadingRadius: Theme.radiusControl, bottomLeadingRadius: Theme.radiusControl))
+        HStack(spacing: 0) {
+            Button(action: add) {
+                Text("Add project")
+                    .font(Theme.bodyStrong)
+                    .foregroundStyle(Theme.sheet)
+                    .padding(.horizontal, 12)
+                    .frame(height: 32)
+                    .background(Theme.sheet.opacity(hoverMain ? 0.12 : 0))
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .onHover { hoverMain = $0 }
+            Rectangle().fill(Theme.sheet.opacity(0.25)).frame(width: 1, height: 18)
             Menu {
                 Button { addMany(.slack) } label: {
                     Label { Text("Add many from Slack") } icon: { BrandLogo(service: .slack, size: 14) }
@@ -516,17 +527,19 @@ struct AddProjectButton: View {
                 .disabled(app.linear == nil)
             } label: {
                 Image(systemName: "chevron.down").font(.system(size: 10, weight: .bold)).foregroundStyle(Theme.sheet)
-                    .frame(width: 26, height: 32)
+                    .frame(width: 28, height: 32)
                     .contentShape(Rectangle())
             }
             .menuStyle(.button)
             .buttonStyle(.plain)
             .menuIndicator(.hidden)
-            .frame(width: 26, height: 32)
-            .background(Theme.text, in: UnevenRoundedRectangle(bottomTrailingRadius: Theme.radiusControl,
-                                                                topTrailingRadius: Theme.radiusControl))
+            .frame(width: 28, height: 32)
+            .background(Theme.sheet.opacity(hoverMore ? 0.12 : 0))
+            .onHover { hoverMore = $0 }
             .accessibilityLabel("Add many projects")
         }
+        .background(Theme.text, in: RoundedRectangle(cornerRadius: Theme.radiusControl))
+        .clipShape(RoundedRectangle(cornerRadius: Theme.radiusControl))
     }
 }
 
