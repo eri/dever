@@ -110,3 +110,19 @@ Verification: `./scripts/build-app.sh`; captures `shots6/{live,deploying,failed,
 project-{dark,light}.png`. Not verified: the live `/preview` round trip; the editor fix (other session).
 
 Verdict: Approve for the panel and page; the editor overflow remains open in the sheets session.
+
+## Revision 3 (user feedback: too much on the line; simplify)
+
+The user's reading of the set state: the PR title says nothing here; links to the APIs are not for people; the
+run, the shield, "Update preview" and "Copy app URL" are noise next to the product chips. Applied with the
+`better-interface` order of fixes (delete, then use what exists, then add):
+
+| Severity | Domain | Location | Before | After | Why |
+| --- | --- | --- | --- | --- | --- |
+| MEDIUM | Layout | Headline | Number, title, state, Run ↗, Kept pill | `#4714` (a link) and the phase with its time | Everything else was a second place for things the menu already holds; the number is enough to tell which PR |
+| MEDIUM | Writing | Host chips | Six chips, one per host (App, API, Back office, BO API, Client Hub, Client Hub API) | Three product chips (App, Back office, Client Hub); each opens its front and its glyph folds in the API's health (check · "down" · "API down" with a warning triangle) | People open products, not APIs; the API's state still shows, as a mark on its product |
+| MEDIUM | Layout | Actions, live | Copy app URL · Update preview · More | More only | The chips already open the apps; "Update" was unclear. Both moved under More as "Copy app URL" and "Redeploy with the latest commits" |
+| LOW | Writing | Protection | Kept pill | A disabled "Protected from the Saturday cleanup" line in More, or "Protect…" when not | The shield meant nothing on its own; the sentence says what it is where the action to change it lives |
+| LOW | Layout | Deploy | "Deploy preview" opened the flags row first | One click posts `/preview`; "Deploy with options…" in More opens the flags | The common deploy has no flags; the row was a step in front of every deploy |
+
+Captures: `…/scratchpad/shots7/{live,failed}/project-{dark,light}.png`. Verdict: Approve.

@@ -87,31 +87,28 @@ struct PreviewPanel: View {
         }
     }
 
-    /// One line: the word "Preview", the pull request it follows (a link), then on the right
-    /// the phase as glyph and word, when it changed, the run, the shield.
+    /// One line: the word "Preview", the pull request's number (a link), then on the right the
+    /// phase as glyph and word and when it changed. The run, the protection and the rest live
+    /// under More.
     private var headline: some View {
         HStack(spacing: 10) {
             Image(systemName: "globe").font(.system(size: 14, weight: .semibold)).foregroundStyle(Soot.ink)
                 .accessibilityHidden(true)
             Text("Preview").font(.system(size: 15, weight: .semibold)).foregroundStyle(Soot.ink)
                 .accessibilityAddTraits(.isHeader)
-            if let s = status {
-                HoverLink(destination: s.pull.url) {
+            if let number = project.previewPullNumber {
+                let s = status
+                HoverLink(destination: s?.pull.url ?? URL(string: "https://github.com/\(project.githubRepo ?? "")/pull/\(number)")!) {
                     HStack(spacing: 6) {
-                        IDPill(text: "#\(s.pull.number)")
-                        Text(PullTitle.split(s.pull.title).title).font(.system(size: 13)).foregroundStyle(Soot.muted)
-                            .lineLimit(1).truncationMode(.tail)
-                        if s.pull.state != .open {
-                            Text(s.pull.state.word).font(.system(size: 12, weight: .medium)).foregroundStyle(Soot.muted)
+                        IDPill(text: "#\(number)")
+                        if let state = s?.pull.state, state != .open {
+                            Text(state.word).font(.system(size: 12, weight: .medium)).foregroundStyle(Soot.muted)
                         }
                     }
                 }
-                .layoutPriority(-1)
-                .help("#\(s.pull.number) \(s.pull.title) · \(s.pull.state.word) · by \(s.pull.author) · Opens on GitHub")
-                .accessibilityLabel("Pull request #\(s.pull.number), \(s.pull.title), \(s.pull.state.word), by \(s.pull.author)")
+                .help(s.map { "#\($0.pull.number) \($0.pull.title) · \($0.pull.state.word) · by \($0.pull.author) · Opens on GitHub" } ?? "Opens the pull request on GitHub")
+                .accessibilityLabel(s.map { "Pull request #\($0.pull.number), \($0.pull.title), \($0.pull.state.word)" } ?? "Pull request #\(number)")
                 .accessibilityHint("Opens on GitHub")
-            } else if let number = project.previewPullNumber {
-                IDPill(text: "#\(number)")
             }
             Spacer(minLength: 12)
             if let s = status {
@@ -121,15 +118,6 @@ struct PreviewPanel: View {
                     Text(verbatim: "·").foregroundStyle(Soot.muted).accessibilityHidden(true)
                     Text(timeLine(s.phase, at)).font(.system(size: 12)).foregroundStyle(Soot.muted).lineLimit(1)
                 }
-                if let run = s.run {
-                    HoverLink(destination: run.url) {
-                        HStack(spacing: 4) { Text("Run"); Image(systemName: "arrow.up.right") }
-                            .font(.system(size: 13, weight: .semibold)).foregroundStyle(Soot.lime)
-                    }
-                    .help("Open the workflow run on GitHub")
-                    .accessibilityLabel("Open the workflow run on GitHub")
-                }
-                if s.keep { KeepPill() }
             }
         }
         .frame(minHeight: 28)
@@ -192,11 +180,12 @@ struct PreviewPanel: View {
         .accessibilityLabel("\(s.phase.word). \(s.run?.step ?? "Waiting for the workflow")")
     }
 
-    /// The hosts the workflow deployed, each a chip that opens it and says whether it answers.
+    /// The products the workflow deployed, one chip each: the chip opens the product and its
+    /// glyph says whether the product and its API answer.
     private func targetChips(_ s: PreviewStatus) -> some View {
         FlowRow(spacing: 6) {
-            ForEach(s.sortedTargets) { target in
-                TargetChip(target: target, url: PreviewTarget.url(target, pull: s.pull.number), reachable: s.targets[target] ?? nil)
+            ForEach(PreviewProduct.allCases.filter { $0.isPresent(in: s) }) { product in
+                ProductChip(product: product, status: s)
             }
         }
     }
@@ -226,31 +215,35 @@ struct PreviewPanel: View {
             } else {
                 switch s.phase {
                 case .notDeployed, .deleted, .failed:
-                    Button("Deploy preview") { optionsOpen = true }
-                        .buttonStyle(LimeButton()).disabled(sending)
-                        .help("Choose the options, then post /preview on the pull request")
-                case .live:
-                    // The preview is there: nothing presses for attention, so no lime.
-                    if let appURL = s.appURL {
-                        Button(copied ? "Copied" : "Copy app URL") { copyAppURL(s) }
-                            .buttonStyle(QuietButton())
-                            .help(appURL.absoluteString)
-                            .accessibilityValue(copied ? "Copied" : "")
+                    // One click posts the plain command; the flags wait under More.
+                    Button(sending ? "Sending…" : "Deploy preview") {
+                        Task { await send { try await store.deploy(project, app: app, options: options) } }
                     }
-                    Button(sending ? "Sending…" : "Update preview") { Task { await send { try await store.deploy(project, app: app, options: options) } } }
-                        .buttonStyle(QuietButton()).disabled(sending)
-                        .help("Post /preview again: rebuilds the targets the diff touched")
-                case .deploying, .updating, .deleting:
-                    EmptyView()
+                    .buttonStyle(LimeButton()).disabled(sending)
+                    .help("Posts \(options.command) on the pull request; about ten minutes")
+                case .live, .deploying, .updating, .deleting:
+                    // The preview is there or on its way: nothing presses for attention.
+                    if sending { Text("Sending…").font(.system(size: 13)).foregroundStyle(Soot.muted) }
                 }
             }
             Menu {
-                if s.phase == .live, !s.keep, canCommand {
-                    Button("Protect from Saturday cleanup…") { confirmingProtect = true }
+                if !s.phase.busy, canCommand, s.phase != .live {
+                    Button("Deploy with options…") { optionsOpen = true }
+                }
+                if s.phase == .live, canCommand {
+                    Button("Redeploy with the latest commits") { Task { await send { try await store.deploy(project, app: app, options: options) } } }
+                        .disabled(sending)
+                    if let appURL = s.appURL { Button("Copy app URL") { copyAppURL(s, appURL) } }
+                    if s.keep {
+                        Button("Protected from the Saturday cleanup") {}.disabled(true)
+                    } else {
+                        Button("Protect from the Saturday cleanup…") { confirmingProtect = true }
+                    }
                 }
                 if s.phase == .live || s.phase == .failed || s.phase == .updating {
                     Button("Delete preview…", role: .destructive) { confirmingDelete = true }
                 }
+                Divider()
                 Link("Open pull request", destination: s.pull.url)
                 if let run = s.run { Link("Open workflow run", destination: run.url) }
                 Divider()
@@ -265,7 +258,7 @@ struct PreviewPanel: View {
             .buttonStyle(QuietButton())
             .menuIndicator(.hidden)
             .fixedSize()
-            .help("More: protect, delete, open on GitHub, change the pull request")
+            .help("More: redeploy, protect, delete, open on GitHub, change the pull request")
             .accessibilityLabel("More preview actions")
         }
     }
@@ -307,8 +300,7 @@ struct PreviewPanel: View {
         do { try await body() } catch { actionError = error.localizedDescription }
     }
 
-    private func copyAppURL(_ s: PreviewStatus) {
-        guard let url = s.appURL else { return }
+    private func copyAppURL(_ s: PreviewStatus, _ url: URL) {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(url.absoluteString, forType: .string)
         copied = true
@@ -344,51 +336,65 @@ struct PreviewPhaseGlyph: View {
     }
 }
 
-/// `preview:keep`: the preview survives the Saturday cleanup.
-struct KeepPill: View {
-    var body: some View {
-        HStack(spacing: 4) {
-            Image(systemName: "shield.fill").font(.system(size: 10, weight: .semibold))
-            Text("Kept").font(.system(size: 12, weight: .semibold))
+/// A product of the preview: its front and the API behind it, deployed as separate hosts.
+enum PreviewProduct: String, CaseIterable, Identifiable {
+    case app, backOffice, clientHub
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .app: "App"
+        case .backOffice: "Back office"
+        case .clientHub: "Client Hub"
         }
-        .foregroundStyle(Soot.lime)
-        .padding(.horizontal, 8)
-        .frame(height: 24)
-        .overlay(Capsule().strokeBorder(Soot.lime))
-        .help("Labelled preview:keep: skipped by the Saturday cleanup. Deleting the preview or closing the pull request lifts it.")
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Kept: protected from the Saturday cleanup")
     }
+
+    var front: PreviewTarget {
+        switch self {
+        case .app: .app
+        case .backOffice: .bo
+        case .clientHub: .clienthub
+        }
+    }
+
+    var api: PreviewTarget {
+        switch self {
+        case .app: .api
+        case .backOffice: .boapi
+        case .clientHub: .clienthubAPI
+        }
+    }
+
+    func isPresent(in s: PreviewStatus) -> Bool { s.targets[front] != nil || s.targets[api] != nil }
 }
 
-/// One deployed host: its name, whether it answered the probe, a click opens it.
-private struct TargetChip: View {
-    let target: PreviewTarget
-    let url: URL
-    /// nil while the probe runs.
-    let reachable: Bool?
+/// One product as a chip: a click opens its front; the glyph folds in the API's health.
+private struct ProductChip: View {
+    let product: PreviewProduct
+    let status: PreviewStatus
     @State private var hovering = false
 
-    private var word: String {
-        switch reachable {
-        case true?: "up"
-        case false?: "not answering"
-        case nil: "checking"
-        }
+    private var frontUp: Bool? { status.targets[product.front] ?? nil }
+    private var apiUp: Bool? { status.targets[product.api] ?? nil }
+    private var url: URL {
+        PreviewTarget.url(status.targets[product.front] != nil ? product.front : product.api, pull: status.pull.number)
+    }
+
+    /// Shape and word together: a check, a cross for the front, a warning for the API only.
+    private var mark: (symbol: String, tint: Color, word: String) {
+        if frontUp == false { return ("xmark.circle.fill", Theme.negative, "down") }
+        if apiUp == false { return ("exclamationmark.triangle.fill", Theme.chart3, "API down") }
+        if frontUp == nil && apiUp == nil { return ("circle.dotted", Soot.muted, "checking") }
+        return ("checkmark.circle.fill", Theme.positive, "up")
     }
 
     var body: some View {
+        let mark = mark
         Link(destination: url) {
             HStack(spacing: 6) {
-                switch reachable {
-                case true?: Image(systemName: "checkmark.circle.fill").foregroundStyle(Theme.positive)
-                case false?: Image(systemName: "xmark.circle.fill").foregroundStyle(Theme.negative)
-                case nil: Image(systemName: "circle.dotted").foregroundStyle(Soot.muted)
-                }
-                Text(target.label).foregroundStyle(Soot.ink)
-                if reachable == false {
-                    Text("down").foregroundStyle(Soot.muted)
-                }
+                Image(systemName: mark.symbol).foregroundStyle(mark.tint)
+                Text(product.label).foregroundStyle(Soot.ink)
+                if mark.word.hasSuffix("down") { Text(mark.word).foregroundStyle(Soot.muted) }
                 Image(systemName: "arrow.up.right").font(.system(size: 10, weight: .bold)).foregroundStyle(Soot.muted)
             }
             .font(.system(size: 13, weight: .semibold))
@@ -402,9 +408,17 @@ private struct TargetChip: View {
         .handCursor()
         .modifier(FocusOutline(radius: 15))
         .onHover { hovering = $0 }
-        .help("\(url.absoluteString) · \(word)")
-        .accessibilityLabel("\(target.label), \(word)")
+        .help(detail)
+        .accessibilityLabel("\(product.label), \(mark.word)")
         .accessibilityHint("Opens in the browser")
+    }
+
+    private var detail: String {
+        func line(_ t: PreviewTarget, _ up: Bool?) -> String? {
+            guard status.targets[t] != nil else { return nil }
+            return "\(t.label): \(up == true ? "up" : up == false ? "not answering" : "checking") · \(PreviewTarget.url(t, pull: status.pull.number).host ?? "")"
+        }
+        return [line(product.front, frontUp), line(product.api, apiUp)].compactMap { $0 }.joined(separator: "\n")
     }
 }
 
