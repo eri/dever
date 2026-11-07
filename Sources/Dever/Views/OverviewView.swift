@@ -15,6 +15,8 @@ struct OverviewView: View {
 
     @State private var search = ""
     @State private var showView = false
+    /// The "Add many" menu under the Add project button, drawn inside the window.
+    @State private var showMany = false
     /// Rows fade in once, on the page's first appearance.
     @State private var appeared = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -112,8 +114,15 @@ struct OverviewView: View {
             } else {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 20) {
-                        head
+                        head.zIndex(1)
                         table
+                            .overlay {
+                                // A click anywhere under the open menu closes it.
+                                if showMany {
+                                    Color.clear.contentShape(Rectangle())
+                                        .onTapGesture { Motion.run(Motion.ui, fade: true) { showMany = false } }
+                                }
+                            }
                     }
                     .padding(.horizontal, 28)
                     .padding(.vertical, 24)
@@ -166,7 +175,7 @@ struct OverviewView: View {
                         .frame(width: 340)
                         .background(Soot.ground)
                 }
-                AddProjectControl(add: newProject, addMany: importFrom)
+                AddProjectControl(add: newProject, addMany: importFrom, showMany: $showMany)
             }
         }
     }
@@ -308,42 +317,171 @@ private struct Count: View {
     }
 }
 
-/// "Add project" as the one lime action, with a chevron for adding many at once.
+/// "Add project" as the one lime action: one 34px capsule split by a hairline. The left part
+/// adds one project, the chevron opens the ways to add many; each part has its own hover and
+/// press tone and its own focus ring, drawn inside it so it never crosses the hairline.
 private struct AddProjectControl: View {
     @EnvironmentObject var app: AppState
     let add: () -> Void
     let addMany: (ImportSheet.Source) -> Void
-    @State private var hoverMore = false
+    @Binding var showMany: Bool
+
+    private func toggle(_ on: Bool) { Motion.run(Motion.ui, fade: true) { showMany = on } }
 
     var body: some View {
         HStack(spacing: 0) {
-            Button("Add project", action: add).buttonStyle(LimeButton())
-            Menu {
-                Button { addMany(.slack) } label: {
-                    Label { Text("Add many from Slack") } icon: { BrandLogo(service: .slack, size: 14) }
+            Button(action: add) {
+                HStack(spacing: 6) {
+                    Image(systemName: "plus").font(.system(size: 12, weight: .bold)).accessibilityHidden(true)
+                    Text("Add project").font(.system(size: 13, weight: .semibold))
                 }
-                .disabled(app.slack == nil)
-                Button { addMany(.linear) } label: {
-                    Label { Text("Add many from Linear") } icon: { BrandLogo(service: .linear, size: 14) }
-                }
-                .disabled(app.linear == nil)
-            } label: {
-                Image(systemName: "chevron.down").font(.system(size: 10, weight: .bold)).foregroundStyle(Soot.limeInk)
-                    .frame(width: 30, height: 36)
-                    .contentShape(Rectangle())
+                .padding(.horizontal, 12)
             }
-            .menuStyle(.button)
-            .buttonStyle(.plain)
-            .menuIndicator(.hidden)
-            .frame(width: 30, height: 36)
-            .background(Soot.lime.opacity(hoverMore ? 0.8 : 1), in: Rectangle())
-            .overlay(alignment: .leading) { Rectangle().fill(Soot.limeInk.opacity(0.25)).frame(width: 1, height: 18) }
-            .onHover { hoverMore = $0 }
-            .help("Add many projects from Slack or Linear")
+            .buttonStyle(LimeSegment())
+            .help("Add a project (⌘N)")
+            Rectangle().fill(Soot.limeInk.opacity(0.28)).frame(width: 1, height: 18)
+                .accessibilityHidden(true)
+            Button { toggle(!showMany) } label: {
+                Image(systemName: "chevron.down").font(.system(size: 11, weight: .bold))
+                    .rotationEffect(.degrees(showMany ? 180 : 0))
+                    .motion(Motion.ui, value: showMany)
+                    .frame(width: 32)
+            }
+            .buttonStyle(LimeSegment(open: showMany))
+            .help("Add many projects at once")
             .accessibilityLabel("Add many projects")
+            .onAppear {
+                // Snapshots: DEVER_SNAPSHOT_ADD_MANY=1 opens the menu.
+                if ProcessInfo.processInfo.environment["DEVER_SNAPSHOT_ADD_MANY"] == "1" {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 2) { toggle(true) }
+                }
+            }
         }
+        .foregroundStyle(Soot.limeInk)
+        .frame(height: 34)
+        .background(Soot.lime, in: RoundedRectangle(cornerRadius: Soot.radius))
         .clipShape(RoundedRectangle(cornerRadius: Soot.radius))
+        // The menu hangs from the button's trailing edge, inside the window, over the table.
+        .overlay(alignment: .topTrailing) {
+            if showMany {
+                AddManyMenu(addMany: { source in toggle(false); addMany(source) }, close: { toggle(false) })
+                    .fixedSize()
+                    .offset(y: 34 + 6)
+                    .transition(Motion.pop.combined(with: .offset(y: Motion.reduced ? 0 : -4)))
+            }
+        }
+        .onExitCommand { if showMany { toggle(false) } }
+    }
+}
+
+/// One part of a split lime button: a tone on hover and press, the focus ring inside it.
+private struct LimeSegment: ButtonStyle {
+    var open = false
+    func makeBody(configuration: Configuration) -> some View {
+        LimeSegmentBody(configuration: configuration, open: open)
+    }
+}
+
+private struct LimeSegmentBody: View {
+    let configuration: ButtonStyle.Configuration
+    let open: Bool
+    @State private var hovering = false
+    @Environment(\.isFocused) private var focused
+
+    var body: some View {
+        configuration.label
+            .frame(maxHeight: .infinity)
+            .background(Soot.limeInk.opacity(configuration.isPressed ? 0.16 : hovering || open ? 0.08 : 0))
+            .overlay(RoundedRectangle(cornerRadius: Soot.radius - 2).strokeBorder(Soot.limeInk, lineWidth: 2)
+                .padding(2).opacity(focused ? 1 : 0))
+            .contentShape(Rectangle())
+            .motion(Motion.quick, fade: true, value: hovering)
+            .motion(Motion.quick, fade: true, value: open)
+            .onHover { hovering = $0 }
+            .handCursor()
+    }
+}
+
+/// The ways to add many projects, in the soot language: each tool as a row with its logo, what
+/// it brings and an arrow; a tool that is not connected says so and leads to Settings.
+private struct AddManyMenu: View {
+    @EnvironmentObject var app: AppState
+    let addMany: (ImportSheet.Source) -> Void
+    let close: () -> Void
+    @Environment(\.openSettings) private var openSettings
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("Add many").font(.system(size: 12, weight: .semibold)).foregroundStyle(Soot.muted)
+                .padding(.horizontal, 10)
+                .padding(.top, 4)
+                .padding(.bottom, 2)
+                .accessibilityAddTraits(.isHeader)
+            row(.slack, title: "From Slack channels", detail: "One per channel", connected: app.slack != nil)
+            row(.linear, title: "From Linear projects", detail: "One per Linear project", connected: app.linear != nil)
+        }
+        .padding(8)
+        .frame(width: 300)
+        .background(Soot.ground, in: RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Soot.line))
+        .shadow(color: .black.opacity(0.28), radius: 18, y: 8)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Add many projects")
+    }
+
+    private func row(_ service: ServiceKind, title: String, detail: String, connected: Bool) -> some View {
+        MenuRow(service: service, title: title, detail: connected ? detail : "Connect \(service.label) in Settings",
+                connected: connected) {
+            if connected {
+                addMany(service == .slack ? .slack : .linear)
+            } else {
+                close()
+                openSettings()
+            }
+        }
+    }
+}
+
+private struct MenuRow: View {
+    let service: ServiceKind
+    let title: String
+    let detail: String
+    let connected: Bool
+    let action: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 12) {
+                BrandLogo(service: service, size: 20)
+                    .foregroundStyle(Soot.ink)
+                    .opacity(connected ? 1 : 0.5)
+                    .frame(width: 32, height: 32)
+                    .background(Soot.surface, in: RoundedRectangle(cornerRadius: 8))
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(title).font(.system(size: 14, weight: .medium)).foregroundStyle(Soot.ink)
+                    Text(detail).font(.system(size: 12)).foregroundStyle(Soot.muted).lineLimit(1)
+                }
+                Spacer(minLength: 8)
+                Image(systemName: connected ? "arrow.right" : "arrow.up.right")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(hovering && connected ? Soot.limeInk : Soot.muted)
+                    .frame(width: 26, height: 26)
+                    .background(hovering && connected ? Soot.lime : Color.clear, in: Circle())
+                    .accessibilityHidden(true)
+            }
+            .padding(.horizontal, 10)
+            .frame(height: 52)
+            .background(hovering ? Soot.surface : Color.clear, in: RoundedRectangle(cornerRadius: Soot.radius))
+            .contentShape(RoundedRectangle(cornerRadius: Soot.radius))
+        }
+        .buttonStyle(.plain)
         .modifier(FocusOutline(radius: Soot.radius))
+        .motion(Motion.quick, fade: true, value: hovering)
+        .onHover { hovering = $0 }
+        .handCursor()
+        .accessibilityLabel("\(title). \(detail)")
     }
 }
 
