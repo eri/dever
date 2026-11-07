@@ -12,7 +12,7 @@ enum OnboardingExit { case overview, newProject, importSlack, importLinear }
 
 
 struct OnboardingView: View {
-    enum Stage: Int, CaseIterable { case name, connect, channels, project }
+    enum Stage: Int, CaseIterable { case name, connect, repositories, channels, project }
 
     @EnvironmentObject var app: AppState
     @State var stage: Stage = .name
@@ -64,7 +64,8 @@ struct OnboardingView: View {
             Group {
                 switch stage {
                 case .name: NameControls(next: { stage = .connect })
-                case .connect: ConnectControls(next: { stage = app.slack == nil ? .project : .channels })
+                case .connect: ConnectControls(next: { stage = app.github == nil ? afterRepositories : .repositories })
+                case .repositories: RepositoryModeControls(next: { stage = afterRepositories })
                 case .channels: ChannelNamingControls(next: { stage = .project })
                 case .project: ProjectControls(finish: finish)
                 }
@@ -74,7 +75,10 @@ struct OnboardingView: View {
         }
     }
 
-    /// Order shown by position: three marks, the current one long.
+    /// Channel naming needs Slack; without it, straight to the projects.
+    private var afterRepositories: Stage { app.slack == nil ? .project : .channels }
+
+    /// Order shown by position: one mark per stage, the current one long.
     private var progress: some View {
         HStack(spacing: 6) {
             ForEach(Stage.allCases, id: \.self) { s in
@@ -85,7 +89,7 @@ struct OnboardingView: View {
                 }
                 .buttonStyle(.plain)
                 .disabled(s.rawValue >= stage.rawValue)
-                .accessibilityLabel(["Name", "Connect", "Channel names", "First project"][s.rawValue])
+                .accessibilityLabel(["Name", "Connect", "Repositories", "Channel names", "First project"][s.rawValue])
                 .accessibilityAddTraits(s == stage ? .isSelected : [])
             }
         }

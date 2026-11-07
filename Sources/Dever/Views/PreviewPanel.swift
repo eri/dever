@@ -98,7 +98,7 @@ struct PreviewPanel: View {
                 .accessibilityAddTraits(.isHeader)
             if let number = project.previewPullNumber {
                 let s = status
-                HoverLink(destination: s?.pull.url ?? URL(string: "https://github.com/\(project.githubRepo ?? "")/pull/\(number)")!) {
+                HoverLink(destination: s?.pull.url ?? URL(string: "https://github.com/\(app.previewRepository(for: project) ?? "")/pull/\(number)")!) {
                     HStack(spacing: 6) {
                         IDPill(text: "#\(number)")
                         if let state = s?.pull.state, state != .open {

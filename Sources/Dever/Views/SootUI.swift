@@ -227,11 +227,18 @@ struct ChipPicker<Value: Hashable>: View {
 /// A round check mark for selectable rows.
 struct CheckCircle: View {
     let on: Bool
+    /// A rounded square says "several can be on", a circle "one of these".
+    var square = false
     var body: some View {
         ZStack {
-            Circle().strokeBorder(on ? Soot.lime : Soot.muted, lineWidth: 1.5)
+            if square {
+                RoundedRectangle(cornerRadius: 4).strokeBorder(on ? Soot.lime : Soot.muted, lineWidth: 1.5)
+                if on { RoundedRectangle(cornerRadius: 4).fill(Soot.lime) }
+            } else {
+                Circle().strokeBorder(on ? Soot.lime : Soot.muted, lineWidth: 1.5)
+                if on { Circle().fill(Soot.lime) }
+            }
             if on {
-                Circle().fill(Soot.lime)
                 Image(systemName: "checkmark").font(.system(size: 9, weight: .bold)).foregroundStyle(Soot.limeInk)
             }
         }

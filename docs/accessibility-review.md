@@ -88,3 +88,39 @@ Scope: the issue page reached from a project's Issues list, dark and light, chec
 - Truncated titles in linked-issue rows carry the full title in a tooltip and open the issue.
 - Text sizes: body 15, activity 14, secondary 13, captions 12; the title's inline code is set
   at the title size minus 1.5.
+
+## Repository mode (onboarding stage, project editor, Settings)
+
+Scope: the "Where's the code?" onboarding stage, the editor's Repositories step (per-project
+and mixed modes), the import rows' repository match, the Repositories section of Settings, and
+the repository label on pull request chips. Checked on captures in dark and light; names, focus
+and keyboard verified in code; contrast computed from the palette.
+
+| Pair | Dark | Light | Need |
+|---|---|---|---|
+| Mode row title `Soot.ink` / detail `Soot.muted` on surface (onboarding, editor) | 17.4 / 5.38:1 | 17.5 / 6.05:1 | 4.5 |
+| Mode row title `Theme.text` / detail `Theme.muted` on the Settings panel | ≥ 12 / 5.0:1 | ≥ 12 / 5.2:1 | 4.5 |
+| Idle ring `Soot.muted` on surface; selected ring and tick box (lime, full) | 5.38 / 15.03:1 | 6.05 / 7.08:1 | 3 |
+| Selected mode edge in Settings (`Theme.text`, 2px) | ≥ 12:1 | ≥ 12:1 | 3 |
+| Workspace repository picker edge `Soot.edge`; focused / open (lime, 2px) | 3.51 / 16.55:1 | 3.45 / 6.43:1 | 3 |
+| Repository name on a pull request chip, `Soot.muted` on surface | 5.38:1 | 6.05:1 | 4.5 |
+
+- The three mode rows are buttons in a group named "Repository mode"; each reads as
+  "<title>. <detail>" and exposes `isSelected`. The selected row is shown by the filled ring and
+  the edge (shape and fill, not hue alone), and in Settings by a 2px edge in the text colour.
+- The editor's repository list uses a rounded tick box instead of the radio ring where several
+  rows can be on at once (1.3.1: the shape says "pick several"); the count of picked
+  repositories is written under the list. In mixed mode, the two radio rows ("Use the workspace
+  repository" / "Its own repositories") are grouped under "Which repositories".
+- The workspace repository picker is a `SearchPicker`: named "Workspace repository", value read
+  as the picked name or "None", type-to-filter list, Return picks the first match. Without
+  GitHub, a sentence replaces it ("Connect GitHub to pick it") rather than a disabled control.
+- Every new control carries the 2px lime focus ring (`FocusOutline`); nothing moves on hover.
+- Targets: mode rows 64px (onboarding) / 52px (Settings), list rows 44px, picker 40px.
+  Pull request chips stay at 26px with the repository label (2.5.8 asks 24px; they sit in a
+  56px row that opens the same issue).
+- The pull request chip's accessible name says the repository ("Pull request #4864, in
+  owner/name, open") only when the project follows more than one, so single-repository
+  projects keep their shorter names.
+- The one-line consequence under the Settings picker is plain text that changes with the
+  mode, not a live region: the change is the user's own action.

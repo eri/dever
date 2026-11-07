@@ -239,6 +239,7 @@ private struct ProjectListHeader: View {
 }
 
 private struct ProjectRow: View {
+    @EnvironmentObject var app: AppState
     let project: Project
     let status: ProjectStatus
     let snapshot: ProjectSnapshot?
@@ -337,7 +338,7 @@ private struct ProjectRow: View {
                 Text(g.openPRs, format: .number).foregroundStyle(Theme.text).monospacedDigit()
                 Text("open").font(Theme.small).foregroundStyle(Theme.muted)
             }
-        } else if project.githubRepo == nil {
+        } else if app.repositories(for: project).isEmpty {
             dash("No repository linked")
         } else if snapshot?.errors[.github] != nil {
             // The pipeline column, next to this one, says why.
@@ -351,7 +352,7 @@ private struct ProjectRow: View {
     private var pipeline: some View {
         if let g = snapshot?.github {
             PipelineBadge(state: g.pipeline)
-        } else if project.githubRepo == nil {
+        } else if app.repositories(for: project).isEmpty {
             dash("No repository linked")
         } else if let state = snapshot?.errors[.github] {
             unavailable(.github, state)

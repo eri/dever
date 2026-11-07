@@ -59,13 +59,7 @@ struct ProjectPullRequests {
             seen.insert(branch)
             return true
         }
-        let states = latest.map(ProjectSnapshot.PipelineState.init(run:))
-        let state: ProjectSnapshot.PipelineState =
-            states.contains(.failing) ? .failing
-            : states.contains(.running) ? .running
-            : states.contains(.passing) ? .passing
-            : .unknown
-        return (state, latest)
+        return (ProjectSnapshot.PipelineState.worst(latest.map(ProjectSnapshot.PipelineState.init(run:))), latest)
     }
 
     /// Pull requests of `repo` that Linear attached to the issues, by number. Covers PRs
@@ -100,6 +94,26 @@ struct ProjectPullRequests {
     }
 }
 
+extension GitHubPull {
+    /// `owner/name`, read off the pull request's own URL.
+    var repository: String { GitHubRepository.name(fromURL: html_url) }
+}
+
+/// A repository name as GitHub writes it, `owner/name`.
+enum GitHubRepository {
+    static func name(fromURL url: String) -> String {
+        let parts = url.split(separator: "/", omittingEmptySubsequences: true).map(String.init)
+        // https: / github.com / owner / name / pull / N
+        guard let host = parts.firstIndex(where: { $0.contains("github.com") }), parts.count > host + 2 else { return "" }
+        return parts[host + 1] + "/" + parts[host + 2]
+    }
+
+    /// The part after the slash: what a row shows when every repository shares an owner.
+    static func short(_ repo: String) -> String {
+        repo.split(separator: "/").last.map(String.init) ?? repo
+    }
+}
+
 extension ProjectSnapshot.PipelineState {
     init(run: GitHubRun) {
         if run.status != "completed" {
@@ -118,7 +132,8 @@ struct MergedPull: Identifiable {
     var url: String
     var issue: String?
     var mergedAt: Date?
-    var id: Int { number }
+    var id: String { url }
+    var repository: String { GitHubRepository.name(fromURL: url) }
 
     static func list(repo: String, recentlyMerged: [GitHubPull], issues: [IssueReference]?,
                      wholeRepository: Bool, open: Set<Int>) -> [MergedPull] {

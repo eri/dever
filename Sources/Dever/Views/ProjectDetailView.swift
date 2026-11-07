@@ -20,7 +20,8 @@ struct ProjectDetailView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var pulls: [ProjectPullRequests.Match] = []
     @State private var pullsScoped = false
-    @State private var runs: [GitHubRun] = []
+    /// The runs of each repository (the branches of two repositories may share a name).
+    @State private var runs: [String: [GitHubRun]] = [:]
     @State private var merged: [MergedPull] = []
     /// Why a panel has nothing: not connected, token rejected, offline, or a failure.
     @State private var states: [ServiceKind: ServiceState] = [:]
@@ -38,9 +39,13 @@ struct ProjectDetailView: View {
     /// several get one section at the top and quiet placeholders in the panels.
     private var missing: [ServiceKind] { app.missingServices(for: project) }
     private var linkedServices: [ServiceKind] {
-        [project.slack != nil ? .slack : nil, project.linear != nil ? .linear : nil, project.githubRepo != nil ? .github : nil]
+        [project.slack != nil ? .slack : nil, project.linear != nil ? .linear : nil, repos.isEmpty ? nil : .github]
             .compactMap { $0 }
     }
+    /// The repositories the project follows under the workspace's repository mode.
+    private var repos: [String] { app.repositories(for: project) }
+    /// Rows name their repository once the project follows more than one.
+    private var labelsRepository: Bool { repos.count > 1 }
     /// Reloads when a token arrives, so a panel fills in without leaving the page.
     private var connectionKey: String { "\(app.slack != nil)-\(app.linear != nil)-\(app.github != nil)" }
 
@@ -109,7 +114,7 @@ struct ProjectDetailView: View {
     private var workColumn: some View {
         VStack(spacing: 16) {
             // The preview first: it is the thing to open or to deploy, and it stays one or two lines.
-            if project.showsPreview {
+            if app.showsPreview(project) {
                 PreviewPanel(project: project, missing: missing, flow: flow,
                              addPreview: {
                                  ProjectEditorSheet.openAt = .preview
@@ -181,7 +186,7 @@ struct ProjectDetailView: View {
             if let linear = project.linear {
                 ToolChip(service: .linear, text: linear.name, url: URL(string: linear.url))
             }
-            if let repo = project.githubRepo {
+            ForEach(repos, id: \.self) { repo in
                 ToolChip(service: .github, text: repo, url: URL(string: "https://github.com/\(repo)"))
             }
             if !project.isComplete {
@@ -208,7 +213,13 @@ struct ProjectDetailView: View {
     // MARK: Work (the signature block)
 
     private var linearURL: URL? { project.linear.flatMap { URL(string: $0.url) } }
-    private var repoURL: URL? { project.githubRepo.flatMap { URL(string: "https://github.com/\($0)") } }
+    /// The open pull requests of the project's repositories on GitHub: one repository's page,
+    /// or a search across several.
+    private var pullsURL: URL? {
+        if repos.count == 1, let repo = repos.first { return URL(string: "https://github.com/\(repo)/pulls") }
+        let query = (["is:pr", "is:open"] + repos.map { "repo:\($0)" }).joined(separator: "+")
+        return URL(string: "https://github.com/pulls?q=\(query)")
+    }
 
     /// The list's filter: every issue, or one delivery stage.
     private enum WorkFilter: Hashable { case all, stage(Delivery.Stage) }
@@ -260,15 +271,17 @@ struct ProjectDetailView: View {
     private var unlinkedOpen: [ProjectPullRequests.Match] { pulls.filter { $0.issue == nil } }
     private var unlinkedMerged: [MergedPull] { merged.filter { $0.issue == nil } }
 
-    /// The latest run of each branch, newest first in `runs`.
+    /// The latest run of each branch of each repository, newest first in `runs`.
     private var runByBranch: [String: GitHubRun] {
         var out: [String: GitHubRun] = [:]
-        for run in runs { if let b = run.head_branch, out[b] == nil { out[b] = run } }
+        for (repo, list) in runs {
+            for run in list { if let b = run.head_branch, out[repo + "\n" + b] == nil { out[repo + "\n" + b] = run } }
+        }
         return out
     }
 
     private func pipeline(of pull: GitHubPull) -> ProjectSnapshot.PipelineState? {
-        runByBranch[pull.head.ref].map(ProjectSnapshot.PipelineState.init(run:))
+        runByBranch[pull.repository + "\n" + pull.head.ref].map(ProjectSnapshot.PipelineState.init(run:))
     }
 
     /// One line for the open pull requests' pipelines: failing wins, then running, then passing.
@@ -284,19 +297,19 @@ struct ProjectDetailView: View {
     /// "3 open · 15 merged": the repository's part of the project, in the headline.
     private var githubLine: String { "\(pulls.count) open · \(merged.count) merged" }
 
-    private var githubReady: Bool { project.githubRepo != nil && states[.github] == nil && loaded }
+    private var githubReady: Bool { !repos.isEmpty && states[.github] == nil && loaded }
 
     private var workPanel: some View {
         VStack(alignment: .leading, spacing: 16) {
             PanelHeader(title: project.linear == nil ? "Pull requests" : "Delivery",
-                        subtitle: project.linear == nil ? project.githubRepo : "Issues joined with their pull requests")
-            if project.linear == nil && project.githubRepo == nil {
+                        subtitle: project.linear == nil ? repos.joined(separator: " · ") : "Issues joined with their pull requests")
+            if project.linear == nil && repos.isEmpty {
                 QuietEmpty(symbol: "link", text: "Link a Linear project or a GitHub repository to see the work here")
             } else if !loaded, states[.linear] == nil, states[.github] == nil {
                 workSkeleton
             } else {
                 if project.linear != nil { linearPart }
-                if project.githubRepo != nil { githubPart }
+                if !repos.isEmpty { githubPart }
             }
         }
         .sootPanel()
@@ -322,7 +335,7 @@ struct ProjectDetailView: View {
                 Text("\(delivery.shipped) of \(delivery.total) shipped").font(.system(size: 14)).foregroundStyle(Soot.muted)
                     .monospacedDigit()
                 Spacer(minLength: 16)
-                if githubReady, let repo = project.githubRepo, let url = URL(string: "https://github.com/\(repo)/pulls") {
+                if githubReady, let url = pullsURL {
                     HoverLink(destination: url) {
                         HStack(spacing: 6) {
                             BrandLogo(service: .github, size: 16).foregroundStyle(Soot.ink).accessibilityHidden(true)
@@ -333,7 +346,7 @@ struct ProjectDetailView: View {
                             }
                         }
                     }
-                    .help("Open the pull requests of \(repo) on GitHub")
+                    .help("Open the pull requests of \(repos.joined(separator: ", ")) on GitHub")
                     .accessibilityLabel("GitHub: \(githubLine)\(pipelineSummary.map { ", \($0.text)" } ?? ""). Opens the pull requests on GitHub")
                 }
             }
@@ -399,10 +412,12 @@ struct ProjectDetailView: View {
         let chips = HStack(spacing: 6) {
             ForEach(item.open.prefix(2)) { m in
                 PullChip(number: m.pull.number, kind: m.pull.draft == true ? .draft : .open,
-                         pipeline: pipeline(of: m.pull), title: m.pull.title, url: URL(string: m.pull.html_url)!)
+                         pipeline: pipeline(of: m.pull), title: m.pull.title,
+                         repository: labelsRepository ? m.pull.repository : nil, url: URL(string: m.pull.html_url)!)
             }
             ForEach(item.merged.prefix(max(0, 2 - min(item.open.count, 2)))) { m in
-                PullChip(number: m.number, kind: .merged, title: m.title, url: URL(string: m.url)!)
+                PullChip(number: m.number, kind: .merged, title: m.title,
+                         repository: labelsRepository ? m.repository : nil, url: URL(string: m.url)!)
             }
             if item.open.count + item.merged.count > 2 {
                 Text("+\(item.open.count + item.merged.count - 2)").font(.system(size: 12, weight: .medium)).foregroundStyle(Soot.muted)
@@ -463,10 +478,10 @@ struct ProjectDetailView: View {
                     switch row {
                     case .open(let m):
                         pullRow(kind: m.pull.draft == true ? .draft : .open, pipeline: pipeline(of: m.pull), title: m.pull.title,
-                                number: m.pull.number, url: m.pull.html_url, trailing: m.pull.user.login)
+                                number: m.pull.number, repository: m.pull.repository, url: m.pull.html_url, trailing: m.pull.user.login)
                     case .merged(let m):
                         pullRow(kind: .merged, pipeline: nil, title: m.title ?? "Pull request #\(m.number)", number: m.number,
-                                url: m.url, trailing: m.mergedAt.map { $0.formatted(.relative(presentation: .named)) })
+                                repository: m.repository, url: m.url, trailing: m.mergedAt.map { $0.formatted(.relative(presentation: .named)) })
                     }
                 }
                 showAll(rows.count, key: "unlinked")
@@ -480,15 +495,15 @@ struct ProjectDetailView: View {
         case open(ProjectPullRequests.Match), merged(MergedPull)
         var id: String {
             switch self {
-            case .open(let m): "open-\(m.pull.number)"
-            case .merged(let m): "merged-\(m.number)"
+            case .open(let m): "open-\(m.pull.html_url)"
+            case .merged(let m): "merged-\(m.url)"
             }
         }
     }
 
     /// Two lines for a pull request on its own: what changed, then number and kind.
     private func pullRow(kind: PullChip.Kind, pipeline: ProjectSnapshot.PipelineState?, title: String, number: Int,
-                         url: String, trailing: String?) -> some View {
+                         repository: String, url: String, trailing: String?) -> some View {
         let parts = PullTitle.split(title)
         let (symbol, tint, word): (String, Color, String) = switch kind {
         case .merged: ("arrow.triangle.merge", Theme.chart1, "merged")
@@ -501,6 +516,7 @@ struct ProjectDetailView: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text(parts.title).font(.system(size: 14)).foregroundStyle(Soot.ink).lineLimit(1).help(title)
                 HStack(spacing: 6) {
+                    if labelsRepository { Text(GitHubRepository.short(repository)); Text("·") }
                     Text(verbatim: "#\(number)")
                     Text("·"); Text(word)
                     if let kind = parts.kind { Text("·"); Text(kind) }
@@ -780,20 +796,32 @@ struct ProjectDetailView: View {
     }
 
     private func loadGitHub() async {
-        guard let repo = project.githubRepo, states[.github] == nil else { return }
+        let repos = self.repos
+        guard !repos.isEmpty, states[.github] == nil else { return }
         do {
             let client = try app.githubClient()
             let refs: [IssueReference]? = project.linear == nil || states[.linear] != nil ? nil : issues
-            async let allRuns = client.runs(repo)
-            async let recentlyMerged = client.mergedPulls(repo)
-            let prs = ProjectPullRequests(pulls: try await client.pulls(repo), issues: refs,
-                                          wholeRepository: project.showsWholeRepository)
-            pulls = prs.matches
-            pullsScoped = prs.scoped
-            runs = prs.scoped ? prs.pipeline(from: try await allRuns).latest : try await allRuns
-            merged = MergedPull.list(repo: repo, recentlyMerged: try await recentlyMerged, issues: refs,
-                                     wholeRepository: project.showsWholeRepository,
-                                     open: Set(prs.matches.map(\.pull.number)))
+            var allPulls: [ProjectPullRequests.Match] = []
+            var allMerged: [MergedPull] = []
+            var allRuns: [String: [GitHubRun]] = [:]
+            var scoped = false
+            // One repository after the other: a project rarely follows more than a few.
+            for repo in repos {
+                async let runs = client.runs(repo)
+                async let recentlyMerged = client.mergedPulls(repo)
+                let prs = ProjectPullRequests(pulls: try await client.pulls(repo), issues: refs,
+                                              wholeRepository: project.showsWholeRepository)
+                allPulls += prs.matches
+                scoped = scoped || prs.scoped
+                allRuns[repo] = prs.scoped ? prs.pipeline(from: try await runs).latest : try await runs
+                allMerged += MergedPull.list(repo: repo, recentlyMerged: try await recentlyMerged, issues: refs,
+                                             wholeRepository: project.showsWholeRepository,
+                                             open: Set(prs.matches.map(\.pull.number)))
+            }
+            pulls = allPulls
+            pullsScoped = scoped
+            runs = allRuns
+            merged = allMerged.sorted { ($0.mergedAt ?? .distantPast) > ($1.mergedAt ?? .distantPast) }
             for m in merged { issueStore.pullsByURL[m.url] = .init(number: m.number, title: m.title ?? "", state: .merged) }
             for p in pulls {
                 issueStore.pullsByURL[p.pull.html_url] = .init(number: p.pull.number, title: p.pull.title,

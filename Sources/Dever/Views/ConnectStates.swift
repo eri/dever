@@ -53,7 +53,7 @@ enum ConnectPitch {
         switch service {
         case .slack: project.slack.map { "Read and reply in #\($0.name) here" } ?? "Read the project's channel here"
         case .linear: project.linear.map { "Track issues and delivery for \($0.name)" } ?? "Track issues and delivery"
-        case .github: project.githubRepo.map { "Follow pull requests on \($0)" } ?? "Follow pull requests"
+        case .github: project.githubRepos.first.map { "Follow pull requests on \($0)" } ?? "Follow pull requests"
         }
     }
 

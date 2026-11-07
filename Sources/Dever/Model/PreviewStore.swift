@@ -231,7 +231,7 @@ final class PreviewStore: ObservableObject {
     /// Loads the project's preview unless it was loaded within the last minute (`force`
     /// ignores that). Concurrent calls share one load.
     func load(_ project: Project, app: AppState, force: Bool = false) async {
-        guard let number = project.previewPullNumber, let repo = project.githubRepo else {
+        guard let number = project.previewPullNumber, let repo = app.previewRepository(for: project) else {
             states[project.id] = nil
             return
         }
@@ -266,7 +266,7 @@ final class PreviewStore: ObservableObject {
 
     /// The overview's cycle: every project with a preview, a few at a time.
     func refreshAll(_ projects: [Project], app: AppState) async {
-        let withPreview = projects.filter { $0.previewPullNumber != nil && $0.githubRepo != nil }
+        let withPreview = projects.filter { $0.previewPullNumber != nil && app.previewRepository(for: $0) != nil }
         guard !withPreview.isEmpty else { states = [:]; return }
         let ids = Set(withPreview.map(\.id))
         states = states.filter { ids.contains($0.key) }
@@ -432,7 +432,7 @@ final class PreviewStore: ObservableObject {
     }
 
     private func post(_ project: Project, app: AppState, body: String, then phase: PreviewStatus.Phase) async throws {
-        guard let number = project.previewPullNumber, let repo = project.githubRepo else { return }
+        guard let number = project.previewPullNumber, let repo = app.previewRepository(for: project) else { return }
         if Self.simulation == nil {
             _ = try await app.githubClient().comment(repo, number: number, body: body)
         }

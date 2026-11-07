@@ -88,16 +88,23 @@ struct ProjectEditorSheet: View {
         }
         Self.openAt = nil
         // Snapshots of the preview step need a repository to list pull requests of.
-        if first == .preview, PreviewStore.simulation != nil, project.githubRepo == nil {
-            project.githubRepo = PreviewStore.sampleRepo
+        if first == .preview, PreviewStore.simulation != nil, project.githubRepos.isEmpty {
+            project.githubRepos = [PreviewStore.sampleRepo]
+            project.previewRepository = PreviewStore.sampleRepo
             project.previewPullNumber = PreviewStore.samplePullNumber
         }
         _project = State(initialValue: project)
         _step = State(initialValue: first)
     }
 
-    /// The adding path; the preview step exists once a repository is linked.
-    private var path: [Step] { [.name, .slack, .linear, .github] + (project.githubRepo != nil ? [.preview] : []) + [.ready] }
+    /// The adding path: the repository step only where the mode lets a project choose, the
+    /// preview step once the project follows a repository.
+    private var path: [Step] {
+        [.name, .slack, .linear] + (app.repositoryMode == .single ? [] : [.github]) + (repos.isEmpty ? [] : [.preview]) + [.ready]
+    }
+
+    /// The repositories the project follows, as edited so far, under the workspace's mode.
+    private var repos: [String] { app.repositories(for: project) }
 
     var body: some View {
         StepSheet(step: isNew ? path.firstIndex(of: step) : nil, count: isNew ? path.count : 0,
@@ -181,49 +188,131 @@ struct ProjectEditorSheet: View {
         }
     }
 
+    /// Mixed mode: the workspace repository, or the project's own list (nil until chosen).
+    private var ownRepositories: Binding<Bool> {
+        Binding(get: { !(project.usesWorkspaceRepository ?? project.githubRepos.isEmpty) },
+                set: { project.usesWorkspaceRepository = !$0 })
+    }
+
+    /// One or several repositories, ticked in a list; in mixed mode, first whether the project
+    /// follows the workspace repository at all.
     private var githubStep: some View {
-        toolStep(.github, title: "GitHub repository", rows: repoRows,
-                 selection: Binding(get: { project.githubRepo }, set: { project.githubRepo = $0 }),
-                 createTitle: nil, more: nil) {
-            if project.githubRepo != nil {
-                SwitchRow(title: "Count every pull request", detail: "Not only those linked to this project's issues",
-                          isOn: Binding(get: { project.githubWholeRepo == true }, set: { project.githubWholeRepo = $0 }))
-                    .frame(maxWidth: 420)
+        VStack(alignment: .leading, spacing: 20) {
+            StepTitle(text: app.repositoryMode == .mixed ? "Repositories" : "GitHub repositories")
+            if !app.isConnected(.github) {
+                connectHint(.github)
+            } else if catalog.loading {
+                VStack(spacing: 6) { ForEach(0..<4, id: \.self) { _ in Skeleton(height: 44, radius: Soot.fieldRadius) } }
+            } else {
+                if app.repositoryMode == .mixed {
+                    VStack(spacing: 6) {
+                        PickRow(item: PickerItem(id: "workspace", title: "Use the workspace repository",
+                                                 subtitle: app.workspaceRepository ?? "None picked yet in Settings"),
+                                selected: !ownRepositories.wrappedValue) { ownRepositories.wrappedValue = false }
+                        PickRow(item: PickerItem(id: "own", title: "Its own repositories",
+                                                 subtitle: project.githubRepos.isEmpty ? "Pick one or several below"
+                                                     : project.githubRepos.joined(separator: ", ")),
+                                selected: ownRepositories.wrappedValue) { ownRepositories.wrappedValue = true }
+                    }
+                    .accessibilityElement(children: .contain)
+                    .accessibilityLabel("Which repositories")
+                }
+                if app.repositoryMode == .perProject || ownRepositories.wrappedValue {
+                    SootField(label: "", placeholder: "Search", text: $query, leadingSymbol: "magnifyingglass")
+                        .accessibilityLabel("Search repositories")
+                    ScrollView {
+                        LazyVStack(spacing: 6) {
+                            ForEach(filtered(repoRows)) { item in
+                                PickRow(item: item, selected: project.githubRepos.contains(item.id), multiple: true) {
+                                    toggleRepository(item.id)
+                                }
+                            }
+                            if filtered(repoRows).isEmpty && !query.isEmpty {
+                                Text("No match for \u{201C}\(query)\u{201D}").font(.system(size: 13)).foregroundStyle(Soot.muted)
+                                    .padding(.vertical, 16)
+                            }
+                        }
+                    }
+                    .frame(maxHeight: .infinity)
+                    if !project.githubRepos.isEmpty {
+                        Text(Plural.text("^[\(project.githubRepos.count) repository](inflect: true) picked"))
+                            .font(.system(size: 13)).foregroundStyle(Soot.muted)
+                    }
+                }
+                if !repos.isEmpty {
+                    SwitchRow(title: "Count every pull request", detail: "Not only those linked to this project's issues",
+                              isOn: Binding(get: { project.githubWholeRepo == true }, set: { project.githubWholeRepo = $0 }))
+                        .frame(maxWidth: 420)
+                }
+            }
+            HStack(spacing: 16) {
+                Button(isNew ? "Continue" : "Done") { next() }
+                    .buttonStyle(LimeButton())
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(app.isConnected(.github) && !catalog.loading && repos.isEmpty)
+                if app.isConnected(.github), app.repositoryMode == .perProject || ownRepositories.wrappedValue {
+                    Button("Skip") { project.githubRepos = []; next() }
+                        .buttonStyle(.plain).font(.system(size: 14, weight: .medium)).foregroundStyle(Soot.muted)
+                        .modifier(FocusOutline(radius: 6))
+                }
             }
         }
     }
 
-    /// Which pull request's preview environment the project follows. Only with a repository.
+    private func toggleRepository(_ repo: String) {
+        if let i = project.githubRepos.firstIndex(of: repo) {
+            project.githubRepos.remove(at: i)
+        } else {
+            project.githubRepos.append(repo)
+        }
+        if app.repositoryMode == .mixed { project.usesWorkspaceRepository = false }
+    }
+
+    /// Which pull request's preview environment the project follows. Only with a repository;
+    /// with several, each pull request says which one it is in.
     private var previewStep: some View {
         toolStep(.github, title: "Preview environment", rows: pullItems,
-                 selection: Binding(get: { project.previewPullNumber.map(String.init) },
-                                    set: { project.previewPullNumber = $0.flatMap(Int.init)
-                                           if project.previewPullNumber != nil { project.previewDismissed = nil } }),
+                 selection: Binding(get: { previewID },
+                                    set: { id in
+                                        let parts = id?.split(separator: "#", maxSplits: 1).map(String.init)
+                                        project.previewRepository = parts?.first
+                                        project.previewPullNumber = parts.flatMap { $0.count > 1 ? Int($0[1]) : nil }
+                                        if project.previewPullNumber != nil { project.previewDismissed = nil } }),
                  createTitle: nil, more: nil,
-                 loading: project.githubRepo.map { catalog.pulls[$0] == nil } ?? false) { EmptyView() }
-            .task(id: project.githubRepo) {
-                if let repo = project.githubRepo, app.github != nil { await catalog.loadPulls(repo, app) }
+                 loading: repos.contains { catalog.pulls[$0] == nil }) { EmptyView() }
+            .task(id: repos) {
+                guard app.github != nil else { return }
+                for repo in repos { await catalog.loadPulls(repo, app) }
             }
     }
 
-    /// The repository's open pull requests, the project's own (citing one of its issues) first,
+    /// `owner/name#number` of the preview pull request.
+    private var previewID: String? {
+        guard let n = project.previewPullNumber, let repo = app.previewRepository(for: project) else { return nil }
+        return "\(repo)#\(n)"
+    }
+
+    /// The repositories' open pull requests, the project's own (citing one of its issues) first,
     /// then by number, newest first; the one already linked stays listed even when closed.
     private var pullItems: [PickerItem] {
-        guard let repo = project.githubRepo else { return [] }
-        let pulls = catalog.pulls[repo] ?? []
+        let repos = self.repos
+        guard !repos.isEmpty else { return [] }
+        let several = repos.count > 1
         let identifiers = project.linear.map { Set(IssueStore.shared.issues(project: $0.id).map(\.identifier)) } ?? []
         func isMine(_ p: GitHubPull) -> Bool {
             identifiers.contains { p.title.localizedCaseInsensitiveContains($0) || p.head.ref.localizedCaseInsensitiveContains($0) }
         }
+        let pulls = repos.flatMap { repo in (catalog.pulls[repo] ?? []).map { (repo, $0) } }
         var items = pulls
-            .sorted { (isMine($0) ? 0 : 1, -$0.number) < (isMine($1) ? 0 : 1, -$1.number) }
-            .map { p in
-                PickerItem(id: String(p.number), title: "#\(p.number) \(PullTitle.split(p.title).title)",
-                           subtitle: [isMine(p) ? "This project" : nil, p.draft == true ? "Draft" : nil, p.user.login].compactMap { $0 }.joined(separator: " · "),
+            .sorted { (isMine($0.1) ? 0 : 1, -$0.1.number) < (isMine($1.1) ? 0 : 1, -$1.1.number) }
+            .map { repo, p in
+                PickerItem(id: "\(repo)#\(p.number)", title: "#\(p.number) \(PullTitle.split(p.title).title)",
+                           subtitle: [several ? GitHubRepository.short(repo) : nil, isMine(p) ? "This project" : nil,
+                                      p.draft == true ? "Draft" : nil, p.user.login].compactMap { $0 }.joined(separator: " · "),
                            symbol: p.draft == true ? "pencil.line" : "arrow.triangle.pull")
             }
-        if let n = project.previewPullNumber, !pulls.contains(where: { $0.number == n }) {
-            items.insert(PickerItem(id: String(n), title: "#\(n)", subtitle: "Not open any more", symbol: "arrow.triangle.pull"), at: 0)
+        if let id = previewID, !items.contains(where: { $0.id == id }), let n = project.previewPullNumber {
+            items.insert(PickerItem(id: id, title: "#\(n)", subtitle: "Not open any more", symbol: "arrow.triangle.pull"), at: 0)
         }
         return items
     }
@@ -297,9 +386,11 @@ struct ProjectEditorSheet: View {
                 recapRow(icon: AnyView(BrandLogo(service: .slack, size: 18)), title: slackSummary, detail: "Slack") { step = .slack }
                 recapRow(icon: AnyView(BrandLogo(service: .linear, size: 18).foregroundStyle(Soot.ink)), title: linearSummary,
                          detail: "Linear") { step = .linear }
-                recapRow(icon: AnyView(BrandLogo(service: .github, size: 18).foregroundStyle(Soot.ink)),
-                         title: project.githubRepo ?? "No repository", detail: "GitHub") { step = .github }
-                if project.githubRepo != nil {
+                if app.repositoryMode != .single {
+                    recapRow(icon: AnyView(BrandLogo(service: .github, size: 18).foregroundStyle(Soot.ink)),
+                             title: githubSummary, detail: "GitHub") { step = .github }
+                }
+                if !repos.isEmpty {
                     recapRow(icon: AnyView(Image(systemName: "globe").font(.system(size: 16, weight: .medium)).foregroundStyle(Soot.ink)),
                              title: project.previewPullNumber.map { "Pull request #\($0)" }
                                 ?? (project.previewDismissed == true ? "Not needed" : "No preview"), detail: "Preview") { step = .preview }
@@ -346,6 +437,13 @@ struct ProjectEditorSheet: View {
         case let id?: catalog.channels.first { $0.id == id }.map { "#\($0.name)" } ?? project.slack.map { "#\($0.name)" } ?? "No channel"
         case nil: "No channel"
         }
+    }
+
+    private var githubSummary: String {
+        if app.repositoryMode == .mixed, !ownRepositories.wrappedValue {
+            return app.workspaceRepository.map { "Workspace repository · \($0)" } ?? "Workspace repository"
+        }
+        return repos.isEmpty ? "No repository" : repos.joined(separator: ", ")
     }
 
     private var linearSummary: String {
@@ -449,8 +547,9 @@ struct ProjectEditorSheet: View {
             case nil:
                 p.linear = nil
             }
-            if p.githubRepo == nil { p.previewPullNumber = nil }
-            if p.previewPullNumber != project.previewPullNumber || p.githubRepo != project.githubRepo { PreviewStore.shared.forget(p.id) }
+            if app.previewRepository(for: p) == nil { p.previewPullNumber = nil; p.previewRepository = nil }
+            if p.previewPullNumber != nil, p.previewRepository == nil { p.previewRepository = app.previewRepository(for: p) }
+            if p.previewPullNumber != project.previewPullNumber || p.previewRepository != project.previewRepository { PreviewStore.shared.forget(p.id) }
             app.upsert(p)
             dismiss()
         } catch {
@@ -463,12 +562,14 @@ struct ProjectEditorSheet: View {
 private struct PickRow: View {
     let item: PickerItem
     let selected: Bool
+    /// A tick box rather than a radio ring: several rows can be on at once.
+    var multiple = false
     let pick: () -> Void
 
     var body: some View {
         Button(action: pick) {
             HStack(spacing: 12) {
-                CheckCircle(on: selected)
+                CheckCircle(on: selected, square: multiple)
                 if let symbol = item.symbol {
                     Image(systemName: symbol).font(.system(size: 12, weight: .semibold))
                         .foregroundStyle(symbol == "plus" ? Soot.lime : Soot.muted).frame(width: 14)
@@ -566,6 +667,8 @@ struct ImportSheet: View {
         var title: String
         var projectName: String
         var match: String?
+        /// A repository named like the project, where the mode lets a project have its own.
+        var repo: String?
     }
 
     private var isNarrowed: Bool { source == .slack && narrowed && search.isEmpty }
@@ -583,14 +686,14 @@ struct ImportSheet: View {
                 .map { ch in
                     let name = Naming.projectName(fromChannel: ch.name, prefix: channelPrefix)
                     return Candidate(id: ch.id, title: "#\(ch.name)", projectName: name,
-                                     match: linearMatch(for: name)?.name)
+                                     match: linearMatch(for: name)?.name, repo: repoMatch(for: name))
                 }
         case .linear:
             rows = catalog.linearProjects
                 .filter { !app.linkedLinearIDs.contains($0.id) }
                 .map { lp in
                     Candidate(id: lp.id, title: lp.name, projectName: lp.name,
-                              match: slackMatch(for: lp.name).map { "#\($0.name)" })
+                              match: slackMatch(for: lp.name).map { "#\($0.name)" }, repo: repoMatch(for: lp.name))
                 }
         }
     }
@@ -703,6 +806,13 @@ struct ImportSheet: View {
         return catalog.channels.first { !app.linkedSlackIDs.contains($0.id) && $0.name == expected }
     }
 
+    /// In `perProject` and `mixed` modes, a repository whose name is the project's; `single`
+    /// mode needs none, the workspace repository is followed.
+    private func repoMatch(for name: String) -> String? {
+        guard app.repositoryMode != .single else { return nil }
+        return catalog.repos.first { Naming.matches(GitHubRepository.short($0.full_name), name) }?.full_name
+    }
+
     private func importSelected() {
         for id in selection {
             switch source {
@@ -711,11 +821,13 @@ struct ImportSheet: View {
                 let name = Naming.projectName(fromChannel: ch.name, prefix: channelPrefix)
                 var p = Project(name: name, slack: .init(id: ch.id, name: ch.name))
                 if let lp = linearMatch(for: name) { p.linear = .init(id: lp.id, name: lp.name, url: lp.url) }
+                if let repo = repoMatch(for: name) { p.githubRepos = [repo]; p.usesWorkspaceRepository = false }
                 app.upsert(p)
             case .linear:
                 guard let lp = catalog.linearProjects.first(where: { $0.id == id }) else { continue }
                 var p = Project(name: lp.name, linear: .init(id: lp.id, name: lp.name, url: lp.url))
                 if let ch = slackMatch(for: lp.name) { p.slack = .init(id: ch.id, name: ch.name) }
+                if let repo = repoMatch(for: lp.name) { p.githubRepos = [repo]; p.usesWorkspaceRepository = false }
                 app.upsert(p)
             }
         }
@@ -742,6 +854,13 @@ private struct ImportRow: View {
                     }
                 }
                 Spacer(minLength: 12)
+                if let repo = c.repo {
+                    HStack(spacing: 6) {
+                        BrandLogo(service: .github, size: 12).foregroundStyle(Soot.ink)
+                        Text(GitHubRepository.short(repo)).font(.system(size: 12)).foregroundStyle(Soot.ink).lineLimit(1)
+                    }
+                    .help("Repository \(repo), linked automatically")
+                }
                 HStack(spacing: 6) {
                     BrandLogo(service: counterpart, size: 12)
                         .foregroundStyle(c.match == nil ? Soot.muted : Soot.ink)

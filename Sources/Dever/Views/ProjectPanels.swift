@@ -187,6 +187,8 @@ struct PullChip: View {
     let kind: Kind
     var pipeline: ProjectSnapshot.PipelineState? = nil
     var title: String? = nil
+    /// Named on the chip when the project follows several repositories.
+    var repository: String? = nil
     let url: URL
     @State private var hovering = false
 
@@ -211,6 +213,10 @@ struct PullChip: View {
         Link(destination: url) {
             HStack(spacing: 5) {
                 Image(systemName: glyph.symbol).font(.system(size: 11, weight: .bold)).foregroundStyle(glyph.tint)
+                if let repository {
+                    Text(GitHubRepository.short(repository)).font(.system(size: 12, weight: .medium)).foregroundStyle(Soot.muted)
+                        .lineLimit(1)
+                }
                 Text(verbatim: "#\(number)").font(.system(size: 12, weight: .medium, design: .monospaced)).foregroundStyle(Soot.ink)
                 if let run {
                     Image(systemName: run.symbol).font(.system(size: 11, weight: .semibold)).foregroundStyle(run.tint)
@@ -226,8 +232,8 @@ struct PullChip: View {
         .handCursor()
         .modifier(FocusOutline(radius: 13))
         .onHover { hovering = $0 }
-        .help([title.map { "#\(number) \($0)" } ?? "Pull request #\(number)", glyph.word, run?.word].compactMap { $0 }.joined(separator: " · ") + " · Opens on GitHub")
-        .accessibilityLabel(["Pull request #\(number)", glyph.word, run?.word].compactMap { $0 }.joined(separator: ", "))
+        .help([title.map { "#\(number) \($0)" } ?? "Pull request #\(number)", repository, glyph.word, run?.word].compactMap { $0 }.joined(separator: " · ") + " · Opens on GitHub")
+        .accessibilityLabel(["Pull request #\(number)", repository.map { "in \($0)" }, glyph.word, run?.word].compactMap { $0 }.joined(separator: ", "))
         .accessibilityHint("Opens on GitHub")
     }
 }

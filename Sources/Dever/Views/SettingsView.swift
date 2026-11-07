@@ -52,6 +52,7 @@ struct SettingsView: View {
                     }
                     .padding(.vertical, 12)
                 }
+                RepositoryModeSettings()
             }
             .padding(Theme.pad)
             .frame(maxWidth: 1100, alignment: .leading)

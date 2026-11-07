@@ -31,6 +31,12 @@ enum Snapshotter {
                 let settle: Double = wait == 0 ? 0.4 : (item == .overview ? 3 : 8)
                 try? await Task.sleep(nanoseconds: UInt64(settle * 1_000_000_000))
                 capture(to: dir.appendingPathComponent("\(name)-\(themeName).png"))
+                // DEVER_SNAPSHOT_SCROLL_END=1 adds each screen scrolled to its end.
+                if ProcessInfo.processInfo.environment["DEVER_SNAPSHOT_SCROLL_END"] == "1" {
+                    scrollToEnd()
+                    try? await Task.sleep(nanoseconds: 800_000_000)
+                    capture(to: dir.appendingPathComponent("\(name)-\(themeName)-end.png"))
+                }
             }
         }
         if ProcessInfo.processInfo.environment["DEVER_SNAPSHOT_SLACK_WIDE"] == "1", let first = projects.first {
@@ -102,6 +108,20 @@ enum Snapshotter {
             }
         }
         NSApp.terminate(nil)
+    }
+
+    /// Scrolls the main window's outermost scroll view to its end.
+    private static func scrollToEnd() {
+        guard let main = NSApp.windows.first(where: { $0.isVisible && $0.canBecomeMain }), let root = main.contentView else { return }
+        func all(_ v: NSView) -> [NSScrollView] {
+            (v as? NSScrollView).map { [$0] } ?? [] + v.subviews.flatMap(all)
+        }
+        // The tallest document is the screen's own scroll view, not a list inside a panel.
+        guard let scroll = all(root).max(by: { ($0.documentView?.bounds.height ?? 0) < ($1.documentView?.bounds.height ?? 0) }),
+              let doc = scroll.documentView else { return }
+        let y = max(0, doc.bounds.height - scroll.contentView.bounds.height)
+        doc.scroll(NSPoint(x: 0, y: doc.isFlipped ? y : 0))
+        scroll.reflectScrolledClipView(scroll.contentView)
     }
 
     /// An open popover lives in its own window; nothing is written when none is open.

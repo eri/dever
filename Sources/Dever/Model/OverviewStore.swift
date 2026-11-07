@@ -30,9 +30,41 @@ struct ProjectSnapshot {
         /// Issues with an open / merged pull request, for the delivery strip.
         var openPRIssues: Set<String> = []
         var mergedPRIssues: Set<String> = []
+        /// The repositories these numbers add up, and those whose pipeline fails.
+        var repositories: [String] = []
+        var failingRepositories: [String] = []
+
+        /// One project's numbers across its repositories: counts add up, sets join, the
+        /// pipeline is the worst of them.
+        static func combined(_ parts: [(repo: String, stats: GitHubStats)]) -> GitHubStats {
+            guard parts.count > 1 else { return parts.first?.stats ?? GitHubStats() }
+            var out = GitHubStats()
+            for (repo, s) in parts {
+                out.openPRs += s.openPRs
+                out.scoped = out.scoped || s.scoped
+                out.mergedButOpen += s.mergedButOpen
+                out.openPRIssues.formUnion(s.openPRIssues)
+                out.mergedPRIssues.formUnion(s.mergedPRIssues)
+                out.repositories.append(repo)
+                if s.pipeline == .failing { out.failingRepositories.append(repo) }
+            }
+            out.mergedButOpen = Array(Set(out.mergedButOpen)).sorted()
+            out.pipeline = PipelineState.worst(parts.map(\.stats.pipeline))
+            return out
+        }
     }
 
-    enum PipelineState { case passing, failing, running, unknown }
+    enum PipelineState {
+        case passing, failing, running, unknown
+
+        /// Failing wins, then running, then passing.
+        static func worst(_ states: [PipelineState]) -> PipelineState {
+            states.contains(.failing) ? .failing
+            : states.contains(.running) ? .running
+            : states.contains(.passing) ? .passing
+            : .unknown
+        }
+    }
 
     var linear: LinearStats?
     var slack: SlackStats?
@@ -191,7 +223,8 @@ final class OverviewStore: ObservableObject {
             s.errors[.linear] = await app.failure(e, .linear)
         }
         let projectIssues = issues
-        async let github = loadGitHub(p, repos, issues: projectIssues)
+        let repositories = await app.repositories(for: p)
+        async let github = loadGitHub(p, repositories, repos, issues: projectIssues)
         switch await slack {
         case .success(let v): s.slack = v
         case .failure(let e): s.errors[.slack] = await app.failure(e, .slack)
@@ -249,9 +282,26 @@ final class OverviewStore: ObservableObject {
         }
     }
 
-    private static func loadGitHub(_ p: Project, _ repos: Result<RepoCache, Error>, issues: [LinearClient.ProjectSummary.Issue]?)
+    /// Every repository the project follows, added up; one failing call fails the whole.
+    private static func loadGitHub(_ p: Project, _ repositories: [String], _ repos: Result<RepoCache, Error>,
+                                   issues: [LinearClient.ProjectSummary.Issue]?)
         async -> Result<ProjectSnapshot.GitHubStats?, Error> {
-        guard let repo = p.githubRepo else { return .success(nil) }
+        guard !repositories.isEmpty else { return .success(nil) }
+        var parts: [(repo: String, stats: ProjectSnapshot.GitHubStats)] = []
+        for repo in repositories {
+            switch await loadGitHub(p, repo: repo, repos, issues: issues) {
+            case .success(let stats): parts.append((repo, stats))
+            case .failure(let error): return .failure(error)
+            }
+        }
+        var combined = ProjectSnapshot.GitHubStats.combined(parts)
+        combined.repositories = repositories
+        if parts.count == 1, combined.pipeline == .failing { combined.failingRepositories = repositories }
+        return .success(combined)
+    }
+
+    private static func loadGitHub(_ p: Project, repo: String, _ repos: Result<RepoCache, Error>, issues: [LinearClient.ProjectSummary.Issue]?)
+        async -> Result<ProjectSnapshot.GitHubStats, Error> {
         do {
             let repos = try repos.get()
             let prs = ProjectPullRequests(pulls: try await repos.openPulls(repo), issues: issues,

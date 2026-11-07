@@ -61,6 +61,48 @@ enum ServiceState: Equatable {
     var needsConnecting: Bool { self == .notConnected || self == .unauthorized }
 }
 
+/// How a team keeps its code: one repository for every project, one or several per project,
+/// or both. Persisted with the rest of the settings.
+enum RepositoryMode: String, CaseIterable, Identifiable, Codable {
+    /// One repository for the whole workspace: every project follows it.
+    case single
+    /// Each project links one or several repositories of its own.
+    case perProject
+    /// A project follows the workspace repository, or its own list.
+    case mixed
+
+    var id: String { rawValue }
+    static let key = "repositoryMode"
+    static let workspaceKey = "workspaceRepository"
+
+    var title: String {
+        switch self {
+        case .single: "One repository for everything"
+        case .perProject: "Repositories per project"
+        case .mixed: "Both"
+        }
+    }
+
+    var detail: String {
+        switch self {
+        case .single: "Every project follows the same repository"
+        case .perProject: "Each project links one or more"
+        case .mixed: "Some share one, some have their own"
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .single: "square"
+        case .perProject: "square.grid.2x2"
+        case .mixed: "square.on.square"
+        }
+    }
+
+    /// Whether the mode needs a workspace repository.
+    var usesWorkspaceRepository: Bool { self != .perProject }
+}
+
 struct Project: Codable, Identifiable, Hashable {
     struct SlackLink: Codable, Hashable { var id: String; var name: String }
     struct LinearLink: Codable, Hashable { var id: String; var name: String; var url: String }
@@ -69,15 +111,32 @@ struct Project: Codable, Identifiable, Hashable {
     var name: String
     var slack: SlackLink?
     var linear: LinearLink?
-    var githubRepo: String?
+    /// The project's own repositories (`owner/name`). What the project follows also depends on the
+    /// workspace's `RepositoryMode`: see `AppState.repositories(for:)`.
+    var githubRepos: [String] = []
+    /// Mixed mode: true when the project follows the workspace repository rather than its own list.
+    /// Nil means "the workspace repository unless it has repositories of its own".
+    var usesWorkspaceRepository: Bool?
     /// nil/false: only PRs linked to the project's Linear issues (shared repositories).
     var githubWholeRepo: Bool?
-    /// The pull request whose preview environment this project follows (needs `githubRepo`).
+    /// The pull request whose preview environment this project follows, and the repository it
+    /// lives in (nil: the project's first repository, from before projects had several).
     var previewPullNumber: Int?
+    var previewRepository: String?
     /// True once the user said this project needs no preview: the panel stays away until a
     /// pull request is picked in the editor.
     var previewDismissed: Bool?
     var createdAt = Date()
+
+    init(id: UUID = UUID(), name: String, slack: SlackLink? = nil, linear: LinearLink? = nil,
+         githubRepos: [String] = [], createdAt: Date = Date()) {
+        self.id = id
+        self.name = name
+        self.slack = slack
+        self.linear = linear
+        self.githubRepos = githubRepos
+        self.createdAt = createdAt
+    }
 
     /// Whether to show every PR of the repository rather than those of the project's issues.
     var showsWholeRepository: Bool { githubWholeRepo == true || linear == nil }
@@ -85,9 +144,43 @@ struct Project: Codable, Identifiable, Hashable {
     /// A project is trackable once both Slack and Linear are linked.
     var isComplete: Bool { slack != nil && linear != nil }
 
-    /// Whether the project page shows the Preview panel: a repository, and either a pull
-    /// request to follow or no word yet on whether one is wanted.
-    var showsPreview: Bool { githubRepo != nil && (previewPullNumber != nil || previewDismissed != true) }
+    /// The repositories the project follows under a mode and a workspace repository.
+    func repositories(mode: RepositoryMode, workspace: String?) -> [String] {
+        let shared = workspace.map { [$0] } ?? []
+        switch mode {
+        case .single: return shared
+        case .perProject: return githubRepos
+        case .mixed: return (usesWorkspaceRepository ?? githubRepos.isEmpty) ? shared : githubRepos
+        }
+    }
+
+    // MARK: Codable (projects saved before repository modes had one `githubRepo`)
+
+    private enum CodingKeys: String, CodingKey {
+        case id, name, slack, linear, githubRepos, usesWorkspaceRepository, githubWholeRepo
+        case previewPullNumber, previewRepository, previewDismissed, createdAt
+    }
+    private enum LegacyKeys: String, CodingKey { case githubRepo }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
+        name = try c.decode(String.self, forKey: .name)
+        slack = try c.decodeIfPresent(SlackLink.self, forKey: .slack)
+        linear = try c.decodeIfPresent(LinearLink.self, forKey: .linear)
+        if let list = try c.decodeIfPresent([String].self, forKey: .githubRepos) {
+            githubRepos = list
+        } else {
+            let legacy = try decoder.container(keyedBy: LegacyKeys.self)
+            githubRepos = try legacy.decodeIfPresent(String.self, forKey: .githubRepo).map { [$0] } ?? []
+        }
+        usesWorkspaceRepository = try c.decodeIfPresent(Bool.self, forKey: .usesWorkspaceRepository)
+        githubWholeRepo = try c.decodeIfPresent(Bool.self, forKey: .githubWholeRepo)
+        previewPullNumber = try c.decodeIfPresent(Int.self, forKey: .previewPullNumber)
+        previewRepository = try c.decodeIfPresent(String.self, forKey: .previewRepository)
+        previewDismissed = try c.decodeIfPresent(Bool.self, forKey: .previewDismissed)
+        createdAt = try c.decodeIfPresent(Date.self, forKey: .createdAt) ?? Date()
+    }
 }
 
 /// Slack channel naming convention: `<prefix><slug>`.
@@ -135,6 +228,14 @@ final class AppState: ObservableObject {
     @Published var slack: SlackCredentials? { didSet { saveCredentials(); expired.remove(.slack) } }
     @Published var linear: LinearCredentials? { didSet { saveCredentials(); expired.remove(.linear) } }
     @Published var projects: [Project] = [] { didSet { saveProjects() } }
+    /// How the team keeps its code; `perProject` is what Dever did before it was asked.
+    @Published var repositoryMode: RepositoryMode {
+        didSet { if simulatedMode == nil { UserDefaults.standard.set(repositoryMode.rawValue, forKey: RepositoryMode.key) } }
+    }
+    /// The one repository of `single` mode and the shared one of `mixed` mode (`owner/name`).
+    @Published var workspaceRepository: String? {
+        didSet { if simulatedMode == nil { UserDefaults.standard.set(workspaceRepository, forKey: RepositoryMode.workspaceKey) } }
+    }
     @Published var lastError: String?
     /// Services whose token the service itself rejected since the last successful call.
     /// Connected but dead: Settings and the rail show "Reconnect" from here.
@@ -154,6 +255,7 @@ final class AppState: ObservableObject {
     }
     private let simulatedMissing = Set(simulated("DEVER_SNAPSHOT_DISCONNECTED").keys.compactMap(ServiceKind.init(rawValue:)))
     private let simulatedFailing = simulated("DEVER_SNAPSHOT_FAILING")
+    private var simulatedMode: RepositoryMode?
     private var isSimulating: Bool {
         !simulatedMissing.isEmpty || !simulatedFailing.isEmpty || !Self.simulated("DEVER_SNAPSHOT_UNAUTHORIZED").isEmpty
             || PreviewStore.simulation != nil
@@ -167,6 +269,20 @@ final class AppState: ObservableObject {
     }()
 
     init() {
+        repositoryMode = UserDefaults.standard.string(forKey: RepositoryMode.key).flatMap(RepositoryMode.init(rawValue:)) ?? .perProject
+        workspaceRepository = UserDefaults.standard.string(forKey: RepositoryMode.workspaceKey)
+        // Snapshots: DEVER_SNAPSHOT_REPO_MODE=single|perProject|mixed[:owner/name] runs under that mode.
+        if let raw = ProcessInfo.processInfo.environment["DEVER_SNAPSHOT_REPO_MODE"] {
+            let parts = raw.split(separator: ":", maxSplits: 1).map(String.init)
+            simulatedMode = RepositoryMode(rawValue: parts[0])
+            if let mode = simulatedMode {
+                repositoryMode = mode
+                if parts.count > 1 { workspaceRepository = parts[1] }
+            }
+        }
+        // DEVER_SNAPSHOT_REPOS=owner/a,owner/b gives the first project those repositories (not saved).
+        let simulatedRepos = ProcessInfo.processInfo.environment["DEVER_SNAPSHOT_REPOS"]?
+            .split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) } ?? []
         if let stored = Keychain.load(StoredCredentials.self, for: Self.credentialsKey) {
             github = stored.github
             slack = stored.slack
@@ -183,6 +299,11 @@ final class AppState: ObservableObject {
            let list = try? JSONDecoder().decode([Project].self, from: data) {
             projects = list
         }
+        if !simulatedRepos.isEmpty, !projects.isEmpty {
+            projects[0].githubRepos = simulatedRepos
+            projects[0].usesWorkspaceRepository = false
+            simulatedMode = simulatedMode ?? repositoryMode
+        }
         if simulatedMissing.contains(.slack) { slack = nil }
         if simulatedMissing.contains(.linear) { linear = nil }
         if simulatedMissing.contains(.github) { github = nil }
@@ -190,7 +311,8 @@ final class AppState: ObservableObject {
         // sample pull request (none: no preview linked). Nothing is written back.
         if let mode = PreviewStore.simulation, !projects.isEmpty {
             projects[0].previewPullNumber = mode == "none" ? nil : PreviewStore.samplePullNumber
-            projects[0].githubRepo = projects[0].githubRepo ?? PreviewStore.sampleRepo
+            if projects[0].githubRepos.isEmpty { projects[0].githubRepos = [PreviewStore.sampleRepo] }
+            projects[0].previewRepository = projects[0].githubRepos.first
         }
         expired = Set(Self.simulated("DEVER_SNAPSHOT_UNAUTHORIZED").keys.compactMap(ServiceKind.init(rawValue:)))
     }
@@ -225,8 +347,36 @@ final class AppState: ObservableObject {
         var out: [ServiceKind] = []
         if p.slack != nil, slack == nil { out.append(.slack) }
         if p.linear != nil, linear == nil { out.append(.linear) }
-        if p.githubRepo != nil, github == nil { out.append(.github) }
+        if !repositories(for: p).isEmpty, github == nil { out.append(.github) }
         return out
+    }
+
+    // MARK: Repositories
+
+    /// The repositories a project follows: the workspace's in `single` mode, its own in
+    /// `perProject`, either in `mixed`.
+    func repositories(for p: Project) -> [String] {
+        p.repositories(mode: repositoryMode, workspace: workspaceRepository)
+    }
+
+    /// The repository of the project's preview pull request, when the project still follows it.
+    func previewRepository(for p: Project) -> String? {
+        let repos = repositories(for: p)
+        guard let repo = p.previewRepository ?? repos.first, repos.contains(repo) else { return nil }
+        return repo
+    }
+
+    /// Whether the project page shows the Preview panel: a repository, and either a pull
+    /// request to follow or no word yet on whether one is wanted.
+    func showsPreview(_ p: Project) -> Bool {
+        !repositories(for: p).isEmpty && (p.previewPullNumber != nil || p.previewDismissed != true)
+    }
+
+    /// Changes the mode without losing anything: a project's own repositories stay stored while
+    /// `single` ignores them, and come back when the mode allows them again.
+    func setRepositoryMode(_ mode: RepositoryMode, workspace: String?) {
+        repositoryMode = mode
+        workspaceRepository = workspace
     }
 
     func isConnected(_ s: ServiceKind) -> Bool {
@@ -346,7 +496,7 @@ final class AppState: ObservableObject {
     }
 
     private func saveProjects() {
-        guard PreviewStore.simulation == nil else { return }
+        guard PreviewStore.simulation == nil, simulatedMode == nil else { return }
         if let data = try? JSONEncoder().encode(projects) {
             try? data.write(to: projectsURL, options: .atomic)
         }

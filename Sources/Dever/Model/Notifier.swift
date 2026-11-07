@@ -33,11 +33,15 @@ struct ProjectAlert: Hashable {
 extension Project {
     func alerts(_ s: ProjectSnapshot) -> [ProjectAlert] {
         var out: [ProjectAlert] = []
-        if s.github?.pipeline == .failing {
-            out.append(.init(kind: .pipelineFailing, key: "pipeline", title: "\(name): pipeline failing",
-                             body: s.github?.scoped == true
-                                 ? "A pull request branch of this project fails its checks."
-                                 : "The default branch fails its checks."))
+        if let g = s.github, g.pipeline == .failing {
+            // Several repositories: say which one, so the key changes when another starts failing.
+            let several = g.repositories.count > 1
+            let names = g.failingRepositories.joined(separator: ", ")
+            out.append(.init(kind: .pipelineFailing, key: several ? "pipeline:" + names : "pipeline",
+                             title: "\(name): pipeline failing",
+                             body: (g.scoped
+                                 ? "A pull request branch of this project fails its checks"
+                                 : "The default branch fails its checks") + (several ? " in \(names)." : ".")))
         }
         if let l = s.linear, let target = l.targetDate,
            target < Calendar.current.startOfDay(for: Date()), l.done < l.total {

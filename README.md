@@ -26,6 +26,13 @@ Tokens are stored in the macOS Keychain (`io.github.eri.dever`), projects in `~/
 - **Import from Slack**: lists channels following the naming convention and suggests the matching Linear project.
 - **Import from Linear**: lists projects and suggests the matching channel.
 - A project without both a Slack channel **and** a Linear project is flagged ⚠️ incomplete.
+- **Repository mode** (asked during onboarding, changeable in Settings → Repositories): *one repository for
+  everything* (a workspace repository every project follows; the editor has no repository step),
+  *repositories per project* (each project picks one or several) or *both* (a project follows the workspace
+  repository unless it picks its own). Pull requests and pipeline runs add up across a project's repositories,
+  and rows name the repository when there is more than one. Switching modes loses nothing: a project's own
+  repositories stay saved while the single mode ignores them. Imports in the per-project and mixed modes link a
+  repository named like the project.
 - **Preview environment** (optional, needs a GitHub repository): the project follows the preview of one pull request,
   chosen in the editor ("Preview" step); "No preview needed" on the project page hides the panel until one is picked.
   The panel sits above Delivery and shows the PR, the state (not deployed, deploying, updating,
@@ -57,8 +64,13 @@ tools had never been connected, `DEVER_SNAPSHOT_UNAUTHORIZED=linear` as if the s
 Preview panel states from sample data (PR #4714, no network): `DEVER_SNAPSHOT_PREVIEW=live|deploying|failed|deleted|notdeployed|none`
 (`none`: no pull request linked); add `DEVER_SNAPSHOT_PREVIEW_OPTIONS=1` for the deploy options row, and
 `DEVER_SNAPSHOT_SHEETS=1 DEVER_SNAPSHOT_SCREENS=0 DEVER_SNAPSHOT_STEP=preview DEVER_SNAPSHOT_PICKER="Pull request"` for the editor's step.
+Repository modes: `DEVER_SNAPSHOT_REPO_MODE=single|perProject|mixed[:owner/name]` runs under that mode (and workspace
+repository), `DEVER_SNAPSHOT_REPOS=owner/a,owner/b` gives the first project those repositories, and
+`DEVER_SNAPSHOT_SCROLL_END=1` adds each main screen scrolled to its end (`settings-dark-end.png` shows the Repositories section).
+Nothing is written back in these runs.
 
 ## Onboarding
 
-New users (no project yet) start with a three-stage welcome: what Dever does and their display name, connecting
-Slack, Linear and GitHub (with what each one is used for), then a first project. Reopen it from Help → Welcome to Dever….
+New users (no project yet) start with a short welcome: their display name, connecting Slack, Linear and GitHub
+(with what each one is used for), where the code lives (the repository mode, with GitHub), the channel prefix, then
+a first project. Reopen it from Help → Welcome to Dever….
