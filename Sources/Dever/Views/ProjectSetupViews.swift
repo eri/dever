@@ -383,29 +383,31 @@ struct ProjectEditorSheet: View {
 
     /// The recap: one row per thing, each opening its step; then the one button.
     private var readyStep: some View {
-        VStack(alignment: .leading, spacing: 20) {
+        VStack(alignment: .leading, spacing: 16) {
             StepTitle(text: isNew ? "Ready?" : "Edit project")
             ScrollView {
-            VStack(spacing: 6) {
-                recapRow(icon: AnyView(Image(systemName: "textformat").font(.system(size: 15, weight: .medium)).foregroundStyle(Soot.ink)),
-                         title: project.name, detail: "Name") { go(.name) }
-                recapRow(icon: AnyView(BrandLogo(service: .slack, size: 18)), title: slackSummary, detail: "Slack") { go(.slack) }
-                recapRow(icon: AnyView(BrandLogo(service: .linear, size: 18).foregroundStyle(Soot.ink)), title: linearSummary,
-                         detail: "Linear") { go(.linear) }
-                if app.repositoryMode != .single {
-                    recapRow(icon: AnyView(BrandLogo(service: .github, size: 18).foregroundStyle(Soot.ink)),
-                             title: githubSummary, detail: "GitHub") { go(.github) }
+                VStack(alignment: .leading, spacing: 4) {
+                    recapRow(icon: AnyView(Image(systemName: "textformat").font(.system(size: 15, weight: .medium)).foregroundStyle(Soot.ink)),
+                             tool: "Name", state: .set(project.name)) { go(.name) }
+                    FieldLabel(text: "Tools").padding(.top, 12).padding(.bottom, 4)
+                    recapRow(icon: AnyView(BrandLogo(service: .slack, size: 18)), tool: "Slack", state: slackState) { go(.slack) }
+                    recapRow(icon: AnyView(BrandLogo(service: .linear, size: 18).foregroundStyle(Soot.ink)), tool: "Linear",
+                             state: linearState) { go(.linear) }
+                    if app.repositoryMode != .single {
+                        recapRow(icon: AnyView(BrandLogo(service: .github, size: 18).foregroundStyle(Soot.ink)), tool: "GitHub",
+                                 state: githubState) { go(.github) }
+                    }
+                    if !repos.isEmpty {
+                        recapRow(icon: AnyView(Image(systemName: "globe").font(.system(size: 16, weight: .medium)).foregroundStyle(Soot.ink)),
+                                 tool: "Preview",
+                                 state: project.previewPullNumber.map { .set("Pull request #\($0)") }
+                                    ?? .unset(project.previewDismissed == true ? "Not needed" : "Not linked")) { go(.preview) }
+                    }
                 }
-                if !repos.isEmpty {
-                    recapRow(icon: AnyView(Image(systemName: "globe").font(.system(size: 16, weight: .medium)).foregroundStyle(Soot.ink)),
-                             title: project.previewPullNumber.map { "Pull request #\($0)" }
-                                ?? (project.previewDismissed == true ? "Not needed" : "No preview"), detail: "Preview") { go(.preview) }
-                }
-            }
-            .frame(maxWidth: 420)
+                .frame(maxWidth: 440)
             }
             .frame(maxHeight: .infinity)
-            VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 8) {
                 Button(saving ? "Saving…" : isNew ? "Create project" : "Save") { Task { await save() } }
                     .buttonStyle(LimeButton())
                     .keyboardShortcut(.defaultAction)
@@ -415,49 +417,78 @@ struct ProjectEditorSheet: View {
         }
     }
 
-    /// A recap line: the value, what it is underneath, and where it leads. Compact, so five fit.
-    private func recapRow(icon: AnyView, title: String, detail: String, open: @escaping () -> Void) -> some View {
+    /// What a recap row shows: linked to something, about to create it, or nothing yet.
+    enum RecapState {
+        case set(String), create(String), unset(String)
+    }
+
+    /// A recap line: the tool, what it is linked to underneath, and a clear mark of set or not.
+    /// Set: the value in ink and a lime check. Not set: a quiet line and a lime "Link".
+    private func recapRow(icon: AnyView, tool: String, state: RecapState, open: @escaping () -> Void) -> some View {
         Button(action: open) {
             HStack(spacing: 12) {
                 icon.frame(width: 22).accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 1) {
-                    Text(title).font(.system(size: 14, weight: .medium)).foregroundStyle(Soot.ink).lineLimit(1)
-                    Text(detail).font(.system(size: 12)).foregroundStyle(Soot.muted)
+                    Text(tool).font(.system(size: 14, weight: .medium)).foregroundStyle(Soot.ink)
+                    switch state {
+                    case .set(let value):
+                        Text(value).font(.system(size: 12)).foregroundStyle(Soot.ink).lineLimit(1).truncationMode(.middle)
+                    case .create(let value):
+                        Text(value).font(.system(size: 12)).foregroundStyle(Soot.lime).lineLimit(1).truncationMode(.middle)
+                    case .unset(let hint):
+                        Text(hint).font(.system(size: 12)).foregroundStyle(Soot.muted).lineLimit(1)
+                    }
                 }
-                Spacer()
-                Image(systemName: "arrow.right").font(.system(size: 12, weight: .semibold)).foregroundStyle(Soot.muted)
+                Spacer(minLength: 12)
+                switch state {
+                case .set:
+                    Image(systemName: "checkmark.circle.fill").font(.system(size: 14)).foregroundStyle(Soot.lime)
+                    Image(systemName: "chevron.right").font(.system(size: 11, weight: .semibold)).foregroundStyle(Soot.muted)
+                case .create:
+                    Image(systemName: "plus.circle.fill").font(.system(size: 14)).foregroundStyle(Soot.lime)
+                    Image(systemName: "chevron.right").font(.system(size: 11, weight: .semibold)).foregroundStyle(Soot.muted)
+                case .unset:
+                    Text("Link").font(.system(size: 13, weight: .semibold)).foregroundStyle(Soot.lime)
+                }
             }
             .padding(.horizontal, 14)
-            .frame(height: 50)
+            .frame(height: 46)
             .background(Soot.surface, in: RoundedRectangle(cornerRadius: Soot.fieldRadius))
             .contentShape(RoundedRectangle(cornerRadius: Soot.fieldRadius))
             .modifier(FocusOutline(radius: Soot.fieldRadius))
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("\(detail): \(title)")
+        .accessibilityLabel({
+            switch state {
+            case .set(let v): "\(tool): \(v)"
+            case .create(let v): "\(tool): \(v)"
+            case .unset(let h): "\(tool): \(h)"
+            }
+        }())
     }
 
-    private var slackSummary: String {
+    private var slackState: RecapState {
         switch slackPick {
-        case Self.create?: "Create #\(suggestedChannel)"
-        case let id?: catalog.channels.first { $0.id == id }.map { "#\($0.name)" } ?? project.slack.map { "#\($0.name)" } ?? "No channel"
-        case nil: "No channel"
+        case Self.create?: .create("Create #\(suggestedChannel)")
+        case let id?: (catalog.channels.first { $0.id == id }.map { "#\($0.name)" } ?? project.slack.map { "#\($0.name)" })
+            .map { .set($0) } ?? .unset("Not linked")
+        case nil: .unset("Not linked")
         }
     }
 
-    private var githubSummary: String {
-        if app.repositoryMode == .mixed, !ownRepositories.wrappedValue {
-            return app.workspaceRepository.map { "Workspace repository · \($0)" } ?? "Workspace repository"
-        }
-        return repos.isEmpty ? "No repository" : repos.joined(separator: ", ")
-    }
-
-    private var linearSummary: String {
+    private var linearState: RecapState {
         switch linearPick {
-        case Self.create?: "Create \u{201C}\(project.name)\u{201D}"
-        case let id?: catalog.linearProjects.first { $0.id == id }?.name ?? project.linear?.name ?? "No Linear project"
-        case nil: "No Linear project"
+        case Self.create?: .create("Create \u{201C}\(project.name)\u{201D}")
+        case let id?: (catalog.linearProjects.first { $0.id == id }?.name ?? project.linear?.name).map { .set($0) } ?? .unset("Not linked")
+        case nil: .unset("Not linked")
         }
+    }
+
+    private var githubState: RecapState {
+        if app.repositoryMode == .mixed, !ownRepositories.wrappedValue {
+            return app.workspaceRepository.map { .set("Workspace · \($0)") } ?? .unset("Workspace repository, not set")
+        }
+        return repos.isEmpty ? .unset("Not linked") : .set(repos.joined(separator: ", "))
     }
 
     private func connectHint(_ service: ServiceKind) -> some View {
