@@ -355,6 +355,9 @@ struct SlackThreadView: View {
     var loadingEarlier = false
     /// The reading room: full text, day headings, threads in a pane beside the messages.
     var wide = false
+    /// The content width of each layout. While the panel's frame animates from one to the
+    /// other, each list is laid out at its own final width and clipped, so no message reflows.
+    var widths: (rail: CGFloat, wide: CGFloat)? = nil
     /// The message to land on when the wide view opens (its `ts`).
     var focus: String?
     var customEmoji: [String: URL] = [:]
@@ -374,53 +377,77 @@ struct SlackThreadView: View {
 
     private var visible: [SlackMessage] { Array(messages.prefix(shown).reversed()) }
 
+    /// The thread beside the room opens, closes or changes in one movement: slides in from
+    /// the right over the aside, cross-fades to another thread, slides back out.
+    private func setThread(_ m: SlackMessage?) { Motion.run(Motion.move) { openThread = m } }
+
     var body: some View {
-        if wide {
-            HStack(alignment: .top, spacing: 16) {
-                ScrollViewReader { proxy in
-                    ScrollView {
-                        list.frame(maxWidth: 1200, alignment: .leading)
-                        Color.clear.frame(height: 1).id("slack-end")
-                    }
-                    .background(OverlayScrollers())
-                    // Opens on the message that was clicked, else on the latest, as Slack does.
-                    .onAppear { proxy.scrollTo(focus ?? "slack-end", anchor: focus == nil ? .bottom : .center) }
-                    .onChange(of: focus) { _, ts in if let ts { withAnimation { proxy.scrollTo(ts, anchor: .center) } } }
+        // Both layouts live in one place, so the view's state (the open thread) survives the
+        // switch. The one leaving fades as the one arriving fades in (200 ms), each at its own
+        // final width; the panel's growing frame clips the overflow. 8 px of headroom keep the
+        // hover strip above the first message out of the clip.
+        ZStack(alignment: .topLeading) {
+            if wide {
+                room.frame(width: widths?.wide, alignment: .leading)
+                    .transition(.opacity)
+            } else {
+                list.frame(width: widths?.rail, alignment: .leading)
+                    .transition(.opacity)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .padding(.top, 8)
+        .clipped()
+        .padding(.top, -8)
+        .motion(Motion.ui, fade: true, value: wide)
+        .onReceive(NotificationCenter.default.publisher(for: .previewFirstSlackFile)) { _ in
+            NotificationCenter.default.post(name: .previewSlackFile, object: firstFile())
+        }
+    }
+
+    private var room: some View {
+        HStack(alignment: .top, spacing: 16) {
+            ScrollViewReader { proxy in
+                ScrollView {
+                    list.frame(maxWidth: 1200, alignment: .leading)
+                    Color.clear.frame(height: 1).id("slack-end")
                 }
-                .frame(maxWidth: 1200, maxHeight: .infinity, alignment: .topLeading)
-                PaneHandle(width: $paneWidth)
-                // Beside the messages: the open thread, or what the channel holds when none is open.
-                Group {
-                    if let parent = openThread {
-                        ThreadPane(parent: messages.first { $0.ts == parent.ts } ?? parent, user: parent.user.flatMap { users[$0] },
-                                   users: users, channels: channels, customEmoji: customEmoji,
-                                   permalink: permalink(parent), actions: actions) {
-                            openThread = nil
-                        }
-                        .id(parent.ts)
-                        .transition(.move(edge: .trailing).combined(with: .opacity))
-                    } else {
-                        ChannelAside(messages: messages, users: users, channels: channels)
-                            .transition(.opacity)
+                // Starts at the latest message and stays anchored there while the panel grows.
+                .defaultScrollAnchor(.bottom)
+                .background(OverlayScrollers())
+                // Opens on the message that was clicked (once the panel has grown), else on the latest.
+                .onAppear {
+                    guard let focus else { return }
+                    DispatchQueue.main.asyncAfter(deadline: .now() + (Motion.reduced ? 0 : 0.4)) {
+                        Motion.run(Motion.ui) { proxy.scrollTo(focus, anchor: .center) }
                     }
                 }
-                .frame(width: paneWidth)
+                .onChange(of: focus) { _, ts in if let ts { Motion.run(Motion.ui) { proxy.scrollTo(ts, anchor: .center) } } }
             }
-            .animation(.snappy(duration: 0.25), value: openThread?.ts)
-            .onReceive(NotificationCenter.default.publisher(for: .previewFirstSlackFile)) { _ in
-                NotificationCenter.default.post(name: .previewSlackFile, object: firstFile())
+            .frame(maxWidth: 1200, maxHeight: .infinity, alignment: .topLeading)
+            PaneHandle(width: $paneWidth)
+            // Beside the messages: the open thread, or what the channel holds when none is open.
+            Group {
+                if let parent = openThread {
+                    ThreadPane(parent: messages.first { $0.ts == parent.ts } ?? parent, user: parent.user.flatMap { users[$0] },
+                               users: users, channels: channels, customEmoji: customEmoji,
+                               permalink: permalink(parent), actions: actions) {
+                        setThread(nil)
+                    }
+                    .transition(Motion.slide(from: .trailing))
+                } else {
+                    ChannelAside(messages: messages, users: users, channels: channels)
+                        .transition(.opacity)
+                }
             }
-            .onReceive(NotificationCenter.default.publisher(for: .openFirstSlackThread)) { _ in
-                openThread = openThread == nil ? messages.prefix(shown).first { ($0.reply_count ?? 0) > 0 } : nil
-            }
-            .onChange(of: messages.map(\.ts)) { _, ts in
-                // The thread pane follows a message that scrolled out of the loaded range.
-                if let parent = openThread, !ts.contains(parent.ts) { openThread = nil }
-            }
-        } else {
-            list.onReceive(NotificationCenter.default.publisher(for: .previewFirstSlackFile)) { _ in
-                NotificationCenter.default.post(name: .previewSlackFile, object: firstFile())
-            }
+            .frame(width: paneWidth)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .openFirstSlackThread)) { _ in
+            setThread(openThread == nil ? messages.prefix(shown).first { ($0.reply_count ?? 0) > 0 } : nil)
+        }
+        .onChange(of: messages.map(\.ts)) { _, ts in
+            // The thread pane follows a message that scrolled out of the loaded range.
+            if let parent = openThread, !ts.contains(parent.ts) { setThread(nil) }
         }
     }
 
@@ -431,15 +458,20 @@ struct SlackThreadView: View {
     private var list: some View {
         VStack(alignment: .leading, spacing: 0) {
             if wide, hasEarlier || messages.count > shown {
-                if loadingEarlier {
-                    WaitingLine().padding(.horizontal, 8).padding(.bottom, 12)
-                        .accessibilityElement().accessibilityLabel("Loading earlier messages")
-                } else {
-                    Button("Show earlier", action: showEarlier)
-                        .buttonStyle(.plain).font(.system(size: 12, weight: .semibold)).foregroundStyle(Soot.lime)
-                        .padding(.horizontal, 8).padding(.bottom, 12)
-                        .modifier(FocusOutline(radius: 4))
+                Group {
+                    if loadingEarlier {
+                        WaitingLine().padding(.horizontal, 8).padding(.bottom, 12)
+                            .accessibilityElement().accessibilityLabel("Loading earlier messages")
+                            .transition(.opacity)
+                    } else {
+                        Button("Show earlier", action: showEarlier)
+                            .buttonStyle(PressButton()).font(.system(size: 12, weight: .semibold)).foregroundStyle(Soot.lime)
+                            .padding(.horizontal, 8).padding(.bottom, 12)
+                            .modifier(FocusOutline(radius: 4))
+                            .transition(.opacity)
+                    }
                 }
+                .motion(Motion.ui, fade: true, value: loadingEarlier)
             }
             ForEach(Array(visible.enumerated()), id: \.element.id) { index, m in
                 let previous = index > 0 ? visible[index - 1] : nil
@@ -456,7 +488,7 @@ struct SlackThreadView: View {
                     MessageRow(message: m, user: m.user.flatMap { users[$0] }, users: users, channels: channels,
                                customEmoji: customEmoji, grouped: grouped, wide: wide,
                                selected: openThread?.ts == m.ts || focus == m.ts, permalink: permalink(m),
-                               actions: actions, openThread: wide ? { openThread = $0 } : nil, openWide: openWide)
+                               actions: actions, openThread: wide ? { setThread($0) } : nil, openWide: openWide)
                         .padding(.top, grouped ? 2 : (newDay ? 0 : (wide ? 18 : 14)))
                         .id(m.ts)
                 }
@@ -717,14 +749,15 @@ struct FilePreviewHost: ViewModifier {
     func body(content: Content) -> some View {
         content
             .onReceive(NotificationCenter.default.publisher(for: .previewSlackFile)) { note in
-                preview = note.object as? SlackFile   // nil closes it
+                // The lightbox pops in over a dimming page (200 ms ease-out), leaves faster (150 ms ease-in).
+                let file = note.object as? SlackFile   // nil closes it
+                Motion.run(file == nil ? Motion.exit : Motion.ui, fade: true) { preview = file }
             }
             .overlay {
                 if let file = preview {
-                    FileLightbox(file: file) { preview = nil }
+                    FileLightbox(file: file) { Motion.run(Motion.exit, fade: true) { preview = nil } }
                 }
             }
-            .animation(.easeOut(duration: 0.18), value: preview?.id)
     }
 }
 
@@ -847,13 +880,18 @@ private struct ThreadPane: View {
                 }
             }
             .frame(maxHeight: .infinity)
+            // Another thread picked while this one is open: the pane stays, its content
+            // cross-fades (200 ms) instead of a second pane sliding in over the first.
+            .id(parent.ts)
+            .transition(.opacity)
+            .motion(Motion.ui, fade: true, value: parent.ts)
             ReplyComposer(draft: $draft, sending: sending, autofocus: false, send: { await send() }, cancel: { draft = "" })
         }
         .padding(18)
         .frame(maxHeight: .infinity, alignment: .top)
         .background(Soot.ground, in: RoundedRectangle(cornerRadius: 12))
         .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Soot.line))
-        .task(id: parent.ts) { await load() }
+        .task(id: parent.ts) { replies = nil; draft = ""; await load() }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Thread")
     }
@@ -1055,12 +1093,19 @@ private struct MessageRow: View {
         .background(selected ? Soot.ground : (hovering ? Soot.ground.opacity(0.6) : Color.clear), in: RoundedRectangle(cornerRadius: 6))
         .padding(.leading, selected ? 8 : 0)
         .overlay(alignment: .leading) {
-            if selected { RoundedRectangle(cornerRadius: 2).fill(Soot.lime).frame(width: 3).padding(.vertical, 6) }
+            if selected { RoundedRectangle(cornerRadius: 2).fill(Soot.lime).frame(width: 3).padding(.vertical, 6).transition(.opacity) }
         }
+        // Hover is a 120 ms tone; the lime bar of the selected message fades in and the row
+        // steps aside for it (200 ms, fade only under Reduce Motion).
+        .motion(Motion.quick, fade: true, value: hovering)
+        .motion(Motion.ui, value: selected)
         .contentShape(Rectangle())
         .simultaneousGesture(TapGesture().onEnded { if let openWide { openWide(message) } }, including: openWide == nil ? .none : .all)
         .help(openWide == nil ? "" : "Open the conversation at this message")
-        .overlay(alignment: .topTrailing) { toolbar.opacity(stripShown ? 1 : 0).offset(x: 0, y: -6) }
+        .overlay(alignment: .topTrailing) {
+            toolbar.opacity(stripShown ? 1 : 0).offset(x: 0, y: -6)
+                .motion(Motion.quick, fade: true, value: stripShown)
+        }
         .onHover { hovering = $0 }
         .onAppear { reactions = message.reactions ?? [] }
         .onChange(of: message.reactions) { _, new in reactions = new ?? [] }

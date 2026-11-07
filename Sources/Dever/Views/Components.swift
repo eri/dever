@@ -114,6 +114,7 @@ struct DeliveryLegend: View {
                     RoundedRectangle(cornerRadius: 1).fill(DeliveryStrip.color(stage)).frame(width: 10, height: 8)
                     Text(stage.label).foregroundStyle(Theme.muted)
                     Text(delivery.count(stage), format: .number).foregroundStyle(Theme.text).monospacedDigit()
+                        .rollingNumber(delivery.count(stage))
                 }
             }
         }
@@ -177,12 +178,13 @@ struct ErrorLabel: View {
     }
 }
 
-/// Row hover: a tone step, no motion.
+/// Row hover: a tone step that fades in over 120 ms, no movement.
 struct HoverRow: ViewModifier {
     @State private var hovering = false
     func body(content: Content) -> some View {
         content
             .background(hovering ? Theme.raised : Color.clear)
+            .motion(Motion.quick, fade: true, value: hovering)
             .onHover { hovering = $0 }
     }
 }

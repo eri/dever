@@ -65,6 +65,9 @@ struct ProjectDetailView: View {
             // In the wide view the page stops scrolling: the messages scroll inside their
             // panel and the thread pane stays put beside them. Same ScrollView either way,
             // so the panel's state (open thread, draft) survives the switch.
+            // The Slack panel's content width in each layout, so the messages are laid out at
+            // their final width while the panel grows or shrinks around them (no reflow).
+            let railWidth = twoColumns ? min(420, geo.size.width * 0.34) : geo.size.width - 56
             ScrollView(.vertical) {
                 VStack(alignment: .leading, spacing: 24) {
                     titleRow
@@ -73,17 +76,25 @@ struct ProjectDetailView: View {
                     }
                     // The Slack panel keeps one place in the hierarchy whichever layout is on,
                     // so open threads and a half-written reply survive a switch to the wide view.
+                    // Opening the room: the work column slides out to the left as the panel
+                    // grows over its place (one spring, ~350 ms); the reverse on the way back.
                     if twoColumns {
                         HStack(alignment: .top, spacing: 16) {
-                            if !slackExpanded { workColumn.frame(maxWidth: .infinity) }
-                            slackPanel
-                                .frame(width: slackExpanded ? nil : min(420, geo.size.width * 0.34))
+                            if !slackExpanded {
+                                workColumn.frame(maxWidth: .infinity)
+                                    .transition(Motion.reduced ? .opacity : .opacity.combined(with: .offset(x: -40)))
+                            }
+                            slackPanel(railWidth: railWidth - 40, wideWidth: geo.size.width - 56 - 40)
+                                .frame(width: slackExpanded ? nil : railWidth)
                                 .frame(maxHeight: slackExpanded ? .infinity : nil, alignment: .top)
                         }
                     } else {
                         VStack(spacing: 16) {
-                            if !slackExpanded { workColumn }
-                            slackPanel.frame(maxHeight: slackExpanded ? .infinity : nil, alignment: .top)
+                            if !slackExpanded {
+                                workColumn.transition(Motion.reduced ? .opacity : .opacity.combined(with: .offset(y: -24)))
+                            }
+                            slackPanel(railWidth: railWidth - 40, wideWidth: geo.size.width - 56 - 40)
+                                .frame(maxHeight: slackExpanded ? .infinity : nil, alignment: .top)
                         }
                     }
                 }
@@ -100,10 +111,7 @@ struct ProjectDetailView: View {
         .task { await load() }
         .sheet(isPresented: $flow.githubSheet) { GitHubLoginSheet() }
         .onChange(of: connectionKey) { _, _ in Task { await load() } }
-        .onReceive(NotificationCenter.default.publisher(for: .toggleSlackWide)) { _ in
-            slackExpanded.toggle()
-            if slackExpanded { shownMessages = max(shownMessages, 30) }
-        }
+        .onReceive(NotificationCenter.default.publisher(for: .toggleSlackWide)) { _ in toggleSlackWide() }
         .onReceive(NotificationCenter.default.publisher(for: .openFirstIssue)) { _ in
             if let first = workList.first?.issue {
                 NotificationCenter.default.post(name: .openIssue, object: IssueRoute(project: project, issue: first))
@@ -113,6 +121,8 @@ struct ProjectDetailView: View {
 
     private var workColumn: some View {
         VStack(spacing: 16) {
+            // Skeletons dissolve into the loaded panels; the panels resize in the same 200 ms.
+            // Scoped to `loaded`, so nothing else on the page animates with it.
             // The preview first: it is the thing to open or to deploy, and it stays one or two lines.
             if app.showsPreview(project) {
                 PreviewPanel(project: project, missing: missing, flow: flow,
@@ -128,6 +138,7 @@ struct ProjectDetailView: View {
             }
             workPanel
         }
+        .motion(Motion.ui, fade: true, value: loaded)
     }
 
     // MARK: Title row
@@ -143,8 +154,10 @@ struct ProjectDetailView: View {
                         .lineLimit(1)
                         .help(project.name)
                         .accessibilityAddTraits(.isHeader)
-                    if status == .loading { Skeleton(width: 72, height: 20, radius: 4) } else { StatusBadge(status: status) }
+                    if status == .loading { Skeleton(width: 72, height: 20, radius: 4).transition(.opacity) }
+                    else { StatusBadge(status: status).transition(.opacity) }
                 }
+                .motion(Motion.ui, fade: true, value: status == .loading)
                 linkRow
             }
             Spacer(minLength: 16)
@@ -330,16 +343,20 @@ struct ProjectDetailView: View {
             QuietEmpty(symbol: "tray", text: "No issues in this project yet")
         } else {
             HStack(alignment: .lastTextBaseline, spacing: 10) {
+                // The figures roll to their new values when a refresh lands.
                 Text(Double(delivery.shipped) / Double(delivery.total), format: .percent.precision(.fractionLength(0)))
                     .font(.system(size: 34, weight: .semibold)).tracking(-1).foregroundStyle(Soot.ink).monospacedDigit()
+                    .rollingNumber(delivery.shipped * 10_000 + delivery.total)
                 Text("\(delivery.shipped) of \(delivery.total) shipped").font(.system(size: 14)).foregroundStyle(Soot.muted)
                     .monospacedDigit()
+                    .rollingNumber(delivery.shipped * 10_000 + delivery.total)
                 Spacer(minLength: 16)
                 if githubReady, let url = pullsURL {
                     HoverLink(destination: url) {
                         HStack(spacing: 6) {
                             BrandLogo(service: .github, size: 16).foregroundStyle(Soot.ink).accessibilityHidden(true)
                             Text(githubLine).font(.system(size: 13, weight: .semibold)).foregroundStyle(Soot.ink).monospacedDigit()
+                                .rollingNumber(pulls.count * 10_000 + merged.count)
                             if let summary = pipelineSummary {
                                 PipelineGlyph(state: summary.state)
                                 Text(summary.text).font(.system(size: 13, weight: .semibold)).foregroundStyle(Soot.ink)
@@ -356,12 +373,14 @@ struct ProjectDetailView: View {
                 VStack(alignment: .leading, spacing: 10) { stageTabs; updateInLinear }
             }
             VStack(alignment: .leading, spacing: 2) {
-                ForEach(capped(workList, key: "work")) { item in workRow(item) }
+                ForEach(capped(workList, key: "work")) { item in workRow(item).transition(.opacity) }
                 showAll(workList.count, key: "work")
                 if githubReady, pulls.isEmpty, merged.isEmpty {
                     QuietEmpty(symbol: "arrow.triangle.pull", text: "No pull request cites one of these issues yet")
                 }
             }
+            // A stage picked above: the rows it drops fade out, the ones it keeps slide up.
+            .motion(Motion.ui, value: currentFilter)
         }
     }
 
@@ -400,6 +419,8 @@ struct ProjectDetailView: View {
                         .opacity(currentFilter == .all || currentFilter == .stage(stage) ? 1 : 0.3)
                 }
             }
+            // The other stages step back (200 ms); the segments themselves never move for style.
+            .motion(Motion.ui, fade: true, value: currentFilter)
         }
         .frame(height: 10)
         .accessibilityHidden(true)
@@ -475,6 +496,8 @@ struct ProjectDetailView: View {
                 }
                 let rows: [UnlinkedPull] = unlinkedOpen.map { .open($0) } + unlinkedMerged.map { .merged($0) }
                 ForEach(capped(rows, key: "unlinked")) { row in
+                    // Rows revealed by "Show all" fade in with the list's growth.
+                    Group {
                     switch row {
                     case .open(let m):
                         pullRow(kind: m.pull.draft == true ? .draft : .open, pipeline: pipeline(of: m.pull), title: m.pull.title,
@@ -483,6 +506,8 @@ struct ProjectDetailView: View {
                         pullRow(kind: .merged, pipeline: nil, title: m.title ?? "Pull request #\(m.number)", number: m.number,
                                 repository: m.repository, url: m.url, trailing: m.mergedAt.map { $0.formatted(.relative(presentation: .named)) })
                     }
+                    }
+                    .transition(.opacity)
                 }
                 showAll(rows.count, key: "unlinked")
             }
@@ -562,7 +587,9 @@ struct ProjectDetailView: View {
 
     // MARK: Slack
 
-    private var slackPanel: some View {
+    /// The panel in both layouts. `railWidth` and `wideWidth` are the content widths of each,
+    /// so the messages keep their final layout while the panel's frame animates between the two.
+    private func slackPanel(railWidth: CGFloat, wideWidth: CGFloat) -> some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack(spacing: 10) {
                 if slackExpanded {
@@ -578,19 +605,21 @@ struct ProjectDetailView: View {
                         .overlay(Capsule().strokeBorder(Soot.edge))
                         .contentShape(Capsule())
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(PressButton())
                     .handCursor()
                     .modifier(FocusOutline(radius: 15))
                     .help("Back to the project (⌘⇧E)")
                     .accessibilityLabel("Back to the project")
                     .keyboardShortcut("e", modifiers: [.command, .shift])
-                    Rectangle().fill(Soot.line).frame(width: 1, height: 22)
+                    .transition(.opacity)
+                    Rectangle().fill(Soot.line).frame(width: 1, height: 22).transition(.opacity)
                 }
                 BrandLogo(service: .slack, size: 18)
                 VStack(alignment: .leading, spacing: 1) {
                     Text(project.slack.map { "#\($0.name)" } ?? "Slack").font(.system(size: 16, weight: .semibold))
                         .foregroundStyle(Soot.ink).accessibilityAddTraits(.isHeader)
                     Text(slackSubtitle).font(.system(size: 12)).foregroundStyle(Soot.muted)
+                        .contentTransition(.opacity)
                 }
                 Spacer()
                 if slackExpanded, let url = slackURL {
@@ -598,18 +627,20 @@ struct ProjectDetailView: View {
                         .font(.system(size: 13, weight: .semibold)).foregroundStyle(Soot.lime)
                         .handCursor()
                         .help("Open the channel in Slack")
+                        .transition(.opacity)
                 }
                 if project.slack != nil, !slackExpanded {
                     Button { toggleSlackWide() } label: {
                         Image(systemName: "arrow.up.left.and.arrow.down.right").font(.system(size: 11, weight: .semibold))
                             .foregroundStyle(Soot.ink).frame(width: 30, height: 30).background(Soot.ground, in: Circle())
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(PressButton())
                     .handCursor()
                     .modifier(FocusOutline(radius: 15))
                     .help("Read the conversation full width (⌘⇧E)")
                     .accessibilityLabel("Read the conversation full width")
                     .keyboardShortcut("e", modifiers: [.command, .shift])
+                    .transition(.opacity)
                 }
             }
             if project.slack == nil {
@@ -632,6 +663,7 @@ struct ProjectDetailView: View {
                         }
                     }
                 }
+                .transition(.opacity)
                 .accessibilityElement()
                 .accessibilityLabel("Loading messages")
             } else if messages.isEmpty {
@@ -641,21 +673,26 @@ struct ProjectDetailView: View {
                                 channelID: project.slack?.id, channelName: project.slack?.name,
                                 shown: slackExpanded ? shownMessages : railPlan.count,
                                 hasEarlier: hasEarlier, loadingEarlier: loadingEarlier,
-                                wide: slackExpanded, focus: slackFocus, customEmoji: customEmoji,
+                                wide: slackExpanded, widths: (rail: railWidth, wide: wideWidth),
+                                focus: slackFocus, customEmoji: customEmoji,
                                 showEarlier: { Task { await showEarlier() } },
                                 openWide: slackExpanded ? nil : { m in
                                     slackFocus = m.ts
-                                    withAnimation(reduceMotion ? nil : .snappy(duration: 0.3)) {
-                                        slackExpanded = true
-                                        shownMessages = max(shownMessages, 30)
+                                    toggleSlackWide()
+                                    Task {
+                                        try? await Task.sleep(nanoseconds: 3_000_000_000)
+                                        if slackFocus == m.ts { Motion.run(Motion.ui, fade: true) { slackFocus = nil } }
                                     }
-                                    Task { try? await Task.sleep(nanoseconds: 3_000_000_000); if slackFocus == m.ts { slackFocus = nil } }
                                 },
                                 expand: slackExpanded ? nil : { toggleSlackWide() },
                                 actions: slackActions)
+                    .transition(.opacity)
             }
         }
+        .motion(Motion.ui, fade: true, value: loaded)
         .sootPanel()
+        // The panel's own frame is the mask of the move: nothing of the room shows outside it.
+        .clipShape(RoundedRectangle(cornerRadius: 12))
     }
 
     // MARK: Capped lists
@@ -770,8 +807,11 @@ struct ProjectDetailView: View {
         return plan.recent == 1 ? "1 message this week" : "\(plan.recent) messages this week"
     }
 
+    /// Rail to room and back: one spring (~350 ms, ease-out, no overshoot). The panel's frame
+    /// grows in place while the work column slides out of its way; inside, the rail's messages
+    /// dissolve into the room's, each laid out at its own final width. Instant under Reduce Motion.
     private func toggleSlackWide() {
-        withAnimation(reduceMotion ? nil : .snappy(duration: 0.3)) {
+        Motion.run(Motion.move) {
             slackExpanded.toggle()
             if slackExpanded { shownMessages = max(shownMessages, 30) }
         }

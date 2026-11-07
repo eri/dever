@@ -109,13 +109,16 @@ struct ProjectEditorSheet: View {
     var body: some View {
         StepSheet(step: isNew ? path.firstIndex(of: step) : nil, count: isNew ? path.count : 0,
                   back: backAction, close: { dismiss() }) {
-            switch step {
-            case .name: nameStep
-            case .slack: slackStep
-            case .linear: linearStep
-            case .github: githubStep
-            case .preview: previewStep
-            case .ready: readyStep
+            // One step fades out and the next rises in (`FadeSwap`); the marks slide with it.
+            FadeSwap(value: step) { shown in
+                switch shown {
+                case .name: nameStep
+                case .slack: slackStep
+                case .linear: linearStep
+                case .github: githubStep
+                case .preview: previewStep
+                case .ready: readyStep
+                }
             }
         }
         .task {
@@ -133,16 +136,19 @@ struct ProjectEditorSheet: View {
         .onChange(of: step) { _, _ in query = "" }
     }
 
+    /// Every step change: the step fades out and the next rises in (`FadeSwap`); the marks slide.
+    private func go(_ s: Step) { Motion.run(Motion.settle) { step = s } }
+
     private var backAction: (() -> Void)? {
-        if !isNew { return step == .ready ? nil : { step = .ready } }
+        if !isNew { return step == .ready ? nil : { go(.ready) } }
         guard let i = path.firstIndex(of: step), i > 0 else { return nil }
-        return { step = path[i - 1] }
+        return { go(path[i - 1]) }
     }
 
     private func next() {
-        if !isNew { step = .ready; return }
-        guard let i = path.firstIndex(of: step), i + 1 < path.count else { step = .ready; return }
-        step = path[i + 1]
+        if !isNew { go(.ready); return }
+        guard let i = path.firstIndex(of: step), i + 1 < path.count else { go(.ready); return }
+        go(path[i + 1])
     }
 
     // MARK: Steps
@@ -382,18 +388,18 @@ struct ProjectEditorSheet: View {
             ScrollView {
             VStack(spacing: 6) {
                 recapRow(icon: AnyView(Image(systemName: "textformat").font(.system(size: 15, weight: .medium)).foregroundStyle(Soot.ink)),
-                         title: project.name, detail: "Name") { step = .name }
-                recapRow(icon: AnyView(BrandLogo(service: .slack, size: 18)), title: slackSummary, detail: "Slack") { step = .slack }
+                         title: project.name, detail: "Name") { go(.name) }
+                recapRow(icon: AnyView(BrandLogo(service: .slack, size: 18)), title: slackSummary, detail: "Slack") { go(.slack) }
                 recapRow(icon: AnyView(BrandLogo(service: .linear, size: 18).foregroundStyle(Soot.ink)), title: linearSummary,
-                         detail: "Linear") { step = .linear }
+                         detail: "Linear") { go(.linear) }
                 if app.repositoryMode != .single {
                     recapRow(icon: AnyView(BrandLogo(service: .github, size: 18).foregroundStyle(Soot.ink)),
-                             title: githubSummary, detail: "GitHub") { step = .github }
+                             title: githubSummary, detail: "GitHub") { go(.github) }
                 }
                 if !repos.isEmpty {
                     recapRow(icon: AnyView(Image(systemName: "globe").font(.system(size: 16, weight: .medium)).foregroundStyle(Soot.ink)),
                              title: project.previewPullNumber.map { "Pull request #\($0)" }
-                                ?? (project.previewDismissed == true ? "Not needed" : "No preview"), detail: "Preview") { step = .preview }
+                                ?? (project.previewDismissed == true ? "Not needed" : "No preview"), detail: "Preview") { go(.preview) }
                 }
             }
             .frame(maxWidth: 420)

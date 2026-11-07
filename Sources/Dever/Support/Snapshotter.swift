@@ -28,6 +28,10 @@ enum Snapshotter {
                 window.setContentSize(NSSize(width: parts[0], height: parts[1]))
             }
         }
+        // In front and unoccluded: SwiftUI pauses animations in a covered window, which would
+        // freeze every transition mid-way in the pictures.
+        NSApp.activate(ignoringOtherApps: true)
+        NSApp.windows.first(where: { $0.canBecomeMain })?.makeKeyAndOrderFront(nil)
         try? await Task.sleep(nanoseconds: UInt64(wait * 1_000_000_000))
         // DEVER_SNAPSHOT_SCREENS=0 skips the main screens when only sheets or onboarding are wanted.
         let wantScreens = ProcessInfo.processInfo.environment["DEVER_SNAPSHOT_SCREENS"] != "0"
@@ -53,12 +57,17 @@ enum Snapshotter {
             for (themeName, appearance) in [("dark", NSAppearance.Name.darkAqua), ("light", .aqua)] {
                 NSApp.appearance = NSAppearance(named: appearance)
                 NotificationCenter.default.post(name: .showScreen, object: SidebarItem.project(first.id))
-                try? await Task.sleep(nanoseconds: 2_000_000_000)
+                try? await Task.sleep(nanoseconds: UInt64((wait == 0 ? 0.4 : 8) * 1_000_000_000))
                 NotificationCenter.default.post(name: .toggleSlackWide, object: nil)
+                // DEVER_SNAPSHOT_SLACK_MID=1 also captures the room while it is still growing
+                // (about a third of the way through its spring) and while the thread slides in.
+                let mid = ProcessInfo.processInfo.environment["DEVER_SNAPSHOT_SLACK_MID"] == "1"
+                if mid { await filmstrip(dir, "project-slack-mid-\(themeName)") }
                 try? await Task.sleep(nanoseconds: UInt64((wait == 0 ? 0.4 : 6) * 1_000_000_000))
                 capture(to: dir.appendingPathComponent("project-slack-wide-\(themeName).png"))
                 if ProcessInfo.processInfo.environment["DEVER_SNAPSHOT_SLACK_THREAD"] == "1" {
                     NotificationCenter.default.post(name: .openFirstSlackThread, object: nil)
+                    if mid { await filmstrip(dir, "project-slack-thread-mid-\(themeName)") }
                     try? await Task.sleep(nanoseconds: 5_000_000_000)
                     capture(to: dir.appendingPathComponent("project-slack-thread-\(themeName).png"))
                     NotificationCenter.default.post(name: .openFirstSlackThread, object: nil)
@@ -72,6 +81,7 @@ enum Snapshotter {
                     try? await Task.sleep(nanoseconds: 1_500_000_000)
                 }
                 NotificationCenter.default.post(name: .toggleSlackWide, object: nil)
+                if mid { await filmstrip(dir, "project-slack-back-mid-\(themeName)") }
                 try? await Task.sleep(nanoseconds: 1_000_000_000)
             }
         }
@@ -121,14 +131,24 @@ enum Snapshotter {
             NotificationCenter.default.post(name: .showOnboarding, object: nil)
             for (themeName, appearance) in [("dark", NSAppearance.Name.darkAqua), ("light", .aqua)] {
                 NSApp.appearance = NSAppearance(named: appearance)
+                // DEVER_SNAPSHOT_STAGE_WAIT=<seconds> holds each stage longer (default 1.5).
+                let hold = ProcessInfo.processInfo.environment["DEVER_SNAPSHOT_STAGE_WAIT"].flatMap(Double.init) ?? 1.5
                 for stage in OnboardingView.Stage.allCases {
                     NotificationCenter.default.post(name: .showOnboardingStage, object: stage.rawValue)
-                    try? await Task.sleep(nanoseconds: 1_500_000_000)
+                    try? await Task.sleep(nanoseconds: UInt64(hold * 1_000_000_000))
                     capture(to: dir.appendingPathComponent("onboarding-\(stage)-\(themeName).png"))
                 }
             }
         }
         NSApp.terminate(nil)
+    }
+
+    /// Eight frames, one every 60 ms, of a transition that has just been started: a filmstrip.
+    private static func filmstrip(_ dir: URL, _ name: String) async {
+        for i in 0..<8 {
+            try? await Task.sleep(nanoseconds: 60_000_000)
+            capture(to: dir.appendingPathComponent("\(name)-\(i).png"))
+        }
     }
 
     /// Scrolls the main window's outermost scroll view to its end.

@@ -18,6 +18,10 @@ struct OnboardingView: View {
     @State var stage: Stage = .name
     let finish: (_ then: OnboardingExit) -> Void
 
+    /// Every stage change goes through here: the headline and its control fade out and the
+    /// next rise in (`FadeSwap`), the progress marks slide, the stage on the right fills in.
+    private func go(_ s: Stage) { Motion.run(Motion.settle) { stage = s } }
+
     var body: some View {
         VStack(spacing: 0) {
             topBar
@@ -35,7 +39,7 @@ struct OnboardingView: View {
         .background(Soot.ground)
         .environment(\.colorScheme, .dark)
         .onReceive(NotificationCenter.default.publisher(for: .showOnboardingStage)) { note in
-            if let raw = note.object as? Int, let s = Stage(rawValue: raw) { stage = s }
+            if let raw = note.object as? Int, let s = Stage(rawValue: raw) { go(s) }
         }
     }
 
@@ -46,11 +50,6 @@ struct OnboardingView: View {
                 Text("Dever").font(.system(size: 15, weight: .semibold)).foregroundStyle(Soot.ink)
             }
             Spacer()
-            Button("Skip") { finish(.overview) }
-                .buttonStyle(.plain)
-                .font(.system(size: 14))
-                .foregroundStyle(Soot.muted)
-                .help("Go straight to Dever; set things up later in Settings.")
         }
         .padding(.horizontal, Soot.margin)
         .frame(height: 56)
@@ -61,13 +60,17 @@ struct OnboardingView: View {
     private var controls: some View {
         VStack(alignment: .leading, spacing: 0) {
             Spacer(minLength: 0)
-            Group {
-                switch stage {
-                case .name: NameControls(next: { stage = .connect })
-                case .connect: ConnectControls(next: { stage = app.github == nil ? afterRepositories : .repositories })
-                case .repositories: RepositoryModeControls(next: { stage = afterRepositories })
-                case .channels: ChannelNamingControls(next: { stage = .project })
-                case .project: ProjectControls(finish: finish)
+            FadeSwap(value: stage) { shown in
+                VStack(alignment: .leading, spacing: 16) {
+                    switch shown {
+                    case .name: NameControls(next: { go(.connect) })
+                    case .connect: ConnectControls(next: { go(app.github == nil ? afterRepositories : .repositories) })
+                    case .repositories: RepositoryModeControls(next: { go(afterRepositories) })
+                    case .channels: ChannelNamingControls(next: { go(.project) })
+                    case .project: ProjectControls(finish: finish)
+                    }
+                    // The way out, under every stage's own action: same place, same words.
+                    SkipButton { finish(.overview) }
                 }
             }
             Spacer(minLength: 0)
@@ -82,7 +85,7 @@ struct OnboardingView: View {
     private var progress: some View {
         HStack(spacing: 6) {
             ForEach(Stage.allCases, id: \.self) { s in
-                Button { if s.rawValue < stage.rawValue { stage = s } } label: {
+                Button { if s.rawValue < stage.rawValue { go(s) } } label: {
                     Capsule()
                         .fill(s == stage ? Soot.ink : s.rawValue < stage.rawValue ? Soot.muted : Soot.surface)
                         .frame(width: s == stage ? 28 : 8, height: 8)
@@ -98,7 +101,22 @@ struct OnboardingView: View {
 
 // MARK: - Shared controls
 
-
+/// A tertiary way out of onboarding: lime text, no fill, under the stage's primary action.
+private struct SkipButton: View {
+    let action: () -> Void
+    var body: some View {
+        Button("Skip for now", action: action)
+            .buttonStyle(PressButton())
+            .font(.system(size: 14, weight: .semibold))
+            .foregroundStyle(Soot.lime)
+            .padding(.horizontal, 8)
+            .frame(height: 32)
+            .contentShape(Capsule())
+            .modifier(FocusOutline(radius: 16))
+            .padding(.leading, -8)
+            .help("Go straight to Dever; set things up later in Settings.")
+    }
+}
 
 
 // MARK: - Name
@@ -195,17 +213,23 @@ private struct ServiceRow: View {
             }
             Spacer()
             if app.isConnected(service) {
+                // The one celebration of onboarding: the check mark lands with a small spring.
                 Image(systemName: "checkmark.circle.fill").foregroundStyle(Soot.lime)
                     .font(.system(size: 18))
+                    .transition(Motion.reduced ? .opacity : .scale(scale: 0.4).combined(with: .opacity))
                     .accessibilityLabel("\(service.label) connected")
             } else if flow != nil {
                 Button("Cancel") { flow?.cancel(); flow = nil }
                     .buttonStyle(.plain).font(.system(size: 14)).foregroundStyle(Soot.muted)
+                    .transition(.opacity)
             } else {
                 Button("Connect", action: connect).buttonStyle(.plain)
                     .font(.system(size: 14, weight: .semibold)).foregroundStyle(Soot.lime)
+                    .transition(.opacity)
             }
         }
+        .motion(.spring(response: 0.35, dampingFraction: 0.6), fade: true, value: app.isConnected(service))
+        .motion(Motion.ui, fade: true, value: flow != nil)
         .padding(.horizontal, 16)
         .frame(height: 52)
         .background(Soot.surface, in: RoundedRectangle(cornerRadius: Soot.radius))
@@ -416,9 +440,24 @@ private struct ProjectControls: View {
 }
 
 
-/// Alerts, with a control that matches what macOS allows right now.
+/// Alerts, with a control that matches what macOS allows right now: a switch over every
+/// alert kind (the same keys as Settings › Alerts), a link to System Settings once denied.
 private struct AlertsRow: View {
     @State private var status: UNAuthorizationStatus = .notDetermined
+    @State private var on = AlertKind.allCases.allSatisfy(\.isEnabled)
+
+    private var authorized: Bool { status == .authorized || status == .provisional }
+
+    /// On: every kind enabled. Off: every kind off. Switching on asks macOS first when needed.
+    private var master: Binding<Bool> {
+        Binding(get: { authorized && on }, set: { value in
+            on = value
+            for kind in AlertKind.allCases { UserDefaults.standard.set(value, forKey: kind.settingKey) }
+            if value, !authorized {
+                Task { _ = await Notifier.shared.requestAuthorization(); await refresh() }
+            }
+        })
+    }
 
     var body: some View {
         HStack(spacing: 12) {
@@ -430,11 +469,7 @@ private struct AlertsRow: View {
                     .lineLimit(1)
             }
             Spacer()
-            switch status {
-            case .authorized, .provisional:
-                Image(systemName: "checkmark.circle.fill").foregroundStyle(Soot.lime).font(.system(size: 18))
-                    .accessibilityLabel("Alerts on")
-            case .denied:
+            if status == .denied {
                 Button("Open Settings") {
                     if let url = URL(string: "x-apple.systempreferences:com.apple.Notifications-Settings.extension") {
                         NSWorkspace.shared.open(url)
@@ -442,16 +477,19 @@ private struct AlertsRow: View {
                 }
                 .buttonStyle(.plain).font(.system(size: 14, weight: .semibold)).foregroundStyle(Soot.lime)
                 .help("Alerts are turned off for Dever in System Settings.")
-            default:
-                Button("Turn on") {
-                    Task { _ = await Notifier.shared.requestAuthorization(); await refresh() }
-                }
-                .buttonStyle(.plain).font(.system(size: 14, weight: .semibold)).foregroundStyle(Soot.lime)
+            } else {
+                Toggle("Alerts", isOn: master)
+                    .labelsHidden().toggleStyle(.switch).tint(Soot.lime).controlSize(.small)
             }
         }
         .padding(.horizontal, 16)
         .frame(height: 64)
         .overlay(RoundedRectangle(cornerRadius: Soot.radius).strokeBorder(Soot.surface, lineWidth: 1.5))
+        .contentShape(Rectangle())
+        .onTapGesture { if status != .denied { master.wrappedValue.toggle() } }
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(status == .denied ? [] : .isToggle)
+        .accessibilityValue(status == .denied ? "Off in System Settings" : master.wrappedValue ? "On" : "Off")
         .task { await refresh() }
         // Back from System Settings: show the new state.
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
@@ -543,6 +581,13 @@ private struct DeverWindowCrop: View {
         .background(Theme.sheet)
         .clipShape(UnevenRoundedRectangle(topLeadingRadius: 10, bottomLeadingRadius: 10))
         .shadow(color: .black.opacity(0.25), radius: 24, y: 12)
+        // The crop fills in as the answers land: columns light up and skeletons dissolve into
+        // data. Fixed-size mock, so nothing else can move with it.
+        .motion(Motion.ui, fade: true, value: stage)
+        .motion(Motion.ui, fade: true, value: slack)
+        .motion(Motion.ui, fade: true, value: linear)
+        .motion(Motion.ui, fade: true, value: github)
+        .motion(Motion.ui, fade: true, value: name)
     }
 
     private var sidebar: some View {

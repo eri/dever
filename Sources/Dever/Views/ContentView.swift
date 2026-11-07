@@ -64,6 +64,7 @@ struct ContentView: View {
             rail
             Rectangle().fill(Theme.border).frame(width: 1)
             NavigationStack(path: $path) {
+            // Screens dissolve into each other (150 ms): core navigation gets no movement.
             Group {
                 switch selection {
                 case .project(let id):
@@ -82,6 +83,9 @@ struct ContentView: View {
                                  importFrom: { importSource = $0 })
                 }
             }
+            .id(selection)
+            .transition(.opacity)
+            .motion(.easeOut(duration: 0.15), fade: true, value: selection)
             .environment(\.openSettings, { selection = .settings })
             .background(Theme.frame)
             .toolbarBackgroundHiddenIfAvailable()
@@ -184,8 +188,9 @@ struct ContentView: View {
                 .frame(width: 40, height: 40)
                 .background(on ? Theme.active : Color.clear, in: RoundedRectangle(cornerRadius: 10))
                 .contentShape(Rectangle())
+                .motion(Motion.quick, fade: true, value: on)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(PressButton())
         .modifier(FocusOutline(radius: 10))
         .help(label)
         .accessibilityLabel(label)
@@ -212,10 +217,12 @@ struct ContentView: View {
                     }
                 }
                 .padding(2)
+                // The ring fades in (120 ms); the tile itself answers the press with a small scale.
                 .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(on ? Theme.text : .clear, lineWidth: 2))
+                .motion(Motion.quick, fade: true, value: on)
                 .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(PressButton())
         .modifier(FocusOutline(radius: 12))
         .help("\(p.name) — \(status.label)")
         .accessibilityLabel("\(p.name), \(status.label)")
@@ -243,9 +250,10 @@ struct ContentView: View {
                 }
                 .padding(3)
                 .overlay(Circle().strokeBorder(on ? Theme.text : .clear, lineWidth: 2))
+                .motion(Motion.quick, fade: true, value: on)
                 .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(PressButton())
         .modifier(FocusOutline(radius: 20))
         .help(accountsHint.map { "Settings — \($0)" } ?? "Settings")
         .accessibilityLabel(accountsHint.map { "Settings, \($0)" } ?? "Settings")
@@ -254,9 +262,9 @@ struct ContentView: View {
 
     private var addMenu: some View {
         Button { showNew = true } label: {
-            Image(systemName: "plus").foregroundStyle(Theme.muted)
+            Image(systemName: "plus").foregroundStyle(Theme.muted).frame(width: 40, height: 40).contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(PressButton())
         .keyboardShortcut("n")
         .help("Add a project")
         .accessibilityLabel("Add project")

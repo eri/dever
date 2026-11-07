@@ -40,7 +40,7 @@ struct IssueDetailView: View {
                             ServiceFailureRow(service: .linear, state: error, retry: { Task { await load() } }, flow: flow)
                         } else if let detail {
                             signals(detail)
-                            if let notice { noticeLine(notice) }
+                            if let notice { noticeLine(notice).transition(Motion.rise) }
                             if let pull = mergedPull(detail) { mergedBanner(pull, detail) }
                             if twoColumns {
                                 HStack(alignment: .top, spacing: 20) {
@@ -52,10 +52,14 @@ struct IssueDetailView: View {
                                 sideColumn(detail).frame(maxWidth: measure)
                             }
                         } else {
-                            loadingBody
+                            loadingBody.transition(.opacity)
                         }
                         Color.clear.frame(height: 1).id("end")
                     }
+                    // The skeleton dissolves into the issue (200 ms); nothing else on the page
+                    // animates with it. The confirmation line rises in and fades out.
+                    .motion(Motion.ui, fade: true, value: detail == nil)
+                    .motion(Motion.ui, value: notice?.text)
                     .frame(maxWidth: measure + 20 + aside, alignment: .leading)
                     .padding(.horizontal, 28)
                     .padding(.vertical, 20)
@@ -436,14 +440,18 @@ struct IssueDetailView: View {
     @ViewBuilder
     private func description(_ d: LinearIssueDetail) -> some View {
         if let text = d.description, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            if let blocks {
-                MarkdownView(blocks: blocks)
-            } else {
-                VStack(alignment: .leading, spacing: 10) {
-                    Skeleton(height: 12); Skeleton(width: 420, height: 12); Skeleton(width: 360, height: 12)
+            Group {
+                if let blocks {
+                    MarkdownView(blocks: blocks).transition(.opacity)
+                } else {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Skeleton(height: 12); Skeleton(width: 420, height: 12); Skeleton(width: 360, height: 12)
+                    }
+                    .transition(.opacity)
+                    .accessibilityElement().accessibilityLabel("Loading description")
                 }
-                .accessibilityElement().accessibilityLabel("Loading description")
             }
+            .motion(Motion.ui, fade: true, value: blocks == nil)
         } else {
             Text("No description").font(.system(size: 14)).foregroundStyle(Soot.muted)
         }

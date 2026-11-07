@@ -40,8 +40,9 @@ struct PreviewPanel: View {
                 ServiceFailureRow(service: .github, state: serviceState, lastLoaded: store.loadedAt[project.id],
                                   retry: { Task { await store.load(project, app: app, force: true) } }, flow: flow)
             } else if let status {
+                // Options unfold in place of the second line (200 ms), and fold back.
                 if optionsOpen {
-                    optionsRow
+                    optionsRow.transition(Motion.rise)
                 } else {
                     // Second line: what there is to see or know on the left, what to do on the right.
                     ViewThatFits(in: .horizontal) {
@@ -56,11 +57,14 @@ struct PreviewPanel: View {
                         }
                     }
                 }
-                if let actionError { ErrorLabel(actionError) }
+                if let actionError { ErrorLabel(actionError).transition(Motion.rise) }
             } else {
-                skeleton
+                skeleton.transition(.opacity)
             }
         }
+        .motion(Motion.ui, value: optionsOpen)
+        .motion(Motion.ui, fade: true, value: status == nil)
+        .motion(Motion.ui, value: actionError)
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .topLeading)
         .background(Soot.surface, in: RoundedRectangle(cornerRadius: 12))
@@ -114,6 +118,7 @@ struct PreviewPanel: View {
             if let s = status {
                 PreviewPhaseGlyph(phase: s.phase, size: 13)
                 Text(s.phase.word).font(.system(size: 13, weight: .semibold)).foregroundStyle(Soot.ink)
+                    .contentTransition(.opacity).motion(Motion.ui, fade: true, value: s.phase)
                 if let at = s.updatedAt {
                     Text(verbatim: "·").foregroundStyle(Soot.muted).accessibilityHidden(true)
                     Text(timeLine(s.phase, at)).font(.system(size: 12)).foregroundStyle(Soot.muted).lineLimit(1)

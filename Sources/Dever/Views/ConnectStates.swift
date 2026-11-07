@@ -137,6 +137,7 @@ struct ConnectRow: View {
             .background(Soot.ground.opacity(0.6), in: RoundedRectangle(cornerRadius: 10))
             .overlay(alignment: .bottom) { if running { WaitingLine().transition(.opacity) } }
             .clipShape(RoundedRectangle(cornerRadius: 10))
+            .motion(Motion.ui, fade: true, value: running)
             .accessibilityElement(children: .contain)
             .accessibilityLabel("\(service.label): \(connected ? "connected" : why)")
             .accessibilityValue(running ? "Waiting for approval in your browser" : "")
@@ -221,6 +222,7 @@ struct ConnectPanelBody: View {
             .background(Soot.ground.opacity(0.6), in: RoundedRectangle(cornerRadius: 10))
             .overlay(alignment: .bottom) { if flow.running == service { WaitingLine().transition(.opacity) } }
             .clipShape(RoundedRectangle(cornerRadius: 10))
+            .motion(Motion.ui, fade: true, value: flow.running == service)
             if let error = flow.error, error.service == service { ErrorLabel(error.message) }
         }
     }

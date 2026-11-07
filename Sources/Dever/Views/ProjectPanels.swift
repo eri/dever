@@ -84,6 +84,7 @@ struct TileRow<Content: View>: View {
             .frame(minHeight: 46)
             .background(hovering ? Soot.ground.opacity(0.7) : Color.clear, in: RoundedRectangle(cornerRadius: 8))
             .contentShape(Rectangle())
+            .motion(Motion.quick, fade: true, value: hovering)
             .onHover { hovering = $0 }
         if let url {
             Link(destination: url) { row }.buttonStyle(.plain).modifier(FocusOutline(radius: 8))
@@ -99,12 +100,14 @@ struct CountTabs<Tab: Hashable>: View {
     let tabs: [(label: String, count: Int, tab: Tab)]
     @Binding var selection: Tab
     var dot: (Tab) -> Color? = { _ in nil }
+    @Namespace private var marker
 
     var body: some View {
         HStack(spacing: 6) {
             ForEach(tabs, id: \.tab) { t in
                 let on = t.tab == selection
-                Button { selection = t.tab } label: {
+                // The lime pill slides to the chosen tab (spring, ~300 ms); counts roll on refresh.
+                Button { Motion.run(Motion.settle) { selection = t.tab } } label: {
                     HStack(spacing: 6) {
                         if let tint = dot(t.tab) {
                             Circle().fill(tint).frame(width: 7, height: 7)
@@ -112,15 +115,20 @@ struct CountTabs<Tab: Hashable>: View {
                         }
                         Text(t.label)
                         Text("\(t.count)").monospacedDigit().foregroundStyle(on ? Soot.limeInk.opacity(0.7) : Soot.muted)
+                            .rollingNumber(t.count)
                     }
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(on ? Soot.limeInk : Soot.ink)
                     .padding(.horizontal, 12)
                     .frame(height: 30)
-                    .background(on ? Soot.lime : Soot.ground, in: Capsule())
+                    .background {
+                        if on { Capsule().fill(Soot.lime).matchedGeometryEffect(id: "pill", in: marker) }
+                        else { Capsule().fill(Soot.ground) }
+                    }
                     .overlay(Capsule().strokeBorder(on ? Color.clear : Soot.edge))
+                    .contentShape(Capsule())
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(PressButton())
                 .modifier(FocusOutline(radius: 15))
                 .accessibilityAddTraits(on ? .isSelected : [])
             }
@@ -133,8 +141,9 @@ struct ShowAllButton: View {
     let count: Int
     @Binding var expanded: Bool
     var body: some View {
-        Button(expanded ? "Show fewer" : "Show all \(count)") { expanded.toggle() }
-            .buttonStyle(.plain)
+        // In one transaction with the rows it reveals, so the list grows instead of jumping.
+        Button(expanded ? "Show fewer" : "Show all \(count)") { Motion.run(Motion.ui) { expanded.toggle() } }
+            .buttonStyle(PressButton())
             .font(.system(size: 13, weight: .semibold))
             .foregroundStyle(Soot.lime)
             .padding(.horizontal, 8)
@@ -142,6 +151,7 @@ struct ShowAllButton: View {
             .background(hovering ? Soot.ground.opacity(0.85) : Color.clear, in: Capsule())
             .contentShape(Capsule())
             .modifier(FocusOutline(radius: 14))
+            .motion(Motion.quick, fade: true, value: hovering)
             .onHover { hovering = $0 }
             .padding(.leading, 4)
             .padding(.top, 2)
@@ -228,9 +238,10 @@ struct PullChip: View {
             .overlay(Capsule().strokeBorder(Soot.edge))
             .contentShape(Capsule())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(PressButton())
         .handCursor()
         .modifier(FocusOutline(radius: 13))
+        .motion(Motion.quick, fade: true, value: hovering)
         .onHover { hovering = $0 }
         .help([title.map { "#\(number) \($0)" } ?? "Pull request #\(number)", repository, glyph.word, run?.word].compactMap { $0 }.joined(separator: " · ") + " · Opens on GitHub")
         .accessibilityLabel(["Pull request #\(number)", repository.map { "in \($0)" }, glyph.word, run?.word].compactMap { $0 }.joined(separator: ", "))
@@ -264,6 +275,7 @@ struct WorkTile<Value: Hashable, Content: View, Trailing: View>: View {
             HStack(spacing: 12) { trailing() }.padding(.trailing, 12)
         }
         .background(hovering ? Soot.ground.opacity(0.7) : Color.clear, in: RoundedRectangle(cornerRadius: 8))
+        .motion(Motion.quick, fade: true, value: hovering)
         .onHover { hovering = $0 }
     }
 }

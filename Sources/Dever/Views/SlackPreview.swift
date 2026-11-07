@@ -16,6 +16,7 @@ struct FileLightbox: View {
             Color.black.opacity(0.55).ignoresSafeArea()
                 .contentShape(Rectangle())
                 .onTapGesture(perform: close)
+                .transition(.opacity)
                 .accessibilityHidden(true)
             FilePreviewSheet(file: file, close: close)
                 .clipShape(RoundedRectangle(cornerRadius: 14))

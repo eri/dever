@@ -254,6 +254,7 @@ struct TileLink<Value: Hashable, Content: View>: View {
         }
         .buttonStyle(.plain)
         .modifier(FocusOutline(radius: 8))
+        .motion(Motion.quick, fade: true, value: hovering)
         .onHover { hovering = $0 }
     }
 }
@@ -289,8 +290,9 @@ struct ChoiceChip<Label: View, Item: Identifiable, Row: View>: View {
             .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(open ? Soot.lime : Soot.edge))
             .contentShape(RoundedRectangle(cornerRadius: 8))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(PressButton())
         .modifier(FocusOutline(radius: 8))
+        .motion(Motion.quick, fade: true, value: hovering || open)
         .onHover { hovering = $0 }
         .accessibilityLabel(accessibilityLabel)
         .accessibilityAddTraits(.isButton)
@@ -344,6 +346,7 @@ private struct ChoiceRow<Content: View>: View {
             .modifier(FocusOutline(radius: 6))
         }
         .buttonStyle(.plain)
+        .motion(Motion.quick, fade: true, value: hovering)
         .onHover { hovering = $0 }
         .accessibilityAddTraits(selected ? .isSelected : [])
     }
@@ -354,8 +357,8 @@ extension Notification.Name {
     static let scrollToEnd = Notification.Name("dever.scrollToEnd")
 }
 
-/// A text link with a hover state: a faint pill behind it, no motion. `hoverTint` is the tone
-/// one step from the surface it sits on (ground on a panel, surface on the page).
+/// A text link with a hover state: a faint pill fades in behind it (120 ms), no movement.
+/// `hoverTint` is the tone one step from the surface it sits on (ground on a panel, surface on the page).
 struct HoverLink<Label: View>: View {
     let destination: URL
     var hoverTint: Color = Soot.ground
@@ -370,8 +373,9 @@ struct HoverLink<Label: View>: View {
                 .background(hovering ? hoverTint.opacity(0.85) : Color.clear, in: Capsule())
                 .contentShape(Capsule())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(PressButton())
         .modifier(FocusOutline(radius: 14))
+        .motion(Motion.quick, fade: true, value: hovering)
         .onHover { hovering = $0 }
     }
 }
@@ -388,12 +392,13 @@ struct CopyChip: View {
         Button {
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(value, forType: .string)
-            copied = true
-            Task { try? await Task.sleep(nanoseconds: 1_600_000_000); copied = false }
+            Motion.run(Motion.ui, fade: true) { copied = true }
+            Task { try? await Task.sleep(nanoseconds: 1_600_000_000); Motion.run(Motion.ui, fade: true) { copied = false } }
         } label: {
             HStack(spacing: 6) {
                 Image(systemName: copied ? "checkmark" : "arrow.triangle.branch")
                     .font(.system(size: 12, weight: .semibold)).foregroundStyle(copied ? Soot.lime : Soot.muted)
+                    .contentTransition(.symbolEffect(.replace))
                 Text(copied ? "Copied" : value)
                     .font(.system(size: 12, weight: .medium, design: copied ? .default : .monospaced))
                     .foregroundStyle(Soot.ink).lineLimit(1).truncationMode(.middle).frame(maxWidth: maxWidth)
@@ -406,8 +411,9 @@ struct CopyChip: View {
             .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(hovering ? Soot.edge : Soot.edge.opacity(0.5)))
             .contentShape(RoundedRectangle(cornerRadius: 8))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(PressButton())
         .modifier(FocusOutline(radius: 8))
+        .motion(Motion.quick, fade: true, value: hovering)
         .onHover { hovering = $0 }
         .help("Copy the \(what): \(value)")
         .accessibilityLabel(copied ? "\(what) copied" : "Copy the \(what)")

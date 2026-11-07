@@ -226,3 +226,27 @@ code; contrast computed from the palette values.
   and "Clear search".
 - Not verified at runtime: VoiceOver's reading of the row summary and of the popover; the numeric
   counters and the reorder spring replayed at low speed.
+## Motion (the animation sweep)
+
+Findings and rejections are in `docs/reviews/animations.md`; the vocabulary lives in
+`Sources/Dever/Views/Motion.swift`.
+
+- **Durations**: press and hover 120 ms ease-out; swaps, fades, tab changes and skeleton → content
+  200 ms ease-out; exits 150 ms ease-in; the Slack room and the thread pane a spring of ~350 ms
+  (response 0.38, damping 0.86, no overshoot); travelling markers a spring of ~300 ms. Nothing
+  linear, nothing longer than half a second, no spinner anywhere (waiting lines are clock-driven).
+- **Explicit only**: every animation is tied to the one value that changes (`Motion.run`,
+  `.motion(value:)`), so a refresh landing in a panel never moves another; the Slack room is laid
+  out once at its final width behind a clipped frame, so no text reflows while it grows.
+- **Reduce Motion** (`accessibilityReduceMotion`, `Motion.reduced`): movement, scale and springs
+  are off everywhere: the room and the thread pane switch instantly, markers and pills jump, the
+  check mark and the lightbox appear without scaling, stages and steps change with a plain fade,
+  rolling counters become a dissolve, pressed buttons do not shrink. Dissolves (hover tones,
+  skeleton → content, the 150 ms screen switch, the sheet's content fade) stay, as WCAG 2.3.3 and
+  Apple's guidance allow for opacity-only changes. The appearance cross-fade is skipped.
+- **Nothing moves on its own**: no autoplay beyond the waiting lines of a running connection, which
+  stop with it; no animation blocks input (a transition never gates a control).
+- **Vestibular safety**: no parallax, no zoom larger than 3 % (0.97 → 1), no motion across the
+  whole screen except the 150 ms screen dissolve.
+- Not verified at runtime: the behaviour with Reduce Motion switched on mid-session (the
+  `NSWorkspace` flag is read at each animation, the environment value at each render).

@@ -623,8 +623,8 @@ private struct AppearanceSection: View {
                 ForEach(Appearance.allCases) { option in
                     let on = appearance == option.rawValue
                     Button {
-                        // The theme itself switches at once (no cross-fade: every colour would
-                        // smear); only the ring travels.
+                        // The window cross-fades through a picture of itself (Appearance.apply);
+                        // here only the ring travels.
                         withAnimation(reduceMotion ? nil : .spring(response: 0.3, dampingFraction: 0.85)) {
                             appearance = option.rawValue
                         }
@@ -643,7 +643,7 @@ private struct AppearanceSection: View {
                         .frame(width: 128, height: 112)
                         .contentShape(Rectangle())
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(PressButton())
                     .modifier(FocusOutline(radius: 8))
                     .accessibilityLabel("\(option.label) appearance")
                     .accessibilityHint(option.meaning)
@@ -730,13 +730,40 @@ enum Appearance: String, CaseIterable, Identifiable {
         }
     }
 
-    /// Applied app-wide, so sheets, menus and popovers follow too.
+    /// Applied app-wide, so sheets, menus and popovers follow too. The window cross-fades:
+    /// a picture of it as it was fades out over the new appearance (250 ms), the way macOS
+    /// itself switches, so no colour smears through an intermediate tone. Instant under
+    /// Reduce Motion, and on the first application at launch.
     @MainActor func apply() {
-        NSApp.appearance = switch self {
+        let appearance: NSAppearance? = switch self {
         case .system: nil
         case .light: NSAppearance(named: .aqua)
         case .dark: NSAppearance(named: .darkAqua)
         }
+        let window = NSApp.windows.first { $0.isVisible && $0.canBecomeMain }
+        // The picture is taken before the switch, so it holds the old colours.
+        var rep: NSBitmapImageRep?
+        if let content = window?.contentView, !Motion.reduced,
+           let cache = content.bitmapImageRepForCachingDisplay(in: content.bounds) {
+            content.cacheDisplay(in: content.bounds, to: cache)
+            rep = cache
+        }
+        let before = window?.effectiveAppearance.name
+        NSApp.appearance = appearance
+        guard let window, let content = window.contentView, let rep,
+              window.effectiveAppearance.name != before else { return }
+        let image = NSImage(size: content.bounds.size)
+        image.addRepresentation(rep)
+        let veil = NSImageView(frame: content.bounds)
+        veil.image = image
+        veil.imageScaling = .scaleAxesIndependently
+        veil.autoresizingMask = [.width, .height]
+        content.addSubview(veil, positioned: .above, relativeTo: nil)
+        NSAnimationContext.runAnimationGroup({ context in
+            context.duration = 0.25
+            context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            veil.animator().alphaValue = 0
+        }, completionHandler: { veil.removeFromSuperview() })
     }
 }
 

@@ -50,6 +50,7 @@ struct LimeButton: ButtonStyle {
                         in: RoundedRectangle(cornerRadius: Soot.radius))
             .overlay(RoundedRectangle(cornerRadius: Soot.radius).strokeBorder(isEnabled ? Color.clear : Soot.edge))
             .modifier(FocusOutline(radius: Soot.radius))
+            .pressScale(configuration.isPressed)
     }
 }
 
@@ -64,6 +65,7 @@ struct QuietButton: ButtonStyle {
                         in: RoundedRectangle(cornerRadius: Soot.radius))
             .overlay(RoundedRectangle(cornerRadius: Soot.radius).strokeBorder(Soot.edge))
             .modifier(FocusOutline(radius: Soot.radius))
+            .pressScale(configuration.isPressed)
     }
 }
 
@@ -92,11 +94,14 @@ private struct ToolbarButtonBody: View {
             .overlay(RoundedRectangle(cornerRadius: Soot.radius)
                 .fill(Soot.ink.opacity(configuration.isPressed ? 0.12 : hovering && isEnabled ? 0.06 : 0)))
             .overlay(alignment: .bottom) {
-                if busy { WaitingLine().padding(.horizontal, 6).padding(.bottom, 1) }
+                if busy { WaitingLine().padding(.horizontal, 6).padding(.bottom, 1).transition(.opacity) }
             }
             .clipShape(RoundedRectangle(cornerRadius: Soot.radius))
             .contentShape(RoundedRectangle(cornerRadius: Soot.radius))
             .modifier(FocusOutline(radius: Soot.radius))
+            .pressScale(configuration.isPressed)
+            .motion(Motion.quick, fade: true, value: hovering)
+            .motion(Motion.ui, fade: true, value: busy)
             .onHover { hovering = $0 }
             .handCursor()
     }
@@ -172,9 +177,10 @@ struct OptionRow: View {
                 .strokeBorder(recommended && enabled ? Soot.lime.opacity(0.5) : .clear))
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(PressButton())
         .disabled(!enabled)
         .opacity(enabled ? 1 : 0.45)
+        .motion(Motion.quick, fade: true, value: hovering)
         .onHover { hovering = $0 }
     }
 }
@@ -195,6 +201,7 @@ struct UnderlineField: View {
             .padding(.bottom, 8)
             .overlay(alignment: .bottom) {
                 Rectangle().fill(focused ? Soot.ink : Soot.muted).frame(height: focused ? 2 : 1)
+                    .motion(Motion.quick, fade: true, value: focused)
             }
             .focused($focused)
             .onSubmit(onSubmit)
@@ -205,20 +212,29 @@ struct UnderlineField: View {
 struct ChipPicker<Value: Hashable>: View {
     let options: [(label: String, value: Value)]
     @Binding var selection: Value
+    @Namespace private var marker
 
     var body: some View {
         HStack(spacing: 6) {
             ForEach(options, id: \.value) { option in
                 let on = option.value == selection
-                Button(option.label) { selection = option.value }
-                    .buttonStyle(.plain)
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(on ? Soot.limeInk : Soot.ink)
-                    .padding(.horizontal, 12)
-                    .frame(height: 28)
-                    .background(on ? Soot.lime : Soot.surface, in: Capsule())
-                    .overlay(Capsule().strokeBorder(on ? Color.clear : Soot.edge))
-                    .accessibilityAddTraits(on ? .isSelected : [])
+                // The lime pill travels to the new choice; the words only change colour.
+                Button { Motion.run(Motion.settle) { selection = option.value } } label: {
+                    Text(option.label)
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(on ? Soot.limeInk : Soot.ink)
+                        .padding(.horizontal, 12)
+                        .frame(height: 28)
+                        .background {
+                            if on { Capsule().fill(Soot.lime).matchedGeometryEffect(id: "pill", in: marker) }
+                            else { Capsule().fill(Soot.surface) }
+                        }
+                        .overlay(Capsule().strokeBorder(on ? Color.clear : Soot.edge))
+                        .contentShape(Capsule())
+                }
+                .buttonStyle(PressButton())
+                .modifier(FocusOutline(radius: 14))
+                .accessibilityAddTraits(on ? .isSelected : [])
             }
         }
     }
@@ -240,9 +256,11 @@ struct CheckCircle: View {
             }
             if on {
                 Image(systemName: "checkmark").font(.system(size: 9, weight: .bold)).foregroundStyle(Soot.limeInk)
+                    .transition(Motion.pop)
             }
         }
         .frame(width: 18, height: 18)
+        .motion(Motion.ui, value: on)
         .accessibilityHidden(true)
     }
 }
@@ -256,6 +274,21 @@ struct SootSheet: ViewModifier {
             .padding(32)
             .frame(width: width, height: height, alignment: .topLeading)
             .background(Soot.ground)
+            .modifier(SheetEntrance())
+    }
+}
+
+/// The sheet's content rises into place as the system slides the sheet down: 200 ms ease-out,
+/// fade only under Reduce Motion. The chrome itself is macOS's own animation.
+struct SheetEntrance: ViewModifier {
+    @State private var shown = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    func body(content: Content) -> some View {
+        content
+            .opacity(shown ? 1 : 0)
+            .offset(y: shown || reduceMotion ? 0 : 6)
+            .onAppear { withAnimation(Motion.ui) { shown = true } }
     }
 }
 
@@ -282,7 +315,7 @@ struct SheetTitle<Mark: View>: View {
                     .frame(width: 28, height: 28).background(Soot.surface, in: Circle())
                     .modifier(FocusOutline(radius: 14))
             }
-            .buttonStyle(.plain)
+            .buttonStyle(PressButton())
             .keyboardShortcut(.cancelAction)
             .accessibilityLabel("Close")
         }
@@ -317,9 +350,10 @@ struct RadioRow: View {
             HStack(alignment: .top, spacing: 12) {
                 ZStack {
                     Circle().strokeBorder(selected ? Soot.lime : Soot.muted, lineWidth: 1.5)
-                    if selected { Circle().fill(Soot.lime).padding(5) }
+                    if selected { Circle().fill(Soot.lime).padding(5).transition(Motion.pop) }
                 }
                 .frame(width: 18, height: 18)
+                .motion(Motion.ui, value: selected)
                 .padding(.top, 1)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(title).font(.system(size: 15, weight: .medium)).foregroundStyle(Soot.ink)
@@ -381,6 +415,7 @@ struct SootField: View {
             .overlay(RoundedRectangle(cornerRadius: Soot.fieldRadius)
                 .strokeBorder(focused ? Soot.lime : Soot.edge, lineWidth: focused ? 2 : 1))
             .contentShape(RoundedRectangle(cornerRadius: Soot.fieldRadius))
+            .motion(Motion.quick, fade: true, value: focused)
             .onTapGesture { focused = true }
             if let hint {
                 Text(hint).font(.system(size: 12)).foregroundStyle(Soot.muted)
@@ -446,7 +481,9 @@ struct ChoiceCard<Nested: View>: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Button(action: select) {
+            // The choice, its ring and what it reveals below move in one transaction, so the
+            // tiles under it slide instead of jumping.
+            Button { Motion.run(Motion.ui) { select() } } label: {
                 HStack(spacing: 12) {
                     CheckCircle(on: selected).frame(width: 20)
                     VStack(alignment: .leading, spacing: 2) {
@@ -476,8 +513,10 @@ struct ChoiceCard<Nested: View>: View {
                     .padding(.leading, 46)
                     .padding(.trailing, 14)
                     .padding(.bottom, 14)
+                    .transition(Motion.rise)
             }
         }
+        .clipped()
         .background(Soot.surface, in: RoundedRectangle(cornerRadius: Soot.fieldRadius))
         .overlay(RoundedRectangle(cornerRadius: Soot.fieldRadius)
             .strokeBorder(selected ? Soot.lime : .clear, lineWidth: 1.5))
@@ -513,12 +552,13 @@ struct StepSheet<Content: View>: View {
             .padding(40)
             .frame(width: Self.size.width, height: Self.size.height, alignment: .topLeading)
             .background(Soot.ground)
+            .modifier(SheetEntrance())
             Button(action: close) {
                 Image(systemName: "xmark").font(.system(size: 12, weight: .semibold)).foregroundStyle(Soot.ink)
                     .frame(width: 28, height: 28).background(Soot.surface, in: Circle())
                     .modifier(FocusOutline(radius: 14))
             }
-            .buttonStyle(.plain)
+            .buttonStyle(PressButton())
             .keyboardShortcut(.cancelAction)
             .accessibilityLabel("Close")
             .padding(40)
@@ -551,6 +591,7 @@ struct StepMarks: View {
                     .frame(width: i == current ? 28 : 8, height: 8)
             }
         }
+        .motion(Motion.settle, value: current)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Step \(current + 1) of \(count)")
     }
@@ -565,7 +606,7 @@ struct BackButton: View {
                 .frame(width: 28, height: 28).background(Soot.surface, in: Circle())
                 .modifier(FocusOutline(radius: 14))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(PressButton())
         .accessibilityLabel("Back")
     }
 }
@@ -701,6 +742,7 @@ struct SearchPicker: View {
                 .strokeBorder(open ? Soot.lime : Soot.edge, lineWidth: open ? 2 : 1))
             .contentShape(RoundedRectangle(cornerRadius: Soot.fieldRadius))
             .modifier(FocusOutline(radius: Soot.fieldRadius))
+            .motion(Motion.quick, fade: true, value: open)
         }
         .buttonStyle(.plain)
         .accessibilityLabel(label)
@@ -818,6 +860,7 @@ private struct PickerRow: View {
             .modifier(FocusOutline(radius: Soot.radius))
         }
         .buttonStyle(.plain)
+        .motion(Motion.quick, fade: true, value: hovering)
         .onHover { hovering = $0 }
         .accessibilityAddTraits(selected ? .isSelected : [])
     }

@@ -164,6 +164,7 @@ struct PrimaryButtonStyle: ButtonStyle {
             .background(Theme.text.opacity(configuration.isPressed ? 0.8 : 1),
                         in: RoundedRectangle(cornerRadius: Theme.radiusControl))
             .opacity(isEnabled ? 1 : 0.4)
+            .pressScale(configuration.isPressed)
     }
 }
 
@@ -178,6 +179,7 @@ struct SecondaryButtonStyle: ButtonStyle {
             .background(configuration.isPressed ? Theme.active : Theme.sheet,
                         in: RoundedRectangle(cornerRadius: Theme.radiusControl))
             .overlay(RoundedRectangle(cornerRadius: Theme.radiusControl).strokeBorder(Theme.control))
+            .pressScale(configuration.isPressed)
     }
 }
 
