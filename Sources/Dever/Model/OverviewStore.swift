@@ -164,8 +164,8 @@ final class OverviewStore: ObservableObject {
     @Published private(set) var isRefreshing = false
     @Published private(set) var lastRefresh: Date?
 
-    /// Snapshots older than this are refreshed when the overview appears.
-    static let staleAfter: TimeInterval = 5 * 60
+    /// Snapshots older than this are refreshed when the overview appears (Settings › Refresh every).
+    static var staleAfter: TimeInterval { TimeInterval(Preferences.refreshMinutes) * 60 }
 
     var isStale: Bool { lastRefresh.map { Date().timeIntervalSince($0) > Self.staleAfter } ?? true }
 

@@ -124,3 +124,50 @@ and keyboard verified in code; contrast computed from the palette.
   projects keep their shorter names.
 - The one-line consequence under the Settings picker is plain text that changes with the
   mode, not a live region: the change is the user's own action.
+
+## Settings
+
+Scope: the Settings page (`Sources/Dever/Views/SettingsView.swift`, `GenerativeAvatar.swift`), six
+sections and six account states, dark and light, captured at the 1080×680 minimum
+(`DEVER_SNAPSHOT_SETTINGS=1 DEVER_SNAPSHOT_SIZE=1080x680`). Names, focus and keyboard verified in code;
+contrast computed from the palette values.
+
+| Pair | Dark | Light | Need |
+|---|---|---|---|
+| Headline and row titles `Soot.ink` on ground / on surface | 19.17 / 17.40:1 | 17.15 / 18.88:1 | 4.5 |
+| Section lines, details and states `Soot.muted` on ground / on surface | 5.93 / 5.38:1 | 5.49 / 6.05:1 | 4.5 |
+| Error lines "Session expired", "Can't reach" (`Theme.negative`) on surface / on ground | 4.88 / 5.38:1 | 5.78 / 5.25:1 | 4.5 |
+| Section count and segment label `Soot.limeInk` on lime | 16.55:1 | 7.08:1 | 4.5 |
+| Lime check, Reconnect fill, selected ring (`Soot.lime`) on surface / on ground | 15.03 / 16.55:1 | 7.08 / 6.43:1 | 3 |
+| Row edge when not connected (dashed), picker track and field edge `Soot.edge` on surface / on ground | 3.51 / 3.87:1 | 3.45 / 3.13:1 | 3 |
+| Appearance thumbnail edge `Soot.edge` on surface | 3.51:1 | 3.45:1 | 3 |
+| Selected section row: surface on ground | 1.10:1 | 1.10:1 | not relied on: the label turns to `Soot.ink` and semibold, and `isSelected` is exposed |
+| Hairlines between setting rows (`Soot.line`) | decorative | decorative | — |
+
+- **Targets**: section rows 36px full width, account rows 64px, setting rows 56px (a switch row toggles
+  from anywhere in the row, so the 15px switch is never the only target), segments 26px high and at least
+  44px wide, appearance options 128×112, the reshuffle button 26px (2.5.8 asks 24px), buttons 36px.
+- **Names**: every row is one element ("Slack: connected as Eray", "GitHub: not connected. Pull requests
+  and previews", "Linear: session expired, reconnect"); the action buttons name their tool ("Disconnect
+  Slack"); the reshuffle button is "Draw another picture"; the prefix field is "Slack channel prefix";
+  the segment groups are "Refresh interval" and "Screen at launch"; the section list is "Settings
+  sections" with `isSelected` on the open one; the generated picture and the account pictures are
+  decorative (`accessibilityHidden`).
+- **Focus**: custom buttons carry the 2px lime `FocusOutline`; a segment's ring is drawn inside it, ink on
+  the lime pill and lime on the track, so it is visible whichever segment has it (2.4.7); the text field
+  and the switches keep the system ring. Keyboard order: picture, reshuffle, sections, then the open
+  section's controls top to bottom.
+- **State without hue** (1.4.1): connected = check glyph and the person's name; expired = exclamation
+  glyph, "Session expired" in words, Reconnect; offline = wifi glyph and "You're offline"; not connected
+  = dashed edge, the tool's pitch and Connect; connecting = the sweep and "Approve in your browser…" with
+  Cancel. The selected appearance has the ring and a semibold label; the selected segment has the pill.
+- **Reduce Motion**: the section cross-fade keeps opacity only; the marker, pill and ring stop
+  travelling (`withAnimation(nil)`); the logo hover scale and the picture reshuffle scale are off;
+  `WaitingLine` and `Breathing` are still, as before. Nothing moves on its own for more than the sweep,
+  which is the connecting state and stops with it.
+- **Disabled means unavailable**: no control is disabled; "Connect GitHub to pick it" replaces the
+  workspace picker without GitHub; a login-item refusal is written under the switch, which stays usable.
+- **Fit**: every section fits the 1080×680 window without scrolling (Accounts, the tallest, ends at
+  390pt); the right column still scrolls for larger text.
+- Not verified at runtime: VoiceOver's reading of a section switch (the new headline is a header; no
+  live region), and the login item on a notarised build.

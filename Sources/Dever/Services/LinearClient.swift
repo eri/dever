@@ -5,6 +5,8 @@ struct LinearAccount: Codable {
     var email: String
     var orgName: String
     var urlKey: String
+    /// The viewer's picture, when Linear has one (hosted on uploads.linear.app; needs the token).
+    var avatarUrl: String? = nil
 }
 
 /// Linear OAuth token: valid for 24 h, renewed automatically with the refresh token.
@@ -195,12 +197,13 @@ struct LinearClient {
         struct R: Decodable {
             struct V: Decodable {
                 struct O: Decodable { var name: String; var urlKey: String }
-                var name: String; var email: String; var organization: O
+                var name: String; var email: String; var avatarUrl: String?; var organization: O
             }
             var viewer: V
         }
-        let v = try await query("{ viewer { name email organization { name urlKey } } }", as: R.self).viewer
-        return LinearAccount(userName: v.name, email: v.email, orgName: v.organization.name, urlKey: v.organization.urlKey)
+        let v = try await query("{ viewer { name email avatarUrl organization { name urlKey } } }", as: R.self).viewer
+        return LinearAccount(userName: v.name, email: v.email, orgName: v.organization.name, urlKey: v.organization.urlKey,
+                             avatarUrl: v.avatarUrl)
     }
 
     func teams() async throws -> [LinearTeam] {

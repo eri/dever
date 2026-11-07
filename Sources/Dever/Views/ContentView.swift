@@ -18,6 +18,7 @@ struct ContentView: View {
     @State private var removing: Project?
     @AppStorage("onboardingDone") private var onboardingDone = false
     @AppStorage("displayName") private var displayName = ""
+    @AppStorage(GenerativeAvatar.seedKey) private var avatarSeedRaw = ""
     @AppStorage(Appearance.key) private var appearance = Appearance.system.rawValue
     @State private var showOnboarding = false
     @State private var githubSheet = false
@@ -37,6 +38,11 @@ struct ContentView: View {
             // New users only: anyone who already has projects has been through setup.
             if !app.projects.isEmpty { onboardingDone = true }
             showOnboarding = !onboardingDone || ProcessInfo.processInfo.environment["DEVER_ONBOARDING"] == "1"
+            // Settings › Open at launch: back on the project left open, when it still exists.
+            if Preferences.landing == .lastProject, let id = Preferences.lastProjectID,
+               app.projects.contains(where: { $0.id == id }) {
+                selection = .project(id)
+            }
         }
         .onReceive(NotificationCenter.default.publisher(for: .showOnboarding)) { _ in showOnboarding = true }
     }
@@ -82,7 +88,10 @@ struct ContentView: View {
             .navigationDestination(for: IssueRoute.self) { IssueDetailView(route: $0) }
             }
         }
-        .onChange(of: selection) { _, _ in path = NavigationPath() }
+        .onChange(of: selection) { _, value in
+            path = NavigationPath()
+            if case .project(let id) = value { Preferences.lastProjectID = id }
+        }
         .onReceive(NotificationCenter.default.publisher(for: .openIssue)) { note in
             if let route = note.object as? IssueRoute { path.append(route) }
         }
@@ -159,6 +168,9 @@ struct ContentView: View {
         .background(Theme.frame)
     }
 
+    /// Your generated picture: the stored seed, drawn once when there is none.
+    private var avatarSeed: UInt64 { UInt64(avatarSeedRaw) ?? GenerativeAvatar.storedSeed }
+
     private var scope: String {
         app.linear?.account.orgName ?? app.slack?.teamName ?? "No workspace connected"
     }
@@ -220,11 +232,7 @@ struct ContentView: View {
         let on = selection == .settings
         let name = displayName.isEmpty ? "Settings" : displayName
         return Button { selection = .settings } label: {
-            Text(String(name.prefix(1)).uppercased())
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(Theme.chart1)
-                .frame(width: 32, height: 32)
-                .background(Theme.chart1.opacity(0.15), in: Circle())
+            GenerativeAvatar(seed: avatarSeed, size: 32)
                 .overlay(alignment: .topTrailing) {
                     // Amber: something to connect. Negative: a token the service rejected.
                     if missingAccounts > 0 || !app.expired.isEmpty {

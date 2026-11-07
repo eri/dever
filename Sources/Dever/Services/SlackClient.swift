@@ -278,6 +278,16 @@ struct SlackClient {
         try await call("auth.test")["user"] as? String ?? "?"
     }
 
+    /// One member by id (`users.info`): the signed-in user, for Settings.
+    func user(_ id: String) async throws -> SlackUser {
+        let m = try await call("users.info", ["user": id])["user"] as? [String: Any] ?? [:]
+        let profile = m["profile"] as? [String: Any]
+        let display = (profile?["display_name"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+        let name = (m["real_name"] as? String) ?? display ?? (m["name"] as? String) ?? id
+        let image = (profile?["image_72"] as? String) ?? (profile?["image_48"] as? String)
+        return SlackUser(id: id, name: name, avatar: image.flatMap(URL.init(string:)), isBot: m["is_bot"] as? Bool ?? false)
+    }
+
     func channels() async throws -> [SlackChannel] {
         var all: [SlackChannel] = []
         var cursor = ""

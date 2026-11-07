@@ -21,6 +21,13 @@ enum Snapshotter {
         // Let the first refresh land before the first picture; DEVER_SNAPSHOT_WAIT=0 captures
         // the loading state instead.
         let wait = ProcessInfo.processInfo.environment["DEVER_SNAPSHOT_WAIT"].flatMap(Double.init) ?? 15
+        // DEVER_SNAPSHOT_SIZE=1080x680 captures at that window size (the minimum, say).
+        if let raw = ProcessInfo.processInfo.environment["DEVER_SNAPSHOT_SIZE"] {
+            let parts = raw.split(separator: "x").compactMap { Double($0) }
+            if parts.count == 2, let window = NSApp.windows.first(where: { $0.canBecomeMain }) {
+                window.setContentSize(NSSize(width: parts[0], height: parts[1]))
+            }
+        }
         try? await Task.sleep(nanoseconds: UInt64(wait * 1_000_000_000))
         // DEVER_SNAPSHOT_SCREENS=0 skips the main screens when only sheets or onboarding are wanted.
         let wantScreens = ProcessInfo.processInfo.environment["DEVER_SNAPSHOT_SCREENS"] != "0"
@@ -94,6 +101,18 @@ enum Snapshotter {
                 capturePopover(to: dir.appendingPathComponent("\(name)-popover.png"))
                 NotificationCenter.default.post(name: .showSheet, object: "none")
                 try? await Task.sleep(nanoseconds: 1_000_000_000)
+            }
+        }
+        if ProcessInfo.processInfo.environment["DEVER_SNAPSHOT_SETTINGS"] == "1" {
+            // Every Settings section, in both modes.
+            for (themeName, appearance) in [("dark", NSAppearance.Name.darkAqua), ("light", .aqua)] {
+                NSApp.appearance = NSAppearance(named: appearance)
+                NotificationCenter.default.post(name: .showScreen, object: SidebarItem.settings)
+                for section in SettingsView.Section.allCases {
+                    NotificationCenter.default.post(name: .showSettingsSection, object: section.rawValue)
+                    try? await Task.sleep(nanoseconds: UInt64((wait == 0 ? 0.4 : 2.5) * 1_000_000_000))
+                    capture(to: dir.appendingPathComponent("settings-\(section.rawValue)-\(themeName).png"))
+                }
             }
         }
         if ProcessInfo.processInfo.environment["DEVER_SNAPSHOT_ONBOARDING"] == "1" {
