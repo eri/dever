@@ -105,13 +105,19 @@ struct RepositoryModeControls: View {
                 }
             }
             .frame(maxWidth: 400)
-            Button("Continue") {
-                app.setRepositoryMode(mode, workspace: mode.usesWorkspaceRepository ? workspace : app.workspaceRepository)
-                next()
+            // Same line as the Connect stage's reassurance: the choice is not final.
+            HStack(spacing: 16) {
+                Button("Continue") {
+                    app.setRepositoryMode(mode, workspace: mode.usesWorkspaceRepository ? workspace : app.workspaceRepository)
+                    next()
+                }
+                .buttonStyle(LimeButton())
+                .keyboardShortcut(.defaultAction)
+                .disabled(needsWorkspace && workspace == nil)
+                Label("Change it any time in Settings", systemImage: "arrow.triangle.2.circlepath")
+                    .font(.system(size: 13))
+                    .foregroundStyle(Soot.muted)
             }
-            .buttonStyle(LimeButton())
-            .keyboardShortcut(.defaultAction)
-            .disabled(needsWorkspace && workspace == nil)
         }
         .onAppear {
             mode = app.repositoryMode
