@@ -615,7 +615,7 @@ private struct AppearanceSection: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            SectionHead(title: "Appearance", detail: "Auto follows your Mac")
+            SectionHead(title: "Appearance")
             HStack(spacing: 16) {
                 ForEach(Appearance.allCases) { option in
                     let on = appearance == option.rawValue
@@ -643,9 +643,17 @@ private struct AppearanceSection: View {
                     .buttonStyle(.plain)
                     .modifier(FocusOutline(radius: 8))
                     .accessibilityLabel("\(option.label) appearance")
+                    .accessibilityHint(option.meaning)
                     .accessibilityAddTraits(on ? .isSelected : [])
                 }
             }
+            // What the chosen option does, in one line under the choices.
+            Text((Appearance(rawValue: appearance) ?? .system).meaning)
+                .font(.system(size: 13)).foregroundStyle(Soot.muted)
+                .padding(.top, 16)
+                .id(appearance)
+                .transition(.opacity)
+                .animation(.easeOut(duration: 0.15), value: appearance)
         }
     }
 }
@@ -707,6 +715,15 @@ enum Appearance: String, CaseIterable, Identifiable {
         case .system: "Auto"
         case .light: "Light"
         case .dark: "Dark"
+        }
+    }
+
+    /// What choosing it does, shown under the choices.
+    var meaning: String {
+        switch self {
+        case .system: "Follows your Mac, light or dark"
+        case .light: "Always light, whatever your Mac uses"
+        case .dark: "Always dark, whatever your Mac uses"
         }
     }
 
