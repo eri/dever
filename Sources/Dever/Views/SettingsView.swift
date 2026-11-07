@@ -12,12 +12,13 @@ struct SettingsView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     enum Section: String, CaseIterable, Identifiable {
-        case accounts, repositories, appearance, alerts, launch, about
+        case accounts, repositories, overview, appearance, alerts, launch, about
         var id: String { rawValue }
         var label: String {
             switch self {
             case .accounts: "Accounts"
             case .repositories: "Repositories"
+            case .overview: "Overview"
             case .appearance: "Appearance"
             case .alerts: "Alerts"
             case .launch: "Launch"
@@ -28,6 +29,7 @@ struct SettingsView: View {
             switch self {
             case .accounts: "link"
             case .repositories: "shippingbox"
+            case .overview: "list.bullet.rectangle"
             case .appearance: "circle.lefthalf.filled"
             case .alerts: "bell"
             case .launch: "power"
@@ -47,6 +49,7 @@ struct SettingsView: View {
                     switch section {
                     case .accounts: AccountsSection(flow: flow)
                     case .repositories: RepositoriesSection()
+                    case .overview: OverviewSettingsView()
                     case .appearance: AppearanceSection()
                     case .alerts: AlertsSection()
                     case .launch: LaunchSection()
@@ -172,7 +175,7 @@ private struct AttentionDot: View {
 }
 
 /// The right column's head: the section's name, one quiet line.
-private struct SectionHead: View {
+struct SectionHead: View {
     let title: String
     var detail: String? = nil
     var body: some View {
@@ -186,7 +189,7 @@ private struct SectionHead: View {
 }
 
 /// Settings as rows on one surface: a label, a control, a hairline between rows.
-private struct SettingRows<Content: View>: View {
+struct SettingRows<Content: View>: View {
     @ViewBuilder var content: () -> Content
     var body: some View {
         VStack(spacing: 0) { content() }
@@ -196,7 +199,7 @@ private struct SettingRows<Content: View>: View {
 }
 
 /// One row: a title (and a line) on the left, the control on the right.
-private struct SettingRow<Control: View>: View {
+struct SettingRow<Control: View>: View {
     let title: String
     var detail: String? = nil
     var divided = true
@@ -854,7 +857,7 @@ private struct LaunchSection: View {
 }
 
 /// A few mutually exclusive options in one capsule; the lime pill springs to the chosen one.
-private struct SegmentPicker<Value: Hashable>: View {
+struct SegmentPicker<Value: Hashable>: View {
     let label: String
     let options: [(label: String, value: Value)]
     @Binding var selection: Value

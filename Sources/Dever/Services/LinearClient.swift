@@ -285,8 +285,10 @@ struct LinearClient {
             var attachments: Attachments?
         }
         struct Issues: Decodable { var nodes: [Issue] }
+        struct Teams: Decodable { var nodes: [Person] }
         var targetDate: String?
         var lead: Person?
+        var teams: Teams?
         var issues: Issues
     }
 
@@ -294,7 +296,7 @@ struct LinearClient {
     func projectSummary(id: String) async throws -> ProjectSummary {
         struct R: Decodable { var project: ProjectSummary }
         return try await query("""
-        query($id: String!) { project(id: $id) { targetDate lead { name }
+        query($id: String!) { project(id: $id) { targetDate lead { name } teams { nodes { name } }
           issues(first: 250) { nodes { state { type name } identifier branchName attachments { nodes { url } } } } } }
         """, variables: ["id": id], as: R.self).project
     }

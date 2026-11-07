@@ -171,3 +171,58 @@ contrast computed from the palette values.
   390pt); the right column still scrolls for larger text.
 - Not verified at runtime: VoiceOver's reading of a section switch (the new headline is a header; no
   live region), and the login item on a notarised build.
+
+## Overview
+
+Scope: the Overview page (`Sources/Dever/Views/OverviewView.swift`, `OverviewSettingsView.swift`,
+the Overview section of Settings), loaded, loading, grouped, compact, filtered-empty and no-project
+states, dark and light, at the 1080×680 minimum (`DEVER_SNAPSHOT_SIZE=1080x680`, `DEVER_SNAPSHOT_WAIT=0|14`,
+`DEVER_SNAPSHOT_OVERVIEW=…`, `DEVER_SNAPSHOT_OVERVIEW_VIEW=1`). Names, focus and keyboard verified in
+code; contrast computed from the palette values.
+
+| Pair | Dark | Light | Need |
+|---|---|---|---|
+| Headline, names, cell values `Soot.ink` on surface | 17.40:1 | 18.88:1 | 4.5 |
+| Summary line, column headers, ages, dashes `Soot.muted` on ground / on surface | 5.93 / 5.38:1 | 5.49 / 6.05:1 | 4.5 |
+| Connect chip `Theme.muted` on surface | 8.56:1 | 6.42:1 | 4.5 |
+| Overdue date `Theme.negative` on surface (13pt, with a glyph) | 4.88:1 | 5.78:1 | 4.5 |
+| On-track check, pin, segment pill `Soot.lime` on surface | 15.03:1 | 7.08:1 | 3 |
+| Needs-attention glyph `Theme.negative`; quiet moon `Theme.chart3` on surface | 4.88 / 7.62:1 | 5.78 / 4.25:1 | 3 |
+| Shipped bar fill `Theme.chart1`; merged segment `Theme.chart3` on surface | 6.93 / 7.62:1 | 5.99 / 4.25:1 | 3 |
+| Shipped bar track `Theme.empty` on surface | 1.27:1 | 1.25:1 | decorative: the `shipped/total` text beside it carries the value |
+| Segment track and column chip edge `Soot.edge` on ground / on surface | 3.87 / 3.51:1 | 3.13 / 3.45:1 | 3 |
+| Button label `Soot.limeInk` on lime (Add project, chosen segment, shown column) | 16.55:1 | 7.08:1 | 4.5 |
+| Hovered row (ground at 70 % on surface) | ≈1.1:1 | ≈1.1:1 | not relied on: hover only; the hand cursor and the focus ring carry the state |
+
+- **Targets**: rows 56px (comfortable) or 44px (compact), full width; the pin 28px; Refresh and View
+  34px; Add project 36px and its chevron 30×36; segments 26px high and at least 44px wide; column chips
+  26px (2.5.8 asks 24px); setting rows 56px, and a switch row toggles from anywhere in the row.
+- **Names**: each row is one element reading, in column order, "AI Tips, pinned, Slack: 12 messages this
+  week, last yesterday, Linear: 15 of 15 shipped, GitHub: pipeline passing, 0 open pull requests,
+  preview live, target 12 November, past, On track", with the hint "Opens the project"; the pin is
+  "Pin AI Tips to the top" / "Unpin AI Tips"; the summary line is one element; the column headers are
+  hidden (the row's summary names every column); the group rows are headers ("Incomplete 2"); View is
+  "View options"; the chevron is "Add many projects"; column chips are toggles with "Shown" / "Hidden"
+  values; the segment groups are "Sort projects by", "Group projects by", "Row density"; the mark,
+  the tool logos and every glyph are decorative, their word sits beside them.
+- **Focus**: rows, the pin, the toolbar buttons, the lime button, the column chips and the empty state's
+  Settings link carry the 2px lime `FocusOutline`; segments keep their inside ring. The pin is drawn at
+  opacity 0 until hovered, focused or pinned (`@FocusState`), so keyboard focus never lands on an
+  invisible control (2.4.7). Order: Refresh, View, Add project, its chevron, then row by row with the
+  row's pin after the row. The View popover closes with Escape.
+- **State without hue** (1.4.1): health = glyph and word (exclamation "Needs attention", moon "Quiet",
+  check "On track", dashed circle "Incomplete", link "Not connected"); pipeline = glyph and word;
+  preview = glyph and word; past target date = exclamation glyph, the negative colour and "past" in
+  the summary; a pinned row = filled pin and "pinned" in its name; a hidden tool = dash with a tooltip.
+- **Reduce Motion**: row entrance keeps a 200ms fade without the rise; skeleton-to-value fades, the
+  shipped bar's fill, the reorder spring and the numeric counters are off (`nil` animations); row hover
+  stays a 150ms tone change with no movement; `Skeleton` is still, as before. Nothing moves on its own.
+- **Loading**: every cell's skeleton has the size of the value it stands for; the row's height never
+  depends on what has loaded; "refreshing" is written in the summary line and `Refresh` carries the
+  value "Refreshing" while the `WaitingLine` runs along its foot.
+- **Empty states**: no project → a headline, one line, Add project and the import buttons that the
+  connected tools allow, plus a link to Settings when Slack or Linear is missing; every project hidden
+  → "Every project is finished and hidden" with "Show finished projects"; no search match → the query
+  and "Clear search".
+- Not verified at runtime: VoiceOver's reading of the row summary and of the popover; the numeric
+  counters and the reorder spring replayed at low speed.

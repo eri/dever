@@ -38,6 +38,8 @@ enum Snapshotter {
                 let settle: Double = wait == 0 ? 0.4 : (item == .overview ? 3 : 8)
                 try? await Task.sleep(nanoseconds: UInt64(settle * 1_000_000_000))
                 capture(to: dir.appendingPathComponent("\(name)-\(themeName).png"))
+                // An open popover (the overview's View options, say) is written beside it.
+                capturePopover(to: dir.appendingPathComponent("\(name)-\(themeName)-popover.png"))
                 // DEVER_SNAPSHOT_SCROLL_END=1 adds each screen scrolled to its end.
                 if ProcessInfo.processInfo.environment["DEVER_SNAPSHOT_SCROLL_END"] == "1" {
                     scrollToEnd()

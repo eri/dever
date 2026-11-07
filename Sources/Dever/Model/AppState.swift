@@ -126,6 +126,8 @@ struct Project: Codable, Identifiable, Hashable {
     /// True once the user said this project needs no preview: the panel stays away until a
     /// pull request is picked in the editor.
     var previewDismissed: Bool?
+    /// Pinned to the top of the Overview when Settings › Overview says so.
+    var favorite: Bool?
     var createdAt = Date()
 
     init(id: UUID = UUID(), name: String, slack: SlackLink? = nil, linear: LinearLink? = nil,
@@ -158,7 +160,7 @@ struct Project: Codable, Identifiable, Hashable {
 
     private enum CodingKeys: String, CodingKey {
         case id, name, slack, linear, githubRepos, usesWorkspaceRepository, githubWholeRepo
-        case previewPullNumber, previewRepository, previewDismissed, createdAt
+        case previewPullNumber, previewRepository, previewDismissed, favorite, createdAt
     }
     private enum LegacyKeys: String, CodingKey { case githubRepo }
 
@@ -179,6 +181,7 @@ struct Project: Codable, Identifiable, Hashable {
         previewPullNumber = try c.decodeIfPresent(Int.self, forKey: .previewPullNumber)
         previewRepository = try c.decodeIfPresent(String.self, forKey: .previewRepository)
         previewDismissed = try c.decodeIfPresent(Bool.self, forKey: .previewDismissed)
+        favorite = try c.decodeIfPresent(Bool.self, forKey: .favorite)
         createdAt = try c.decodeIfPresent(Date.self, forKey: .createdAt) ?? Date()
     }
 }
@@ -236,6 +239,8 @@ final class AppState: ObservableObject {
     @Published var workspaceRepository: String? {
         didSet { if simulatedMode == nil { UserDefaults.standard.set(workspaceRepository, forKey: RepositoryMode.workspaceKey) } }
     }
+    /// How the Overview lists the projects (Settings › Overview, the page's View control).
+    @Published var overview = OverviewSettings.load() { didSet { if overview != oldValue { overview.save() } } }
     @Published var lastError: String?
     /// Services whose token the service itself rejected since the last successful call.
     /// Connected but dead: Settings and the rail show "Reconnect" from here.
@@ -465,6 +470,12 @@ final class AppState: ObservableObject {
             projects.append(project)
         }
         projects.sort { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+    }
+
+    /// Pins or unpins a project on the Overview.
+    func setFavorite(_ project: Project, _ on: Bool) {
+        guard let i = projects.firstIndex(where: { $0.id == project.id }) else { return }
+        projects[i].favorite = on ? true : nil
     }
 
     func delete(_ project: Project) {

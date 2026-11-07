@@ -8,6 +8,8 @@ struct ProjectSnapshot {
         var inProgress = 0
         var todo = 0
         var lead: String?
+        /// The Linear team the project belongs to (the first, when it spans several).
+        var team: String?
         var targetDate: Date?
 
         var progress: Double { total == 0 ? 0 : Double(done) / Double(total) }
@@ -259,6 +261,7 @@ final class OverviewStore: ObservableObject {
                 stats.total += 1
             }
             stats.lead = summary.lead?.name
+            stats.team = summary.teams?.nodes.first?.name
             stats.targetDate = summary.targetDate.flatMap(dayFormatter.date(from:))
             return .success((stats, summary.issues.nodes))
         } catch {
