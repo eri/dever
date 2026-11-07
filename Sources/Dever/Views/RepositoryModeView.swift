@@ -1,13 +1,11 @@
 import SwiftUI
 
-// The repository mode, in two places: a stage of the onboarding (soot ground, one control)
-// and a section of Settings (the app's own theme), both over the same three choices.
+// The repository mode, in two places: a stage of the onboarding and the Repositories
+// section of Settings (`RepositoriesSection` in SettingsView.swift), over the same rows.
 
 /// Three ways a team keeps its code, as radio rows: a ring, the title, one short line.
-/// `tint` and `fill` let the rows sit on the onboarding's ground or on a Settings panel.
 struct RepositoryModeRows: View {
     @Binding var mode: RepositoryMode
-    var onSoot = true
 
     var body: some View {
         VStack(spacing: 8) {
@@ -15,29 +13,20 @@ struct RepositoryModeRows: View {
                 let on = mode == option
                 Button { mode = option } label: {
                     HStack(spacing: 12) {
-                        if onSoot {
-                            CheckCircle(on: on).frame(width: 22)
-                        } else {
-                            ThemeRing(on: on).frame(width: 22)
-                        }
+                        CheckCircle(on: on).frame(width: 22)
                         Image(systemName: option.symbol).font(.system(size: 15, weight: .medium))
-                            .foregroundStyle(onSoot ? Soot.ink : Theme.text).frame(width: 22)
+                            .foregroundStyle(Soot.ink).frame(width: 22)
                             .accessibilityHidden(true)
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(option.title).font(.system(size: onSoot ? 16 : 14, weight: .medium))
-                                .foregroundStyle(onSoot ? Soot.ink : Theme.text)
-                            Text(option.detail).font(.system(size: onSoot ? 13 : 12))
-                                .foregroundStyle(onSoot ? Soot.muted : Theme.muted).lineLimit(1)
+                            Text(option.title).font(.system(size: 16, weight: .medium)).foregroundStyle(Soot.ink)
+                            Text(option.detail).font(.system(size: 13)).foregroundStyle(Soot.muted).lineLimit(1)
                         }
                         Spacer()
                     }
                     .padding(.horizontal, 16)
-                    .frame(height: onSoot ? 64 : 52)
-                    .background(onSoot ? Soot.surface : (on ? Theme.sheet : Color.clear),
-                                in: RoundedRectangle(cornerRadius: Soot.radius))
-                    .overlay(RoundedRectangle(cornerRadius: Soot.radius)
-                        .strokeBorder(onSoot ? (on ? Soot.lime.opacity(0.5) : .clear) : (on ? Theme.text : Theme.control),
-                                      lineWidth: onSoot ? 1 : (on ? 2 : 1)))
+                    .frame(height: 64)
+                    .background(Soot.surface, in: RoundedRectangle(cornerRadius: Soot.radius))
+                    .overlay(RoundedRectangle(cornerRadius: Soot.radius).strokeBorder(on ? Soot.lime.opacity(0.5) : .clear))
                     .contentShape(Rectangle())
                     .modifier(FocusOutline(radius: Soot.radius))
                 }
@@ -48,19 +37,6 @@ struct RepositoryModeRows: View {
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Repository mode")
-    }
-}
-
-/// The radio ring of a Settings row, in the app's theme.
-private struct ThemeRing: View {
-    let on: Bool
-    var body: some View {
-        ZStack {
-            Circle().strokeBorder(on ? Theme.text : Theme.control, lineWidth: 1.5)
-            if on { Circle().fill(Theme.text).padding(4) }
-        }
-        .frame(width: 18, height: 18)
-        .accessibilityHidden(true)
     }
 }
 
@@ -93,74 +69,6 @@ final class RepositoryList: ObservableObject {
                 self.error = state == .offline ? "You're offline; the list will fill in later." : error.localizedDescription
             }
         }
-    }
-}
-
-// MARK: - Settings
-
-/// The "Repositories" section of Settings: the mode, the workspace repository where the mode
-/// has one, and one line on what changing it does. Self-contained: its own label column and
-/// panel, so Settings only has to place it.
-struct RepositoryModeSettings: View {
-    @EnvironmentObject var app: AppState
-    @EnvironmentObject var store: OverviewStore
-    @StateObject private var repos = RepositoryList()
-
-    private var mode: Binding<RepositoryMode> {
-        Binding(get: { app.repositoryMode }, set: { app.setRepositoryMode($0, workspace: app.workspaceRepository) })
-    }
-
-    private var workspace: Binding<String?> {
-        Binding(get: { app.workspaceRepository }, set: { app.setRepositoryMode(app.repositoryMode, workspace: $0) })
-    }
-
-    /// What the change means for the projects, in one line.
-    private var consequence: String {
-        switch app.repositoryMode {
-        case .single: "Every project follows this repository; their own repositories stay saved and come back when you switch."
-        case .perProject: "Each project follows its own repositories; the workspace repository is kept for later."
-        case .mixed: "A project follows the workspace repository unless it has repositories of its own."
-        }
-    }
-
-    var body: some View {
-        Rectangle().fill(Theme.border).frame(height: 1)
-        HStack(alignment: .top, spacing: 32) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Repositories").font(Theme.section).foregroundStyle(Theme.text).accessibilityAddTraits(.isHeader)
-                Text("One repository for the whole team, one or several per project, or both. Change it any time; nothing is lost.")
-                    .font(Theme.body).foregroundStyle(Theme.muted)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .padding(.top, 6)
-            .frame(width: 240, alignment: .leading)
-            VStack(alignment: .leading, spacing: 16) {
-                RepositoryModeRows(mode: mode, onSoot: false).frame(maxWidth: 420)
-                if app.repositoryMode.usesWorkspaceRepository {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("Workspace repository").font(Theme.bodyStrong).foregroundStyle(Theme.text)
-                        if app.github == nil {
-                            Text("Connect GitHub above to pick it.").font(Theme.small).foregroundStyle(Theme.muted)
-                        } else {
-                            SearchPicker(label: "Workspace repository", placeholder: repos.loading ? "Loading…" : "Pick a repository",
-                                         items: repos.items, selection: workspace)
-                                .frame(maxWidth: 420)
-                        }
-                        if let error = repos.error { ErrorLabel(error) }
-                    }
-                }
-                Text(consequence).font(Theme.small).foregroundStyle(Theme.muted)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 16)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Theme.raised, in: RoundedRectangle(cornerRadius: Theme.radiusSheet))
-        }
-        .task(id: app.github != nil) { await repos.load(app) }
-        // The overview follows the new mode at once.
-        .onChange(of: app.repositoryMode) { _, _ in Task { await store.refresh(app) } }
-        .onChange(of: app.workspaceRepository) { _, _ in Task { await store.refresh(app) } }
     }
 }
 
