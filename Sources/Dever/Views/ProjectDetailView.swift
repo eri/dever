@@ -18,6 +18,11 @@ struct ProjectDetailView: View {
     @State private var roomMounted = false
     @State private var roomMount: Task<Void, Never>?
     @State private var slackFocus: String?
+    /// Slack's read cursor for the channel (nil until known) and the newest message that has
+    /// been on screen in the room: one timestamp each, nothing else is remembered.
+    @State private var lastRead: String?
+    @State private var seenUpTo: String?
+    @State private var markTask: Task<Void, Never>?
     @State private var customEmoji: [String: URL] = [:]
     @State private var previewFile: SlackFile?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -642,6 +647,15 @@ struct ProjectDetailView: View {
                         .help("Open the channel in Slack")
                         .transition(.opacity)
                 }
+                if project.slack != nil, !slackExpanded, loaded, lastRead != nil, !railPlan.caughtUp, railPlan.unread > 0 {
+                    Button("Mark as read") { markAllRead() }
+                        .buttonStyle(PressButton())
+                        .handCursor()
+                        .font(.system(size: 12, weight: .semibold)).foregroundStyle(Soot.muted)
+                        .modifier(FocusOutline(radius: 4))
+                        .help("Mark the whole channel as read, in Slack too")
+                        .transition(.opacity)
+                }
                 if project.slack != nil, !slackExpanded {
                     Button { toggleSlackWide() } label: {
                         Image(systemName: "arrow.up.left.and.arrow.down.right").font(.system(size: 11, weight: .semibold))
@@ -684,7 +698,8 @@ struct ProjectDetailView: View {
             } else {
                 SlackThreadView(messages: messages, users: users, domain: app.slack?.domain,
                                 channelID: project.slack?.id, channelName: project.slack?.name,
-                                shown: shownMessages, railShown: railPlan.count, roomMounted: roomMounted,
+                                shown: shownMessages, railMessages: railPlan.messages, readUpTo: lastRead,
+                                onSeen: { seen($0) }, roomMounted: roomMounted,
                                 hasEarlier: hasEarlier, loadingEarlier: loadingEarlier,
                                 wide: slackExpanded, widths: (rail: railWidth, wide: wideWidth),
                                 focus: slackFocus, customEmoji: customEmoji,
@@ -767,6 +782,10 @@ struct ProjectDetailView: View {
             merge(page.messages)
             lastLoaded[.slack] = Date()
             if messages.count <= 20 { hasEarlier = page.hasMore }
+            // Whatever was marked from here since keeps precedence over a stale cursor.
+            if let cursor = try? await app.withSlack({ try await $0.lastRead(id) }) {
+                lastRead = seenUpTo.map { SlackTS.later($0, cursor) } ?? cursor
+            }
             if let team = app.slack?.teamID {
                 // One users.list per quarter hour across the app, not one per visit.
                 users = try await app.withSlack { try await SlackDirectory.shared.users(team: team, via: $0) }
@@ -801,23 +820,63 @@ struct ProjectDetailView: View {
         } catch { app.report(error) }
     }
 
-    /// What the rail shows: this week's messages, at most six; when the channel has been
-    /// quiet all week, only its last message, under a note saying since when.
-    private var railPlan: (count: Int, recent: Int, quietSince: Date?) {
+    /// What the rail shows. With Slack's read cursor: the unread messages (up to eight) and
+    /// the threads with new replies; all caught up, only the last message, dimmed. Without a
+    /// cursor yet: this week's messages, at most six, or the last one if the week was quiet.
+    private var railPlan: (messages: [SlackMessage], unread: Int, caughtUp: Bool, quietSince: Date?) {
+        if let lastRead {
+            let unread = messages.filter { !SlackTS.isAtOrBefore($0.ts, lastRead) }
+            let threads = messages.filter { m in
+                SlackTS.isAtOrBefore(m.ts, lastRead) && (m.latest_reply.map { !SlackTS.isAtOrBefore($0, lastRead) } ?? false)
+            }
+            let picked = Array((unread.prefix(8) + threads.prefix(3)).sorted { $0.ts > $1.ts })
+            if picked.isEmpty { return (Array(messages.prefix(1)), 0, true, nil) }
+            return (picked, unread.count + threads.count, false, nil)
+        }
         let weekAgo = Date().addingTimeInterval(-7 * 86_400)
         let recent = messages.prefix { $0.date >= weekAgo }.count   // newest first
-        if recent == 0 { return (min(1, messages.count), 0, messages.first?.date) }
-        return (min(recent, 6), recent, nil)
+        if recent == 0 { return (Array(messages.prefix(1)), 0, false, messages.first?.date) }
+        return (Array(messages.prefix(min(recent, 6))), recent, false, nil)
     }
 
     private var slackSubtitle: String {
         if slackExpanded { return "Conversation" }
         if !loaded { return "Latest messages" }
         let plan = railPlan
+        if plan.caughtUp { return "All caught up" }
         if let since = plan.quietSince {
             return "Quiet since \(since.formatted(.relative(presentation: .named)))"
         }
-        return plan.recent == 1 ? "1 message this week" : "\(plan.recent) messages this week"
+        if lastRead != nil { return plan.unread == 1 ? "1 unread" : "\(plan.unread) unread" }
+        return plan.unread == 1 ? "1 message this week" : "\(plan.unread) messages this week"
+    }
+
+    /// A message stayed on screen in the room: remember the newest such, and after three quiet
+    /// seconds move Slack's cursor there. Closing the room sends it at once.
+    private func seen(_ ts: String) {
+        let next = SlackTS.later(seenUpTo, ts)
+        guard next != seenUpTo else { return }
+        seenUpTo = next
+        markTask?.cancel()
+        markTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 3_000_000_000)
+            if !Task.isCancelled { await pushCursor() }
+        }
+    }
+
+    /// Moves the read cursor to the newest seen message, if it is past the current one.
+    private func pushCursor() async {
+        guard let id = project.slack?.id, let seen = seenUpTo,
+              lastRead.map({ !SlackTS.isAtOrBefore(seen, $0) }) ?? true else { return }
+        Motion.run(Motion.ui, fade: true) { lastRead = seen }
+        do { try await app.withSlack { try await $0.markRead(id, ts: seen) } } catch { app.report(error) }
+    }
+
+    /// "Mark as read" in the rail: the cursor goes to the latest message.
+    private func markAllRead() {
+        guard let newest = messages.first?.ts else { return }
+        seenUpTo = SlackTS.later(seenUpTo, newest)
+        Task { await pushCursor() }
     }
 
     /// Rail to room and back: one spring (~350 ms, ease-out, no overshoot). The panel's frame
@@ -830,6 +889,7 @@ struct ProjectDetailView: View {
     /// thirty messages to lay out or tear down.
     private func toggleSlackWide() {
         let opening = !slackExpanded
+        if !opening { markTask?.cancel(); Task { await pushCursor() } }
         Motion.run(Motion.move) {
             slackExpanded = opening
             if opening { shownMessages = max(shownMessages, 30) }

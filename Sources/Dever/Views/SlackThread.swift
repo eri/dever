@@ -354,6 +354,12 @@ struct SlackThreadView: View {
     /// How many messages the rail shows; `shown` is the room's count. Kept apart so the rail
     /// never re-renders with the room's 30 messages while it fades out.
     var railShown: Int?
+    /// The rail's own pick of messages (newest first), when it is not simply the latest ones.
+    var railMessages: [SlackMessage]?
+    /// Slack's read cursor: messages up to it are read. Nil while unknown.
+    var readUpTo: String?
+    /// Called from the room with the `ts` of a message that has stayed on screen for a moment.
+    var onSeen: ((String) -> Void)?
     /// The room is built only once the panel has grown: the click itself only moves the frame,
     /// over a skeleton of the room, so the movement starts on the next frame.
     var roomMounted = true
@@ -454,6 +460,8 @@ struct SlackThreadView: View {
                         Color.clear.frame(height: 1).background(OverlayScrollers()).id("slack-end")
                     }
                 }
+                // Rows measure their place against this space to know whether they are on screen.
+                .coordinateSpace(.named("slack-room"))
                 // Starts at the latest message and stays anchored there while the panel grows.
                 .defaultScrollAnchor(.bottom)
                 // The page stops scrolling while the room is open; the room itself must not.
@@ -526,7 +534,7 @@ struct SlackThreadView: View {
     /// The messages, in the rail's style or the room's, each list with its own count.
     private func list(wide: Bool) -> some View {
         let shown = wide ? self.shown : (railShown ?? self.shown)
-        let visible = Array(messages.prefix(shown).reversed())
+        let visible = Array(((wide ? nil : railMessages) ?? Array(messages.prefix(shown))).reversed())
         return VStack(alignment: .leading, spacing: 0) {
             if wide, hasEarlier || messages.count > shown {
                 Group {
@@ -558,10 +566,14 @@ struct SlackThreadView: View {
                 } else {
                     MessageRow(message: m, user: m.user.flatMap { users[$0] }, users: users, channels: channels,
                                customEmoji: customEmoji, grouped: grouped, wide: wide,
-                               selected: openThread?.ts == m.ts || focus == m.ts, permalink: permalink(m),
+                               selected: openThread?.ts == m.ts || focus == m.ts,
+                               read: readUpTo.map { SlackTS.isAtOrBefore(m.ts, $0) } ?? true,
+                               newReplies: readUpTo.map { r in m.latest_reply.map { !SlackTS.isAtOrBefore($0, r) } ?? false } ?? false,
+                               permalink: permalink(m),
                                actions: actions, openThread: wide ? { setThread($0) } : nil, openWide: openWide)
                         .padding(.top, grouped ? 2 : (newDay ? 0 : (wide ? 18 : 14)))
                         .id(m.ts)
+                        .modifier(SeenReporter(ts: m.ts, active: wide && self.wide, onSeen: onSeen))
                 }
             }
             if !wide, let expand, messages.count > shown {
@@ -584,6 +596,37 @@ struct SlackThreadView: View {
     private func permalink(_ m: SlackMessage) -> URL? {
         guard let domain, let channelID else { return nil }
         return URL(string: "https://\(domain).slack.com/archives/\(channelID)/p\(m.ts.replacingOccurrences(of: ".", with: ""))")
+    }
+}
+
+/// Slack timestamps ("1762097700.123456") compared as numbers.
+enum SlackTS {
+    static func isAtOrBefore(_ a: String, _ b: String) -> Bool { (Double(a) ?? 0) <= (Double(b) ?? 0) }
+    static func later(_ a: String?, _ b: String) -> String { a.map { isAtOrBefore(b, $0) ? $0 : b } ?? b }
+}
+
+/// Reports a message as seen once its row has been on screen for a second: a glance while
+/// scrolling past does not count, and only one timestamp is kept by whoever listens.
+private struct SeenReporter: ViewModifier {
+    let ts: String
+    let active: Bool
+    let onSeen: ((String) -> Void)?
+    @State private var dwell: Task<Void, Never>?
+
+    func body(content: Content) -> some View {
+        content.onGeometryChange(for: Bool.self, of: { proxy in
+            let frame = proxy.frame(in: .named("slack-room"))
+            let height = proxy.bounds(of: .named("slack-room"))?.height ?? 0
+            return frame.maxY > 0 && frame.minY < height && height > 0
+        }) { visible in
+            dwell?.cancel()
+            guard visible, active, let onSeen else { return }
+            dwell = Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                if !Task.isCancelled { onSeen(ts) }
+            }
+        }
+        .onChange(of: active) { _, on in if !on { dwell?.cancel() } }
     }
 }
 
@@ -1132,6 +1175,10 @@ private struct MessageRow: View {
     let grouped: Bool
     var wide = false
     var selected = false
+    /// Already read (Slack's cursor): the rail dims it when it is only there for context.
+    var read = true
+    /// The thread has replies newer than the cursor.
+    var newReplies = false
     let permalink: URL?
     let actions: SlackMessageActions
     /// In the wide view the thread opens in a pane beside the list instead of inline.
@@ -1196,6 +1243,10 @@ private struct MessageRow: View {
                             if threadOpen, thread == nil { Task { await loadThread() } }
                         } label: {
                             HStack(spacing: 6) {
+                                if newReplies {
+                                    Circle().fill(Soot.lime).frame(width: 7, height: 7)
+                                        .accessibilityLabel("New replies")
+                                }
                                 if let ids = message.reply_users, !ids.isEmpty {
                                     ReplierAvatars(ids: ids, users: users)
                                 } else {
@@ -1226,6 +1277,7 @@ private struct MessageRow: View {
                 }
             }
         }
+        .opacity(!wide && read && !newReplies ? 0.55 : 1)
         .padding(.vertical, 4)
         .padding(.horizontal, 8)
         .padding(.trailing, 4)

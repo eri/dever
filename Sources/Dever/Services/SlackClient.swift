@@ -321,6 +321,18 @@ struct SlackClient {
                                 hasMore: res["has_more"] as? Bool ?? false)
     }
 
+    /// Slack's own read cursor for the channel: the `ts` of the last message you read there,
+    /// in Slack or here. Messages after it are unread.
+    func lastRead(_ channelID: String) async throws -> String? {
+        let res = try await call("conversations.info", ["channel": channelID])
+        return (res["channel"] as? [String: Any])?["last_read"] as? String
+    }
+
+    /// Moves the read cursor to `ts`: everything up to that message counts as read, in Slack too.
+    func markRead(_ channelID: String, ts: String) async throws {
+        _ = try await call("conversations.mark", ["channel": channelID, "ts": ts])
+    }
+
     /// A thread's replies, oldest first, without the parent message.
     func replies(_ channelID: String, threadTS: String, limit: Int = 100) async throws -> [SlackMessage] {
         let res = try await call("conversations.replies", ["channel": channelID, "ts": threadTS, "limit": "\(limit)"])
