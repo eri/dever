@@ -303,10 +303,8 @@ private struct StatusMenuRow: View {
     }
 }
 
-/// The channel prefix, shown as what it is: the start of a channel name. The field sits after
-/// the "#" and before a project's name, so typing changes the name it builds; under it, the
-/// channels of your Slack that start with it, with the prefix in lime. Those are what Import
-/// offers, and new channels are named the same way.
+/// The channel prefix as a plain setting row: the title, one line on what it does (with the
+/// user's own channels when Slack is connected), and a normal field on the right.
 private struct ChannelPrefixCard: View {
     @EnvironmentObject var app: AppState
     @Binding var prefix: String
@@ -319,71 +317,44 @@ private struct ChannelPrefixCard: View {
         return channels.filter { $0.hasPrefix(trimmed) }.sorted()
     }
 
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Slack channel prefix").font(.system(size: 14, weight: .medium)).foregroundStyle(Soot.ink)
-                .accessibilityAddTraits(.isHeader)
-            composer
-            matchesView
+    /// What the prefix does, said with real channels when there are some.
+    private var effect: String {
+        if trimmed.isEmpty { return "No prefix: you pick channels when you import" }
+        guard app.slack != nil, channels != nil else { return "Import offers the channels that start with it" }
+        switch matches.count {
+        case 0: return "None of your channels start with \(trimmed)"
+        case 1: return "Import offers 1 channel: #\(matches[0])"
+        case 2: return "Import offers 2 channels: #\(matches[0]), #\(matches[1])"
+        default: return "Import offers \(matches.count) channels: #\(matches[0]), #\(matches[1])…"
         }
-        .padding(16)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Soot.surface, in: RoundedRectangle(cornerRadius: 12))
-        .task(id: app.slack?.teamID) { await load() }
     }
 
-    /// "# [prefix] acme-website": the field is the part you choose, the rest is a project's name.
-    private var composer: some View {
-        HStack(spacing: 0) {
-            BrandLogo(service: .slack, size: 14).padding(.trailing, 10).accessibilityHidden(true)
-            Text("#").foregroundStyle(Soot.muted).accessibilityHidden(true)
+    var body: some View {
+        HStack(alignment: .center, spacing: 16) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Slack channel prefix").font(.system(size: 14, weight: .medium)).foregroundStyle(Soot.ink)
+                Text(effect).font(.system(size: 12)).foregroundStyle(Soot.muted).lineLimit(1)
+                    .help(matches.map { "#" + $0 }.joined(separator: "\n"))
+                    .contentTransition(.opacity)
+                    .motion(Motion.quick, fade: true, value: effect)
+            }
+            Spacer(minLength: 16)
             TextField("Prefix", text: $prefix, prompt: Text("proj-").foregroundStyle(Soot.muted))
                 .textFieldStyle(.plain)
-                .foregroundStyle(Soot.lime)
-                .fontWeight(.semibold)
-                .fixedSize()
-                .frame(minWidth: 36)
-                .padding(.horizontal, 6)
-                .frame(height: 28)
-                .background(Soot.lime.opacity(0.12), in: RoundedRectangle(cornerRadius: 6))
-                .overlay(RoundedRectangle(cornerRadius: 6)
-                    .strokeBorder(focused ? Soot.lime : Soot.edge, lineWidth: focused ? 2 : 1))
+                .font(.system(size: 14)).foregroundStyle(Soot.ink)
                 .focused($focused)
+                .padding(.horizontal, 12)
+                .frame(width: 120, height: 36)
+                .background(Soot.ground, in: RoundedRectangle(cornerRadius: Soot.radius))
+                .overlay(RoundedRectangle(cornerRadius: Soot.radius)
+                    .strokeBorder(focused ? Soot.lime : Soot.edge, lineWidth: focused ? 2 : 1))
                 .accessibilityLabel("Slack channel prefix")
-                .accessibilityHint("Channels starting with it are offered at import")
-            Text(Naming.slug("Acme website")).foregroundStyle(Soot.ink).padding(.leading, 2)
-                .accessibilityHidden(true)
-            Spacer(minLength: 0)
         }
-        .font(.system(size: 15, design: .monospaced))
-        .padding(.horizontal, 12)
-        .frame(height: 44)
-        .background(Soot.ground, in: RoundedRectangle(cornerRadius: Soot.fieldRadius))
-        .contentShape(Rectangle())
-        .onTapGesture { focused = true }
-    }
-
-    /// One quiet line: how many of your channels the prefix finds (their names in the tooltip).
-    @ViewBuilder private var matchesView: some View {
-        Group {
-            if app.slack == nil {
-                Text("Connect Slack to see which channels match")
-            } else if trimmed.isEmpty {
-                Text("No prefix: you pick channels when you import")
-            } else if channels == nil {
-                Skeleton(width: 140, height: 10)
-            } else {
-                HStack(spacing: 4) {
-                    Text(matches.count, format: .number).foregroundStyle(Soot.ink).monospacedDigit()
-                        .contentTransition(.numericText(value: Double(matches.count)))
-                    Text(matches.count == 1 ? "channel matches" : "channels match")
-                }
-                .motion(Motion.ui, fade: true, value: matches.count)
-                .help(matches.map { "#" + $0 }.joined(separator: "\n"))
-            }
-        }
-        .font(.system(size: 12)).foregroundStyle(Soot.muted)
-        .padding(.leading, 2)
+        .padding(.horizontal, 16)
+        .frame(minHeight: 64)
+        .background(Soot.surface, in: RoundedRectangle(cornerRadius: 12))
+        .accessibilityElement(children: .contain)
+        .task(id: app.slack?.teamID) { await load() }
     }
 
     /// The channels the user is in, once per workspace.
