@@ -351,6 +351,12 @@ struct SlackThreadView: View {
     let channelID: String?
     var channelName: String?
     var shown = 8
+    /// How many messages the rail shows; `shown` is the room's count. Kept apart so the rail
+    /// never re-renders with the room's 30 messages while it fades out.
+    var railShown: Int?
+    /// The room is built only once the panel has grown: the click itself only moves the frame,
+    /// over a skeleton of the room, so the movement starts on the next frame.
+    var roomMounted = true
     var hasEarlier = false
     var loadingEarlier = false
     /// The reading room: full text, day headings, threads in a pane beside the messages.
@@ -368,14 +374,22 @@ struct SlackThreadView: View {
     var expand: (() -> Void)?
     var actions = SlackMessageActions()
     @State private var openThread: SlackMessage?
-    @AppStorage("slackThreadPaneWidth") private var paneWidth: Double = 320
+    /// The room's last height, so it keeps its layout while hidden behind the rail.
+    @State private var roomHeight: CGFloat = 600
+    /// Until when the room follows its content's growth after an open (late pictures, long texts).
+    @State private var followUntil = Date.distantPast
+    /// The side pane has two widths: the aside's, and a wider one while a thread is open, so a
+    /// thread gets room to read. Each is dragged and remembered on its own.
+    @AppStorage("slackThreadPaneWidth") private var asideWidth: Double = 320
+    @AppStorage("slackOpenThreadWidth") private var threadWidth: Double = 480
+    private var paneWidth: Double { openThread == nil ? asideWidth : threadWidth }
+    private var paneBinding: Binding<Double> { openThread == nil ? $asideWidth : $threadWidth }
 
     private var channels: [String: String] {
         guard let channelID, let channelName else { return [:] }
         return [channelID: channelName]
     }
 
-    private var visible: [SlackMessage] { Array(messages.prefix(shown).reversed()) }
 
     /// The thread beside the room opens, closes or changes in one movement: slides in from
     /// the right over the aside, cross-fades to another thread, slides back out.
@@ -386,12 +400,35 @@ struct SlackThreadView: View {
         // switch. The one leaving fades as the one arriving fades in (200 ms), each at its own
         // final width; the panel's growing frame clips the overflow. 8 px of headroom keep the
         // hover strip above the first message out of the clip.
+        //
+        // The room, once built, is never torn down: it stays in the same place in the tree,
+        // at its own width and last height, faded out and disabled behind the rail, so opening
+        // and closing only change its opacity. Its skeleton covers the first build.
         ZStack(alignment: .topLeading) {
+            // The rail's list stays mounted too, at its width and height, faded while the room is open.
+            list(wide: false).frame(width: widths?.rail, alignment: .leading)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(height: wide ? 0 : nil, alignment: .top)
+                .opacity(wide ? 0 : 1)
+                .allowsHitTesting(!wide)
+                .accessibilityHidden(wide)
             if wide {
-                room.frame(width: widths?.wide, alignment: .leading)
-                    .transition(.opacity)
-            } else {
-                list.frame(width: widths?.rail, alignment: .leading)
+                Color.clear.frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .onGeometryChange(for: CGFloat.self, of: { $0.size.height }) { roomHeight = $0 }
+            }
+        }
+        .overlay(alignment: .topLeading) {
+            if roomMounted {
+                room.frame(width: widths?.wide, height: wide ? nil : roomHeight, alignment: .topLeading)
+                    .opacity(wide ? 1 : 0)
+                    .allowsHitTesting(wide)
+                    .disabled(!wide)
+                    .accessibilityHidden(!wide)
+            }
+        }
+        .overlay(alignment: .topLeading) {
+            if wide && !roomMounted {
+                RoomSkeleton(paneWidth: paneWidth).frame(width: widths?.wide, alignment: .leading)
                     .transition(.opacity)
             }
         }
@@ -409,23 +446,38 @@ struct SlackThreadView: View {
         HStack(alignment: .top, spacing: 16) {
             ScrollViewReader { proxy in
                 ScrollView {
-                    list.frame(maxWidth: 1200, alignment: .leading)
-                    Color.clear.frame(height: 1).id("slack-end")
+                    // One explicit stack: left to the scroll view, the end marker was laid over
+                    // the messages at mid-height, and landing on it opened mid-conversation.
+                    VStack(alignment: .leading, spacing: 0) {
+                        list(wide: true).frame(maxWidth: 1200, alignment: .leading)
+                        // Inside the content, so the probe finds this scroll view and not the page's.
+                        Color.clear.frame(height: 1).background(OverlayScrollers()).id("slack-end")
+                    }
                 }
                 // Starts at the latest message and stays anchored there while the panel grows.
                 .defaultScrollAnchor(.bottom)
-                .background(OverlayScrollers())
-                // Opens on the message that was clicked (once the panel has grown), else on the latest.
-                .onAppear {
-                    guard let focus else { return }
-                    DispatchQueue.main.asyncAfter(deadline: .now() + (Motion.reduced ? 0 : 0.4)) {
-                        Motion.run(Motion.ui) { proxy.scrollTo(focus, anchor: .center) }
-                    }
-                }
+                // The page stops scrolling while the room is open; the room itself must not.
+                .scrollDisabled(false)
+                // Scrolled up: a "Latest" pill brings the reader back to the end.
+                .jumpToLatest(proxy, target: "slack-end")
+                // Rows finish measuring and pictures arrive after the landing, growing the content.
+                // The room follows: on the clicked message for a moment after an open, on the
+                // latest whenever it was showing it. A reader who scrolled up is left in place.
+                .modifier(FollowsGrowth { wasAtEnd in
+                    guard wide else { return }
+                    if let focus { if Date() < followUntil { proxy.scrollTo(focus, anchor: .center) } }
+                    else if wasAtEnd { proxy.scrollTo("slack-end", anchor: .bottom) }
+                })
+                // Each open lands on the clicked message or on the latest, once rows have measured.
+                .onAppear { land(proxy) }
+                .onChange(of: wide) { _, isWide in if isWide { land(proxy) } }
                 .onChange(of: focus) { _, ts in if let ts { Motion.run(Motion.ui) { proxy.scrollTo(ts, anchor: .center) } } }
             }
             .frame(maxWidth: 1200, maxHeight: .infinity, alignment: .topLeading)
-            PaneHandle(width: $paneWidth)
+            // The messages take their new width at once when the pane widens or narrows.
+            .animation(nil, value: openThread == nil)
+            PaneHandle(width: paneBinding, range: openThread == nil ? 260...560 : 360...760,
+                       reset: openThread == nil ? 320 : 480)
             // Beside the messages: the open thread, or what the channel holds when none is open.
             Group {
                 if let parent = openThread {
@@ -440,7 +492,13 @@ struct SlackThreadView: View {
                         .transition(.opacity)
                 }
             }
+            // Grows to the thread's width as the thread slides in, back to the aside's as it leaves
+            // (in `setThread`'s spring). The messages beside it take their new width at once, so
+            // their text is laid out once instead of on every frame.
             .frame(width: paneWidth)
+            // Held to the room's height: a tall aside must not stretch the messages past the panel.
+            .frame(minHeight: 0, maxHeight: .infinity, alignment: .top)
+            .clipped()
         }
         .onReceive(NotificationCenter.default.publisher(for: .openFirstSlackThread)) { _ in
             setThread(openThread == nil ? messages.prefix(shown).first { ($0.reply_count ?? 0) > 0 } : nil)
@@ -451,12 +509,25 @@ struct SlackThreadView: View {
         }
     }
 
+    private func land(_ proxy: ScrollViewProxy) {
+        followUntil = Date().addingTimeInterval(2)
+        let go = { proxy.scrollTo(focus ?? "slack-end", anchor: focus == nil ? .bottom : .center) }
+        DispatchQueue.main.async(execute: go)
+        // Before macOS 15 there is no growth to follow: land again once pictures have had a moment.
+        if #unavailable(macOS 15.0) {
+            for delay in [0.3, 0.8, 1.6] { DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: go) }
+        }
+    }
+
     private func firstFile() -> SlackFile? {
         return messages.flatMap { $0.files ?? [] }.first { $0.isReadable && $0.url_private != nil }
     }
 
-    private var list: some View {
-        VStack(alignment: .leading, spacing: 0) {
+    /// The messages, in the rail's style or the room's, each list with its own count.
+    private func list(wide: Bool) -> some View {
+        let shown = wide ? self.shown : (railShown ?? self.shown)
+        let visible = Array(messages.prefix(shown).reversed())
+        return VStack(alignment: .leading, spacing: 0) {
             if wide, hasEarlier || messages.count > shown {
                 Group {
                     if loadingEarlier {
@@ -500,7 +571,7 @@ struct SlackThreadView: View {
                         Image(systemName: "arrow.up.left.and.arrow.down.right").font(.system(size: 10, weight: .semibold))
                     }
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(PressButton())
                 .handCursor()
                 .font(.system(size: 13, weight: .semibold)).foregroundStyle(Soot.lime)
                 .padding(.horizontal, 8).padding(.top, 14)
@@ -743,6 +814,72 @@ private struct SystemRow: View {
     }
 }
 
+/// Calls `grew` each time a scroll view's content gets taller (macOS 15+), saying whether the
+/// view was showing the end of its content just before.
+private struct FollowsGrowth: ViewModifier {
+    let grew: (_ wasAtEnd: Bool) -> Void
+
+    private struct Extent: Equatable {
+        var height: CGFloat
+        var gap: CGFloat   // from the visible bottom to the content's end
+    }
+
+    func body(content: Content) -> some View {
+        if #available(macOS 15.0, *) {
+            content.onScrollGeometryChange(for: Extent.self, of: {
+                Extent(height: $0.contentSize.height, gap: $0.contentSize.height - $0.visibleRect.maxY)
+            }) { old, new in
+                if new.height > old.height { grew(old.gap < 24) }
+            }
+        } else {
+            content
+        }
+    }
+}
+
+/// The room before its messages are built: the same columns (messages on the left, the aside
+/// at its width on the right), rows at the size of a message, the latest at the bottom.
+private struct RoomSkeleton: View {
+    let paneWidth: Double
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 16) {
+            VStack(alignment: .leading, spacing: 22) {
+                Spacer(minLength: 0)
+                ForEach(0..<5, id: \.self) { i in
+                    HStack(alignment: .top, spacing: 10) {
+                        Skeleton(width: 36, height: 36, radius: 8)
+                        VStack(alignment: .leading, spacing: 8) {
+                            Skeleton(width: [110, 90, 130, 100, 120][i], height: 13)
+                            Skeleton(height: 12).frame(maxWidth: [620, 540, 700, 480, 580][i])
+                            Skeleton(width: [300, 220, 360, 180, 260][i], height: 12)
+                        }
+                    }
+                    .padding(.horizontal, 8)
+                }
+            }
+            .frame(maxWidth: 1200, maxHeight: .infinity, alignment: .bottomLeading)
+            Rectangle().fill(Soot.line).frame(width: 2).opacity(0.6).padding(.horizontal, 4)
+            VStack(alignment: .leading, spacing: 14) {
+                Skeleton(width: 80, height: 13)
+                ForEach(0..<5, id: \.self) { i in
+                    HStack(spacing: 10) {
+                        Skeleton(width: 22, height: 22, radius: 5)
+                        Skeleton(width: [120, 90, 110, 80, 100][i], height: 12)
+                    }
+                }
+                Skeleton(width: 60, height: 13).padding(.top, 10)
+                Skeleton(height: 40, radius: 8)
+                Skeleton(height: 40, radius: 8)
+            }
+            .frame(width: paneWidth, alignment: .topLeading)
+        }
+        .frame(maxHeight: .infinity, alignment: .top)
+        .accessibilityElement()
+        .accessibilityLabel("Loading the conversation")
+    }
+}
+
 /// Presents a Slack file in a sheet when a thumbnail or file row asks for it.
 struct FilePreviewHost: ViewModifier {
     @Binding var preview: SlackFile?
@@ -773,6 +910,8 @@ extension Notification.Name {
 /// The divider between messages and the side pane: drag to resize, double-click to reset.
 private struct PaneHandle: View {
     @Binding var width: Double
+    var range: ClosedRange<Double> = 260...560
+    var reset: Double = 320
     @State private var hovering = false
     @State private var start: Double?
 
@@ -789,16 +928,16 @@ private struct PaneHandle: View {
             .gesture(DragGesture(minimumDistance: 2, coordinateSpace: .global)
                 .onChanged { value in
                     if start == nil { start = width }
-                    width = min(560, max(260, (start ?? width) - (value.location.x - value.startLocation.x)))
+                    width = min(range.upperBound, max(range.lowerBound, (start ?? width) - (value.location.x - value.startLocation.x)))
                 }
                 .onEnded { _ in start = nil })
             .transaction { $0.animation = nil }
-            .onTapGesture(count: 2) { width = 320 }
+            .onTapGesture(count: 2) { width = reset }
             .accessibilityElement()
             .accessibilityLabel("Pane width")
             .accessibilityValue("\(Int(width)) points")
             .accessibilityAdjustableAction { direction in
-                width = min(560, max(260, width + (direction == .increment ? 20 : -20)))
+                width = min(range.upperBound, max(range.lowerBound, width + (direction == .increment ? 20 : -20)))
             }
     }
 }

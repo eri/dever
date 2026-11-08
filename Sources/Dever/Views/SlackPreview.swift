@@ -166,9 +166,13 @@ struct RichTextLabel: NSViewRepresentable {
     func sizeThatFits(_ proposal: ProposedViewSize, nsView view: LabelView, context: Context) -> CGSize? {
         let width = max(proposal.width ?? 320, 40)
         guard let container = view.textContainer, let lm = view.layoutManager else { return nil }
+        let live = container.containerSize
         container.containerSize = NSSize(width: width, height: .greatestFiniteMagnitude)
         lm.ensureLayout(for: container)
         let height = lm.usedRect(for: container).height
+        // SwiftUI also asks trial sizes: put the text back at the view's own width, or a
+        // label whose frame then does not change stays wrapped at the trial width.
+        container.containerSize = view.frame.width > 0 ? NSSize(width: view.frame.width, height: live.height) : live
         return CGSize(width: width, height: ceil(height))
     }
 

@@ -14,6 +14,9 @@ struct ProjectDetailView: View {
     @State private var hasEarlier = false
     @State private var loadingEarlier = false
     @State private var slackExpanded = false
+    /// The room is built once, after the panel's first growth, then kept (see `toggleSlackWide`).
+    @State private var roomMounted = false
+    @State private var roomMount: Task<Void, Never>?
     @State private var slackFocus: String?
     @State private var customEmoji: [String: URL] = [:]
     @State private var previewFile: SlackFile?
@@ -78,14 +81,23 @@ struct ProjectDetailView: View {
                     // so open threads and a half-written reply survive a switch to the wide view.
                     // Opening the room: the work column slides out to the left as the panel
                     // grows over its place (one spring, ~350 ms); the reverse on the way back.
+                    // The work column is never torn down either: while the room is open it stays
+                    // laid out at its width under the panel, faded and slid 40 pt aside, so Back
+                    // only animates it back instead of rebuilding every row.
                     if twoColumns {
-                        HStack(alignment: .top, spacing: 16) {
-                            if !slackExpanded {
-                                workColumn.frame(maxWidth: .infinity)
-                                    .transition(Motion.reduced ? .opacity : .opacity.combined(with: .offset(x: -40)))
-                            }
+                        let workWidth = max(0, geo.size.width - 56 - railWidth - 16)
+                        ZStack(alignment: .topTrailing) {
+                            workColumn
+                                .frame(width: workWidth, alignment: .topLeading)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .frame(maxWidth: .infinity, alignment: .topLeading)
+                                .frame(height: slackExpanded ? 0 : nil, alignment: .top)
+                                .opacity(slackExpanded ? 0 : 1)
+                                .offset(x: slackExpanded && !reduceMotion ? -40 : 0)
+                                .allowsHitTesting(!slackExpanded)
+                                .accessibilityHidden(slackExpanded)
                             slackPanel(railWidth: railWidth - 40, wideWidth: geo.size.width - 56 - 40)
-                                .frame(width: slackExpanded ? nil : railWidth)
+                                .frame(width: slackExpanded ? geo.size.width - 56 : railWidth)
                                 .frame(maxHeight: slackExpanded ? .infinity : nil, alignment: .top)
                         }
                     } else {
@@ -572,8 +584,9 @@ struct ProjectDetailView: View {
                     HStack(spacing: 12) {
                         Skeleton(width: 12, height: 12, radius: 2)
                         Skeleton(width: 64, height: 20, radius: 5)
-                        Skeleton(width: [280, 220, 320, 250, 200][i], height: 12)
-                        Spacer()
+                        // Flexible, so a narrow column never pushes the row past the panel's edge.
+                        Skeleton(height: 12).frame(maxWidth: [280, 220, 320, 250, 200][i])
+                        Spacer(minLength: 12)
                         Skeleton(width: 66, height: 26, radius: 13)
                         Skeleton(width: 22, height: 22, radius: 11)
                     }
@@ -671,7 +684,7 @@ struct ProjectDetailView: View {
             } else {
                 SlackThreadView(messages: messages, users: users, domain: app.slack?.domain,
                                 channelID: project.slack?.id, channelName: project.slack?.name,
-                                shown: slackExpanded ? shownMessages : railPlan.count,
+                                shown: shownMessages, railShown: railPlan.count, roomMounted: roomMounted,
                                 hasEarlier: hasEarlier, loadingEarlier: loadingEarlier,
                                 wide: slackExpanded, widths: (rail: railWidth, wide: wideWidth),
                                 focus: slackFocus, customEmoji: customEmoji,
@@ -810,10 +823,23 @@ struct ProjectDetailView: View {
     /// Rail to room and back: one spring (~350 ms, ease-out, no overshoot). The panel's frame
     /// grows in place while the work column slides out of its way; inside, the rail's messages
     /// dissolve into the room's, each laid out at its own final width. Instant under Reduce Motion.
+    ///
+    /// The click only moves frames and opacities. The room's messages are built once, after the
+    /// first growth has settled (a skeleton of the room until then), and kept: later opens and
+    /// every close only fade it, so the movement starts on the next frame instead of waiting for
+    /// thirty messages to lay out or tear down.
     private func toggleSlackWide() {
+        let opening = !slackExpanded
         Motion.run(Motion.move) {
-            slackExpanded.toggle()
-            if slackExpanded { shownMessages = max(shownMessages, 30) }
+            slackExpanded = opening
+            if opening { shownMessages = max(shownMessages, 30) }
+        }
+        guard opening, !roomMounted, roomMount == nil else { return }
+        roomMount = Task { @MainActor in
+            defer { roomMount = nil }
+            try? await Task.sleep(nanoseconds: Motion.reduced ? 16_000_000 : 380_000_000)
+            guard !Task.isCancelled, slackExpanded else { return }
+            Motion.run(Motion.ui, fade: true) { roomMounted = true }
         }
     }
 
