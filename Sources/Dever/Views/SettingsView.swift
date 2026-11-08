@@ -234,6 +234,8 @@ private struct AccountsSection: View {
     @EnvironmentObject var app: AppState
     @ObservedObject var flow: ConnectFlow
     @AppStorage("slackChannelPrefix") private var channelPrefix = "proj-"
+    /// The tool whose status menu is open, if any: one at a time.
+    @State private var menu: ServiceKind?
 
     private var connected: Int { ServiceKind.allCases.filter(app.isConnected).count }
 
@@ -241,23 +243,195 @@ private struct AccountsSection: View {
         VStack(alignment: .leading, spacing: 0) {
             SectionHead(title: "Accounts", detail: "\(connected) of 3 connected · tokens stay in your Keychain")
             VStack(spacing: 8) {
-                ForEach(ServiceKind.allCases) { ServiceRow(service: $0, flow: flow) }
+                ForEach(ServiceKind.allCases) { ServiceRow(service: $0, flow: flow, menu: $menu) }
             }
-            SettingRows {
-                SettingRow(title: "Slack channel prefix",
-                           detail: "#\(Naming.channelName(for: "Acme website", prefix: channelPrefix))", divided: false) {
-                    TextField("Prefix", text: $channelPrefix, prompt: Text("proj-").foregroundStyle(Soot.muted))
-                        .textFieldStyle(.plain)
-                        .font(.system(size: 14)).foregroundStyle(Soot.ink)
-                        .padding(.horizontal, 12)
-                        .frame(width: 140, height: 36)
-                        .background(Soot.ground, in: RoundedRectangle(cornerRadius: Soot.radius))
-                        .overlay(RoundedRectangle(cornerRadius: Soot.radius).strokeBorder(Soot.edge))
-                        .accessibilityLabel("Slack channel prefix")
-                }
-            }
+            .zIndex(1)
+            ChannelPrefixCard(prefix: $channelPrefix)
             .padding(.top, 20)
         }
+        // A click anywhere else on the section closes the open menu.
+        .background {
+            if menu != nil {
+                Color.black.opacity(0.001)
+                    .onTapGesture { Motion.run(Motion.ui, fade: true) { menu = nil } }
+            }
+        }
+        .onExitCommand { if menu != nil { Motion.run(Motion.ui, fade: true) { menu = nil } } }
+    }
+}
+
+/// One action in an account's status menu, in the overview menu's row language: a glyph on a
+/// tile, a title, one quiet line. `busy` runs the lime line along its foot (never a spinner).
+private struct StatusMenuRow: View {
+    let symbol: String
+    let title: String
+    let detail: String
+    var destructive = false
+    var busy = false
+    let action: () -> Void
+    @State private var hovering = false
+    @Environment(\.isEnabled) private var isEnabled
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 12) {
+                Image(systemName: symbol).font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(destructive ? Theme.negative : Soot.ink)
+                    .frame(width: 28, height: 28)
+                    .background(Soot.surface, in: RoundedRectangle(cornerRadius: 7))
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(title).font(.system(size: 14, weight: .medium))
+                        .foregroundStyle(destructive ? Theme.negative : Soot.ink)
+                    Text(detail).font(.system(size: 12)).foregroundStyle(Soot.muted).lineLimit(1)
+                }
+                Spacer(minLength: 8)
+            }
+            .padding(.horizontal, 10)
+            .frame(height: 46)
+            .background(hovering && isEnabled ? Soot.surface : Color.clear, in: RoundedRectangle(cornerRadius: Soot.radius))
+            .overlay(alignment: .bottom) { if busy { WaitingLine().padding(.horizontal, 8) } }
+            .clipShape(RoundedRectangle(cornerRadius: Soot.radius))
+            .contentShape(RoundedRectangle(cornerRadius: Soot.radius))
+        }
+        .buttonStyle(.plain)
+        .modifier(FocusOutline(radius: Soot.radius))
+        .motion(Motion.quick, fade: true, value: hovering)
+        .onHover { hovering = $0 }
+        .handCursor()
+        .accessibilityLabel(destructive ? "\(title). \(detail)" : title)
+    }
+}
+
+/// The channel prefix, shown as what it is: the start of a channel name. The field sits after
+/// the "#" and before a project's name, so typing changes the name it builds; under it, the
+/// channels of your Slack that start with it, with the prefix in lime. Those are what Import
+/// offers, and new channels are named the same way.
+private struct ChannelPrefixCard: View {
+    @EnvironmentObject var app: AppState
+    @Binding var prefix: String
+    @State private var channels: [String]?
+    @FocusState private var focused: Bool
+
+    private var trimmed: String { prefix.trimmingCharacters(in: .whitespaces) }
+    private var matches: [String] {
+        guard let channels, !trimmed.isEmpty else { return [] }
+        return channels.filter { $0.hasPrefix(trimmed) }.sorted()
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Project channels").font(.system(size: 14, weight: .medium)).foregroundStyle(Soot.ink)
+                    .accessibilityAddTraits(.isHeader)
+                Text("Import offers the channels that start with this; new ones are named the same way")
+                    .font(.system(size: 12)).foregroundStyle(Soot.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            composer
+            matchesView
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Soot.surface, in: RoundedRectangle(cornerRadius: 12))
+        .task(id: app.slack?.teamID) { await load() }
+    }
+
+    /// "# [prefix] acme-website": the field is the part you choose, the rest is a project's name.
+    private var composer: some View {
+        HStack(spacing: 0) {
+            BrandLogo(service: .slack, size: 14).padding(.trailing, 10).accessibilityHidden(true)
+            Text("#").foregroundStyle(Soot.muted).accessibilityHidden(true)
+            TextField("Prefix", text: $prefix, prompt: Text("proj-").foregroundStyle(Soot.muted))
+                .textFieldStyle(.plain)
+                .foregroundStyle(Soot.lime)
+                .fontWeight(.semibold)
+                .fixedSize()
+                .frame(minWidth: 36)
+                .padding(.horizontal, 6)
+                .frame(height: 28)
+                .background(Soot.lime.opacity(0.12), in: RoundedRectangle(cornerRadius: 6))
+                .overlay(RoundedRectangle(cornerRadius: 6)
+                    .strokeBorder(focused ? Soot.lime : Soot.edge, lineWidth: focused ? 2 : 1))
+                .focused($focused)
+                .accessibilityLabel("Slack channel prefix")
+                .accessibilityHint("Channels starting with it are offered at import")
+            Text(Naming.slug("Acme website")).foregroundStyle(Soot.ink).padding(.leading, 2)
+                .accessibilityHidden(true)
+            Spacer(minLength: 0)
+        }
+        .font(.system(size: 15, design: .monospaced))
+        .padding(.horizontal, 12)
+        .frame(height: 44)
+        .background(Soot.ground, in: RoundedRectangle(cornerRadius: Soot.fieldRadius))
+        .contentShape(Rectangle())
+        .onTapGesture { focused = true }
+    }
+
+    @ViewBuilder private var matchesView: some View {
+        if app.slack == nil {
+            Text("Connect Slack to see which of your channels match")
+                .font(.system(size: 12)).foregroundStyle(Soot.muted)
+        } else if trimmed.isEmpty {
+            Text("No prefix: you pick project channels yourself when you import")
+                .font(.system(size: 12)).foregroundStyle(Soot.muted)
+        } else if channels == nil {
+            HStack(spacing: 6) {
+                ForEach([96, 120, 84], id: \.self) { Skeleton(width: CGFloat($0), height: 24, radius: 6) }
+            }
+            .accessibilityLabel("Loading your channels")
+        } else {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 6) {
+                    Text(matches.count, format: .number).fontWeight(.semibold).foregroundStyle(Soot.ink)
+                        .monospacedDigit().contentTransition(.numericText(value: Double(matches.count)))
+                    Text(matches.count == 1 ? "of your channels matches" : "of your channels match")
+                        .foregroundStyle(Soot.muted)
+                }
+                .font(.system(size: 12))
+                .motion(Motion.ui, fade: true, value: matches.count)
+                if !matches.isEmpty {
+                    HStack(spacing: 6) {
+                        ForEach(matches.prefix(4), id: \.self) { ChannelChip(name: $0, prefix: trimmed) }
+                        if matches.count > 4 {
+                            Text("+\(matches.count - 4)").font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(Soot.muted).padding(.leading, 2)
+                        }
+                    }
+                } else {
+                    Text("None of the channels you're in start with \(trimmed)")
+                        .font(.system(size: 12)).foregroundStyle(Soot.muted)
+                }
+            }
+            .accessibilityElement(children: .combine)
+        }
+    }
+
+    /// The channels the user is in, once per workspace.
+    private func load() async {
+        guard app.slack != nil else { channels = nil; return }
+        if let list = try? await app.withSlack({ try await $0.channels() }) {
+            channels = list.filter { $0.is_member == true }.map(\.name)
+        } else {
+            channels = []
+        }
+    }
+}
+
+/// A real channel, its prefix in lime.
+private struct ChannelChip: View {
+    let name: String
+    let prefix: String
+    var body: some View {
+        (Text("#").foregroundStyle(Soot.muted)
+         + Text(prefix).foregroundStyle(Soot.lime).fontWeight(.semibold)
+         + Text(String(name.dropFirst(prefix.count))).foregroundStyle(Soot.ink))
+            .font(.system(size: 12))
+            .lineLimit(1)
+            .padding(.horizontal, 8)
+            .frame(height: 24)
+            .background(Soot.ground, in: RoundedRectangle(cornerRadius: 6))
+            .help("#\(name)")
     }
 }
 
@@ -277,12 +451,20 @@ private struct ServiceRow: View {
     @EnvironmentObject var app: AppState
     let service: ServiceKind
     @ObservedObject var flow: ConnectFlow
+    @Binding var menu: ServiceKind?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var hovering = false
     @State private var confirmDisconnect = false
     @State private var profile: AccountProfile?
     /// The last health check: nil while unchecked or fine.
     @State private var trouble: ServiceState?
+    @State private var checking = false
+    @State private var lastChecked: Date?
+
+    private var menuOpen: Bool { menu == service }
+    /// Snapshots: DEVER_SNAPSHOT_ACCOUNT_MENU=slack opens that row's status menu.
+    private var snapshotMenu: Bool { ProcessInfo.processInfo.environment["DEVER_SNAPSHOT_ACCOUNT_MENU"] == service.rawValue }
+    private func setMenu(_ open: Bool) { Motion.run(Motion.ui, fade: true) { menu = open ? service : nil } }
 
     private var connected: Bool { app.isConnected(service) }
     private var expired: Bool { app.expired.contains(service) }
@@ -312,7 +494,6 @@ private struct ServiceRow: View {
                 .frame(width: 64, alignment: .leading)
             account
             Spacer(minLength: 12)
-            stateGlyph
             action
         }
         .padding(.horizontal, 16)
@@ -326,12 +507,22 @@ private struct ServiceRow: View {
             .opacity(connected ? 0 : 1))
         .overlay(alignment: .bottom) { if running { WaitingLine().transition(.opacity) } }
         .clipShape(RoundedRectangle(cornerRadius: 12))
+        // The status menu hangs from the row's trailing edge, over the rows below.
+        .overlay(alignment: .topTrailing) {
+            if menuOpen {
+                statusMenu
+                    .offset(x: -16, y: 64 - 8)
+                    .transition(Motion.pop.combined(with: .offset(y: Motion.reduced ? 0 : -4)))
+            }
+        }
+        .zIndex(menuOpen ? 2 : 0)
         .animation(.easeOut(duration: 0.2), value: connected)
         .animation(.easeOut(duration: 0.2), value: running)
         .onHover { hovering = $0 }
         .accessibilityElement(children: .contain)
         .accessibilityLabel(accessibleSummary)
-        .task(id: connectionKey) { await loadProfile() }
+        .task(id: connectionKey) { await check() }
+        .onAppear { if snapshotMenu { DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { setMenu(true) } } }
         .confirmationDialog("Disconnect \(service.label)?", isPresented: $confirmDisconnect) {
             Button("Disconnect \(service.label)", role: .destructive) { trouble = nil; app.disconnect(service) }
             Button("Cancel", role: .cancel) {}
@@ -429,12 +620,10 @@ private struct ServiceRow: View {
         } else if expired {
             HStack(spacing: 10) {
                 Button("Reconnect") { flow.start(service, app: app) }.buttonStyle(LimeButton())
-                Button("Disconnect") { confirmDisconnect = true }.buttonStyle(QuietButton())
-                    .accessibilityLabel("Disconnect \(service.label)")
+                statusTrigger
             }
         } else if connected {
-            Button("Disconnect") { confirmDisconnect = true }.buttonStyle(QuietButton())
-                .accessibilityLabel("Disconnect \(service.label)")
+            statusTrigger
         } else {
             HStack(spacing: 10) {
                 if let error = flow.error, error.service == service {
@@ -446,6 +635,90 @@ private struct ServiceRow: View {
                     .help(service == .github ? "Sign in with a code on github.com" : "Approve Dever in your browser")
             }
         }
+    }
+
+    // MARK: Status menu
+
+    /// The state in a few words, for the menu's head and the trigger's name.
+    private var statusTitle: String {
+        if expired { return "Session expired" }
+        switch trouble {
+        case .offline: return "You're offline"
+        case .failed: return "Can't reach \(service.label)"
+        default: return "Connected and working"
+        }
+    }
+
+    /// What the state means, in one or two lines.
+    private var statusDetail: String {
+        if expired { return "\(service.label) rejected the token. Reconnect to keep reading it." }
+        switch trouble {
+        case .offline: return "The token is fine; \(service.label) comes back with the network."
+        case .failed(let message): return message
+        default:
+            let when = lastChecked.map { $0.formatted(.relative(presentation: .named)) } ?? "not yet"
+            return "\(service.label) answered \(when). The token stays in your Keychain."
+        }
+    }
+
+    /// The state glyph and a chevron, on a small tile: opens the status menu.
+    private var statusTrigger: some View {
+        Button { setMenu(!menuOpen) } label: {
+            HStack(spacing: 6) {
+                stateGlyph
+                Image(systemName: "chevron.down").font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(Soot.muted)
+                    .rotationEffect(.degrees(menuOpen ? 180 : 0))
+                    .motion(Motion.ui, value: menuOpen)
+            }
+            .padding(.horizontal, 10)
+            .frame(height: 32)
+            .background(Soot.ground.opacity(menuOpen ? 1 : 0.7), in: RoundedRectangle(cornerRadius: Soot.radius))
+            .contentShape(RoundedRectangle(cornerRadius: Soot.radius))
+        }
+        .buttonStyle(.plain)
+        .modifier(FocusOutline(radius: Soot.radius))
+        .handCursor()
+        .help(statusTitle)
+        .accessibilityLabel("\(service.label) status: \(statusTitle)")
+        .accessibilityHint("Shows the status, Check status and Disconnect")
+        .accessibilityAddTraits(menuOpen ? .isSelected : [])
+    }
+
+    /// The menu: what the glyph means in words, then Check status and Disconnect.
+    private var statusMenu: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(alignment: .top, spacing: 10) {
+                stateGlyph.frame(width: 20, height: 20)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(statusTitle).font(.system(size: 14, weight: .semibold)).foregroundStyle(Soot.ink)
+                    Text(statusDetail).font(.system(size: 12)).foregroundStyle(Soot.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .padding(.horizontal, 10)
+            .padding(.top, 8)
+            .padding(.bottom, 8)
+            .accessibilityElement(children: .combine)
+            Rectangle().fill(Soot.line).frame(height: 1).padding(.horizontal, 6).padding(.bottom, 4)
+            StatusMenuRow(symbol: "arrow.clockwise", title: checking ? "Checking…" : "Check status",
+                          detail: "Ask \(service.label) now", busy: checking) {
+                Task { await check() }
+            }
+            .disabled(checking)
+            StatusMenuRow(symbol: "xmark.circle", title: "Disconnect", detail: "Projects and links are kept",
+                          destructive: true) {
+                setMenu(false)
+                confirmDisconnect = true
+            }
+        }
+        .padding(8)
+        .frame(width: 300)
+        .background(Soot.ground, in: RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Soot.line))
+        .shadow(color: .black.opacity(0.28), radius: 18, y: 8)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("\(service.label) status")
     }
 
     private var linearAuthorizer: ImageCache.Authorizer? {
@@ -464,6 +737,13 @@ private struct ServiceRow: View {
 
     /// The account behind the token: what the credentials already know first, then the
     /// cheapest call that needs the token, which doubles as the health check.
+    /// The health check: loads the profile, notes when, and never shows a spinner.
+    private func check() async {
+        checking = true
+        defer { checking = false; lastChecked = Date() }
+        await loadProfile()
+    }
+
     private func loadProfile() async {
         trouble = nil
         guard connected else { profile = nil; return }

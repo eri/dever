@@ -123,3 +123,35 @@ Settings is an *occasional* surface (opened a few times a week), so it earns sta
 
 Highest-leverage next change: the panel-content fade on the project page (above), which every open of a
 project would feel.
+
+## Follow-up: account actions and the channel prefix
+
+### Account rows
+
+The 36px "Disconnect" button was the loudest thing on a row whose job is to say "this works". It moves
+into a menu, in the overview's "Add many" menu style: soot ground, 12pt radius, hairline edge, shadow.
+The trigger is the state glyph with a chevron. The menu's head says what the glyph means ("Connected and
+working", "Linear answered 1 second ago. The token stays in your Keychain"). Under it are **Check status**
+and **Disconnect**, which keeps its confirmation. Checking runs the lime line along the row's foot, never
+a spinner. Reconnect stays outside the menu, as the one lime action, when a session expired.
+
+### Channel prefix (better-interface + superfuture critique)
+
+Before: a "Slack channel prefix" row with a 140px field top-right. Under it was a two-column example of
+invented channels (`#23-checkout → Checkout`, `#general` greyed) with arrows.
+
+| Severity | Domain | Location | Before | After | Why |
+| --- | --- | --- | --- | --- | --- |
+| HIGH | Writing | `SettingsView.swift`, the prefix row's detail | "Channels that start with it become projects" | "Import offers the channels that start with this; new ones are named the same way" | The prefix only filters what Import offers and names new channels (`ProjectSetupViews.swift:515`, `:743`, `:511`). Nothing becomes a project by itself, so the sentence misled |
+| HIGH | Layout | the prefix row | Field top-right, its effect bottom-left, about 600pt apart | The field is the start of a channel name: `# [23-] acme-website` | The control and what it changes must touch. The eye crossed the card twice to connect them |
+| MEDIUM | Writing | the example | Invented channels and projects | The user's real channels that match, prefix in lime, with a live count ("8 of your channels match", rolling) and `+N` past four | Made-up data reads as decoration; real channels answer "is my prefix right?" at a glance |
+| MEDIUM | Colors | `#general` greyed as "not a project" | Meaning carried by dimming alone | Only matching channels are listed; the count states the rest | 1.4.1: a grey row is not a statement |
+| LOW | Layout | the example's arrows | Floating arrows across a 140pt gap with no shared edge | Removed | Delete before adding: the composer already shows the mapping |
+
+States: Slack not connected says "Connect Slack to see which of your channels match". An empty prefix says
+"you pick project channels yourself when you import". While channels load, three skeleton chips show. No
+match says so in words.
+
+Superfuture rubric: one focal point (the composer, the only lime field), the scan path follows it (title,
+composer, proof), and no number is invented. The field keeps a 2px lime edge when focused, and its
+accessible name is "Slack channel prefix".
