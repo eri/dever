@@ -241,7 +241,7 @@ private struct AccountsSection: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            SectionHead(title: "Accounts", detail: "\(connected) of 3 connected · tokens stay in your Keychain")
+            SectionHead(title: "Accounts", detail: "\(connected) of 3 connected · Tokens stay in your Keychain and never leave your device")
             VStack(spacing: 8) {
                 ForEach(ServiceKind.allCases) { ServiceRow(service: $0, flow: flow, menu: $menu) }
             }
@@ -320,14 +320,9 @@ private struct ChannelPrefixCard: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Project channels").font(.system(size: 14, weight: .medium)).foregroundStyle(Soot.ink)
-                    .accessibilityAddTraits(.isHeader)
-                Text("Import offers the channels that start with this; new ones are named the same way")
-                    .font(.system(size: 12)).foregroundStyle(Soot.muted)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Slack channel prefix").font(.system(size: 14, weight: .medium)).foregroundStyle(Soot.ink)
+                .accessibilityAddTraits(.isHeader)
             composer
             matchesView
         }
@@ -368,43 +363,27 @@ private struct ChannelPrefixCard: View {
         .onTapGesture { focused = true }
     }
 
+    /// One quiet line: how many of your channels the prefix finds (their names in the tooltip).
     @ViewBuilder private var matchesView: some View {
-        if app.slack == nil {
-            Text("Connect Slack to see which of your channels match")
-                .font(.system(size: 12)).foregroundStyle(Soot.muted)
-        } else if trimmed.isEmpty {
-            Text("No prefix: you pick project channels yourself when you import")
-                .font(.system(size: 12)).foregroundStyle(Soot.muted)
-        } else if channels == nil {
-            HStack(spacing: 6) {
-                ForEach([96, 120, 84], id: \.self) { Skeleton(width: CGFloat($0), height: 24, radius: 6) }
-            }
-            .accessibilityLabel("Loading your channels")
-        } else {
-            VStack(alignment: .leading, spacing: 8) {
-                HStack(spacing: 6) {
-                    Text(matches.count, format: .number).fontWeight(.semibold).foregroundStyle(Soot.ink)
-                        .monospacedDigit().contentTransition(.numericText(value: Double(matches.count)))
-                    Text(matches.count == 1 ? "of your channels matches" : "of your channels match")
-                        .foregroundStyle(Soot.muted)
+        Group {
+            if app.slack == nil {
+                Text("Connect Slack to see which channels match")
+            } else if trimmed.isEmpty {
+                Text("No prefix: you pick channels when you import")
+            } else if channels == nil {
+                Skeleton(width: 140, height: 10)
+            } else {
+                HStack(spacing: 4) {
+                    Text(matches.count, format: .number).foregroundStyle(Soot.ink).monospacedDigit()
+                        .contentTransition(.numericText(value: Double(matches.count)))
+                    Text(matches.count == 1 ? "channel matches" : "channels match")
                 }
-                .font(.system(size: 12))
                 .motion(Motion.ui, fade: true, value: matches.count)
-                if !matches.isEmpty {
-                    HStack(spacing: 6) {
-                        ForEach(matches.prefix(4), id: \.self) { ChannelChip(name: $0, prefix: trimmed) }
-                        if matches.count > 4 {
-                            Text("+\(matches.count - 4)").font(.system(size: 12, weight: .semibold))
-                                .foregroundStyle(Soot.muted).padding(.leading, 2)
-                        }
-                    }
-                } else {
-                    Text("None of the channels you're in start with \(trimmed)")
-                        .font(.system(size: 12)).foregroundStyle(Soot.muted)
-                }
+                .help(matches.map { "#" + $0 }.joined(separator: "\n"))
             }
-            .accessibilityElement(children: .combine)
         }
+        .font(.system(size: 12)).foregroundStyle(Soot.muted)
+        .padding(.leading, 2)
     }
 
     /// The channels the user is in, once per workspace.
@@ -415,23 +394,6 @@ private struct ChannelPrefixCard: View {
         } else {
             channels = []
         }
-    }
-}
-
-/// A real channel, its prefix in lime.
-private struct ChannelChip: View {
-    let name: String
-    let prefix: String
-    var body: some View {
-        (Text("#").foregroundStyle(Soot.muted)
-         + Text(prefix).foregroundStyle(Soot.lime).fontWeight(.semibold)
-         + Text(String(name.dropFirst(prefix.count))).foregroundStyle(Soot.ink))
-            .font(.system(size: 12))
-            .lineLimit(1)
-            .padding(.horizontal, 8)
-            .frame(height: 24)
-            .background(Soot.ground, in: RoundedRectangle(cornerRadius: 6))
-            .help("#\(name)")
     }
 }
 
@@ -657,7 +619,7 @@ private struct ServiceRow: View {
         case .failed(let message): return message
         default:
             let when = lastChecked.map { $0.formatted(.relative(presentation: .named)) } ?? "not yet"
-            return "\(service.label) answered \(when). The token stays in your Keychain."
+            return "\(service.label) answered \(when)."
         }
     }
 
