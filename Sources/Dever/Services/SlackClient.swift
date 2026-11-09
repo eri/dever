@@ -140,6 +140,8 @@ struct SlackRichElement: Codable {
     var url: String?
     var user_id: String?
     var channel_id: String?
+    var author_id: String?
+    var message_ts: String?
     var name: String?
     var unicode: String?
     var range: String?
@@ -151,7 +153,7 @@ struct SlackRichElement: Codable {
     var listStyle: String?
 
     private enum CodingKeys: String, CodingKey {
-        case type, text, url, user_id, channel_id, name, unicode, range, style, elements, indent, border
+        case type, text, url, user_id, channel_id, author_id, message_ts, name, unicode, range, style, elements, indent, border
     }
 
     init(from decoder: Decoder) throws {
@@ -161,6 +163,8 @@ struct SlackRichElement: Codable {
         url = try c.decodeIfPresent(String.self, forKey: .url)
         user_id = try c.decodeIfPresent(String.self, forKey: .user_id)
         channel_id = try c.decodeIfPresent(String.self, forKey: .channel_id)
+        author_id = try c.decodeIfPresent(String.self, forKey: .author_id)
+        message_ts = try c.decodeIfPresent(String.self, forKey: .message_ts)
         name = try c.decodeIfPresent(String.self, forKey: .name)
         unicode = try c.decodeIfPresent(String.self, forKey: .unicode)
         range = try c.decodeIfPresent(String.self, forKey: .range)

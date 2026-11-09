@@ -699,6 +699,7 @@ struct ProjectDetailView: View {
                 SlackThreadView(messages: messages, users: users, domain: app.slack?.domain,
                                 channelID: project.slack?.id, channelName: project.slack?.name,
                                 shown: shownMessages, railMessages: railPlan.messages, readUpTo: lastRead,
+                                railCaughtUp: railPlan.caughtUp,
                                 onSeen: { seen($0) }, roomMounted: roomMounted,
                                 hasEarlier: hasEarlier, loadingEarlier: loadingEarlier,
                                 wide: slackExpanded, widths: (rail: railWidth, wide: wideWidth),
@@ -843,7 +844,7 @@ struct ProjectDetailView: View {
         if slackExpanded { return "Conversation" }
         if !loaded { return "Latest messages" }
         let plan = railPlan
-        if plan.caughtUp { return "All caught up" }
+        if plan.caughtUp { return "Nothing new" }
         if let since = plan.quietSince {
             return "Quiet since \(since.formatted(.relative(presentation: .named)))"
         }

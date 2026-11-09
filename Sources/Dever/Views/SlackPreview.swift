@@ -178,10 +178,11 @@ struct RichTextLabel: NSViewRepresentable {
 
     /// SwiftUI's presentation intents and colours turned into AppKit fonts and attributes.
     /// The SF Symbol "link" as an inline attachment, lime, sized to the text.
-    static func linkGlyph(size: CGFloat) -> NSTextAttachment? {
+    static func linkGlyph(size: CGFloat, symbol: String = "link") -> NSTextAttachment? {
         let config = NSImage.SymbolConfiguration(pointSize: size * 0.82, weight: .semibold)
             .applying(.init(paletteColors: [NSColor(Soot.lime)]))
-        guard let image = NSImage(systemSymbolName: "link", accessibilityDescription: "Link")?.withSymbolConfiguration(config) else { return nil }
+        guard let image = NSImage(systemSymbolName: symbol, accessibilityDescription: symbol == "link" ? "Link" : "Slack message")?
+            .withSymbolConfiguration(config) else { return nil }
         let attachment = NSTextAttachment()
         attachment.image = image
         attachment.bounds = CGRect(x: 0, y: -1, width: image.size.width, height: image.size.height)
@@ -219,7 +220,8 @@ struct RichTextLabel: NSViewRepresentable {
                 attrs[.backgroundColor] = nil
                 attrs[.cursor] = NSCursor.pointingHand
                 // A bare URL (a chip) leads with a small link glyph instead of a highlight.
-                if piece.hasPrefix("\u{2009}"), let glyph = linkGlyph(size: size) {
+                let isMessage = piece.hasPrefix("\u{200A}")
+                if piece.hasPrefix("\u{2009}") || isMessage, let glyph = linkGlyph(size: size, symbol: isMessage ? "bubble.left.fill" : "link") {
                     // A faint wash of the link colour sets the URL apart without shouting.
                     // The chip wraps as one block: narrow no-break spaces around it, no-break hyphens
                     // and word joiners inside, so a line never ends on "pr-4714-".
@@ -230,7 +232,7 @@ struct RichTextLabel: NSViewRepresentable {
                                        range: NSRange(location: 0, length: icon.length))
                     out.append(icon)
                     out.append(NSAttributedString(string: "\u{202F}", attributes: attrs))
-                    let label = piece.trimmingCharacters(in: CharacterSet(charactersIn: "\u{2009}"))
+                    let label = piece.trimmingCharacters(in: CharacterSet(charactersIn: "\u{2009}\u{200A}"))
                         .replacingOccurrences(of: "-", with: "\u{2011}")
                         .replacingOccurrences(of: "/", with: "/\u{2060}")
                         .replacingOccurrences(of: ".", with: ".\u{2060}")

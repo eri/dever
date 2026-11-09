@@ -7,6 +7,9 @@ enum SlackMarkup {
         var text = decodeEntities(raw)
         // Slack quotes ("&gt; " at a line start) become a bar, as in Slack.
         text = text.replacingOccurrences(of: #"(?m)^(\x{E001}|>) ?"#, with: "▍ ", options: .regularExpression)
+        // A URL Slack left bare (pasted inside parentheses, say) gets the same chip as a <url>.
+        text = text.replacingOccurrences(of: #"(?<![<\w/=\x{E000}])(https?://[^\s<>|\x{E000}\x{E001}]+?)(?=[),.;!?»]*(?:\s|$))"#,
+                                         with: "<$1>", options: .regularExpression)
         text = replaceTokens(in: text, users: users, channels: channels)
         text = replaceEmoji(in: text)
         // Slack's *bold*, _italic_, ~strike~ map onto Markdown; `code` is the same in both.
@@ -158,11 +161,38 @@ extension SlackMessage {
 /// Bare URLs read badly in a narrow column. They become a chip: a short label on a lime wash,
 /// and a Slack permalink says what it is ("Message in #channel") instead of showing its path.
 enum SlackLinks {
-    /// Thin spaces mark a chip label, so the style pass finds it after Markdown parsing.
+    /// Thin spaces mark a chip label, so the style pass finds it after Markdown parsing;
+    /// hair spaces mark a Slack message chip, drawn with a speech bubble instead of a link glyph.
     private static let mark = "\u{2009}"
+    static let messageMark = "\u{200A}"
+
+    static func isPermalink(_ url: String) -> Bool {
+        url.range(of: #"slack\.com/archives/[A-Z0-9]+/p\d+"#, options: .regularExpression) != nil
+    }
+
+    /// "Estelle in #23-ai-tips" for a Slack message, from what the element or the URL tells.
+    static func messageLabel(url: String, author: String?, channelID: String?, channels: [String: String]) -> String {
+        let id = channelID ?? url.range(of: #"archives/([A-Z0-9]+)/"#, options: .regularExpression)
+            .map { String(url[$0]).split(separator: "/")[1] }.map(String.init)
+        let channel = id.flatMap { channels[$0] }.map { "#\($0)" }
+        switch (author, channel) {
+        case let (a?, c?): return "\(a) in \(c)"
+        case let (a?, nil): return "\(a)'s message"
+        case let (nil, c?): return "Message in \(c)"
+        default: return "Slack message"
+        }
+    }
+
+    static func messageChip(_ url: URL, label: String) -> AttributedString {
+        var s = AttributedString(messageMark + label + messageMark)
+        s.link = url
+        style(&s)
+        return s
+    }
 
     static func chipLabel(_ url: String, channels: [String: String]) -> String {
-        mark + plainLabel(url, channels: channels) + mark
+        if isPermalink(url) { return messageMark + messageLabel(url: url, author: nil, channelID: nil, channels: channels) + messageMark }
+        return mark + plainLabel(url, channels: channels) + mark
     }
 
     static func plainLabel(_ url: String, channels: [String: String]) -> String {
@@ -203,7 +233,7 @@ enum SlackLinks {
     static func styleChips(in text: inout AttributedString) {
         for run in text.runs where run.link != nil {
             let piece = String(text[run.range].characters)
-            if piece.hasPrefix(mark) && piece.hasSuffix(mark) {
+            if (piece.hasPrefix(mark) && piece.hasSuffix(mark)) || (piece.hasPrefix(messageMark) && piece.hasSuffix(messageMark)) {
                 var chip = AttributedString(text[run.range])
                 style(&chip)
                 text.replaceSubrange(run.range, with: chip)
@@ -293,6 +323,12 @@ enum SlackRichText {
         case "broadcast":
             s = AttributedString("@" + (leaf.range ?? "here"))
             s.inlinePresentationIntent = .stronglyEmphasized
+        case "message_mention":
+            // A Slack message linked in the text: "Estelle in #23-ai-tips", as Slack draws it.
+            let urlString = leaf.url ?? leaf.text ?? ""
+            let label = SlackLinks.messageLabel(url: urlString, author: leaf.author_id.flatMap { users[$0]?.name },
+                                                channelID: leaf.channel_id, channels: channels)
+            if let url = URL(string: urlString) { s = SlackLinks.messageChip(url, label: label) } else { s = AttributedString(label) }
         case "emoji":
             s = AttributedString(leaf.unicode.flatMap(emoji) ?? leaf.name.flatMap(SlackMarkup.unicode) ?? "")
         default:
@@ -358,6 +394,9 @@ struct SlackThreadView: View {
     var railMessages: [SlackMessage]?
     /// Slack's read cursor: messages up to it are read. Nil while unknown.
     var readUpTo: String?
+    /// Nothing unread: the rail says so instead of listing messages.
+    var railCaughtUp = false
+    @State private var railContentHeight: CGFloat = 0
     /// Called from the room with the `ts` of a message that has stayed on screen for a moment.
     var onSeen: ((String) -> Void)?
     /// The room is built only once the panel has grown: the click itself only moves the frame,
@@ -396,6 +435,9 @@ struct SlackThreadView: View {
         return [channelID: channelName]
     }
 
+    /// The rail stops growing here and scrolls instead: about six messages' worth.
+    static let railMaxHeight: CGFloat = 560
+
 
     /// The thread beside the room opens, closes or changes in one movement: slides in from
     /// the right over the aside, cross-fades to another thread, slides back out.
@@ -412,9 +454,18 @@ struct SlackThreadView: View {
         // and closing only change its opacity. Its skeleton covers the first build.
         ZStack(alignment: .topLeading) {
             // The rail's list stays mounted too, at its width and height, faded while the room is open.
-            list(wide: false).frame(width: widths?.rail, alignment: .leading)
-                .fixedSize(horizontal: false, vertical: true)
-                .frame(height: wide ? 0 : nil, alignment: .top)
+            // It grows with its messages up to a cap, then scrolls inside, opened on the latest.
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    list(wide: false)
+                    Color.clear.frame(height: 1).background(OverlayScrollers())
+                }
+                .onGeometryChange(for: CGFloat.self, of: { $0.size.height }) { railContentHeight = $0 }
+            }
+            .defaultScrollAnchor(.bottom)
+            .scrollBounceBehavior(.basedOnSize)
+            .frame(width: widths?.rail, alignment: .leading)
+            .frame(height: wide ? 0 : min(max(railContentHeight, 1), Self.railMaxHeight), alignment: .top)
                 .opacity(wide ? 0 : 1)
                 .allowsHitTesting(!wide)
                 .accessibilityHidden(wide)
@@ -536,6 +587,16 @@ struct SlackThreadView: View {
         let shown = wide ? self.shown : (railShown ?? self.shown)
         let visible = Array(((wide ? nil : railMessages) ?? Array(messages.prefix(shown))).reversed())
         return VStack(alignment: .leading, spacing: 0) {
+            if !wide, railCaughtUp {
+                CaughtUp(channelName: channelName, last: messages.first, users: users, expand: expand)
+            } else {
+            railList(wide: wide, shown: shown, visible: visible)
+            }
+        }
+    }
+
+    private func railList(wide: Bool, shown: Int, visible: [SlackMessage]) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
             if wide, hasEarlier || messages.count > shown {
                 Group {
                     if loadingEarlier {
@@ -596,6 +657,51 @@ struct SlackThreadView: View {
     private func permalink(_ m: SlackMessage) -> URL? {
         guard let domain, let channelID else { return nil }
         return URL(string: "https://\(domain).slack.com/archives/\(channelID)/p\(m.ts.replacingOccurrences(of: ".", with: ""))")
+    }
+}
+
+/// The rail when nothing is unread: one clear mark, when the channel last spoke, a way in.
+private struct CaughtUp: View {
+    let channelName: String?
+    let last: SlackMessage?
+    let users: [String: SlackUser]
+    let expand: (() -> Void)?
+
+    var body: some View {
+        VStack(spacing: 10) {
+            ZStack {
+                Circle().fill(Soot.lime.opacity(0.16)).frame(width: 52, height: 52)
+                Circle().fill(Soot.lime).frame(width: 34, height: 34)
+                Image(systemName: "checkmark").font(.system(size: 15, weight: .bold)).foregroundStyle(Soot.limeInk)
+            }
+            .padding(.top, 10)
+            .accessibilityHidden(true)
+            Text("You're all caught up").font(.system(size: 15, weight: .semibold)).foregroundStyle(Soot.ink)
+            if let last {
+                let who = last.user.flatMap { users[$0]?.name }
+                Text("Last message \(last.date.formatted(.relative(presentation: .named)))\(who.map { " by \($0)" } ?? "")\(channelName.map { " in #\($0)" } ?? "")")
+                    .font(.system(size: 12)).foregroundStyle(Soot.muted)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if let expand {
+                Button(action: expand) {
+                    HStack(spacing: 6) {
+                        Text("Read the conversation")
+                        Image(systemName: "arrow.up.left.and.arrow.down.right").font(.system(size: 10, weight: .semibold))
+                    }
+                }
+                .buttonStyle(PressButton())
+                .handCursor()
+                .font(.system(size: 13, weight: .semibold)).foregroundStyle(Soot.lime)
+                .padding(.top, 6)
+                .modifier(FocusOutline(radius: 4))
+                .help("Read the whole conversation (⌘⇧E)")
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 18)
+        .accessibilityElement(children: .combine)
     }
 }
 
