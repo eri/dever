@@ -20,6 +20,8 @@ struct IssueDetailView: View {
     /// Set by the blocked-by chip: scrolls to Linked issues and outlines it for a moment.
     @State private var linksJump = 0
     @State private var linksHighlighted = false
+    @State private var linksExpanded = false
+    @State private var labelsExpanded = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private let measure: CGFloat = 680   // about 70 characters at 15pt, padding included
@@ -192,19 +194,19 @@ struct IssueDetailView: View {
         let number = String(pull.ref.number)
         let title = PullTitle.split(pull.ref.title).title
         return HStack(alignment: .center, spacing: 14) {
-            Image(systemName: "arrow.triangle.merge")
-                .font(.system(size: 15, weight: .bold))
-                .foregroundStyle(Soot.limeInk)
+            MergeGlyph()
+                .stroke(Soot.limeInk, style: StrokeStyle(lineWidth: 2.4, lineCap: .round, lineJoin: .round))
+                .frame(width: 16, height: 18)
                 .frame(width: 34, height: 34)
                 .background(Soot.lime, in: Circle())
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 3) {
-                Text(verbatim: "Merged")
+                Text(verbatim: done ? "Merged and shipped" : "Merged")
                     .font(.system(size: 15, weight: .semibold)).foregroundStyle(Soot.ink)
-                Text(verbatim: done ? "Shipped with pull request #\(number), \u{201C}\(title)\u{201D}."
-                              : "This issue seems to be merged already by the PR #\(number), \u{201C}\(title)\u{201D}.")
+                Text(verbatim: "PR #\(number) · \(title)")
                     .font(.system(size: 14)).foregroundStyle(Soot.muted)
-                    .fixedSize(horizontal: false, vertical: true)
+                    .lineLimit(1)
+                    .help("Pull request #\(number): \(title)")
             }
             Spacer(minLength: 16)
             HoverLink(destination: pull.url) {
@@ -254,14 +256,14 @@ struct IssueDetailView: View {
             card(symbol: "doc.text", title: "Description") {
                 description(d)
             }
+            card(symbol: "bubble.left.and.bubble.right", title: "Activity") {
+                activity(d)
+            }
             linksCard(d)
                 .id("links")
                 .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Soot.lime, lineWidth: 2).opacity(linksHighlighted ? 1 : 0))
                 .background(Soot.lime.opacity(linksHighlighted ? 0.06 : 0), in: RoundedRectangle(cornerRadius: 12))
             attachmentsCard(d)
-            card(symbol: "bubble.left.and.bubble.right", title: "Activity") {
-                activity(d)
-            }
         }
     }
 
@@ -273,8 +275,25 @@ struct IssueDetailView: View {
             card(symbol: "info.circle", title: "Details") {
                 VStack(alignment: .leading, spacing: 0) {
                     if !current.labelList.isEmpty {
+                        let labels = current.labelList
+                        let shown = labelsExpanded ? labels : Array(labels.prefix(2))
                         detailRow(symbol: "tag", label: "Labels") {
-                            FlowRow(spacing: 4) { ForEach(current.labelList) { LabelPill(label: $0) } }
+                            FlowRow(spacing: 4) {
+                                ForEach(shown) { LabelPill(label: $0) }
+                                if labels.count > 2 {
+                                    Button(labelsExpanded ? "Less" : "+\(labels.count - 2)") { labelsExpanded.toggle() }
+                                        .buttonStyle(.plain)
+                                        .font(.system(size: 11, weight: .semibold))
+                                        .foregroundStyle(Soot.ink)
+                                        .padding(.horizontal, 7)
+                                        .frame(height: 20)
+                                        .overlay(Capsule().strokeBorder(Soot.edge))
+                                        .contentShape(Capsule())
+                                        .modifier(FocusOutline(radius: 10))
+                                        .help(labelsExpanded ? "Show fewer labels" : labels.dropFirst(2).map(\.name).joined(separator: ", "))
+                                        .accessibilityLabel(labelsExpanded ? "Show fewer labels" : "Show \(labels.count - 2) more labels")
+                                }
+                            }
                         }
                     }
                     if let e = d.estimate { detailRow(symbol: "scalemass", label: "Estimate", value: e.formatted() + (e == 1 ? " point" : " points")) }
@@ -286,8 +305,8 @@ struct IssueDetailView: View {
                             CopyChip(value: branch, what: "branch name", maxWidth: 190)
                         }
                     }
-                    detailRow(symbol: "clock", label: "Created", value: LinearDate.short(d.createdAt) ?? "")
-                    detailRow(symbol: "clock.arrow.circlepath", label: "Updated", value: LinearDate.relative(current.updatedAt) ?? "")
+                    detailRow(symbol: "clock", label: "Created", value: LinearDate.dayAndAge(d.createdAt) ?? "")
+                    detailRow(symbol: "clock.arrow.circlepath", label: "Updated", value: LinearDate.dayAndAge(current.updatedAt) ?? "")
                 }
             }
         }
@@ -468,16 +487,28 @@ struct IssueDetailView: View {
             ("lock", "Blocks", d.blocks),
             ("link", "Related", d.related),
         ].filter { !$0.2.isEmpty }
+        let total = groups.reduce(0) { $0 + $1.2.count }
+        let cap = 5
+        // Five rows across the groups, in order; the rest behind "Show all".
+        let visible: [(String, String, [LinearIssueDetail.Brief], Int)] = {
+            var budget = linksExpanded ? Int.max : cap
+            var out: [(String, String, [LinearIssueDetail.Brief], Int)] = []
+            for (symbol, title, briefs) in groups where budget > 0 {
+                out.append((symbol, title, Array(briefs.prefix(budget)), briefs.count))
+                budget -= min(budget, briefs.count)
+            }
+            return out
+        }()
         if !groups.isEmpty {
-            card(symbol: "point.3.connected.trianglepath.dotted", title: "Linked issues") {
+            card(symbol: "point.3.connected.trianglepath.dotted", title: "Linked issues", count: total) {
                 VStack(alignment: .leading, spacing: 16) {
-                    ForEach(groups, id: \.1) { symbol, title, briefs in
+                    ForEach(visible, id: \.1) { symbol, title, briefs, count in
                         VStack(alignment: .leading, spacing: 2) {
                             HStack(spacing: 6) {
                                 Image(systemName: symbol).font(.system(size: 11, weight: .semibold)).foregroundStyle(Soot.muted)
                                     .frame(width: 14).accessibilityHidden(true)
                                 Text(title).font(.system(size: 12, weight: .semibold)).foregroundStyle(Soot.muted)
-                                if briefs.count > 1 { Text("\(briefs.count)").font(.system(size: 12)).foregroundStyle(Soot.muted).monospacedDigit() }
+                                if count > 1 { Text("\(count)").font(.system(size: 12)).foregroundStyle(Soot.muted).monospacedDigit() }
                             }
                             .padding(.leading, 12)
                             .padding(.bottom, 4)
@@ -504,6 +535,9 @@ struct IssueDetailView: View {
                                 .accessibilityLabel("\(b.identifier), \(b.title), \(b.state.name)")
                             }
                         }
+                    }
+                    if total > cap {
+                        ShowAllButton(count: total, expanded: $linksExpanded).padding(.top, -8)
                     }
                 }
                 .padding(.horizontal, -8)
@@ -963,5 +997,24 @@ private struct RecentTime: View {
         }
         .help(LinearDate.parse(date)?.formatted(date: .abbreviated, time: .shortened) ?? "")
         .accessibilityLabel((LinearDate.relative(date) ?? "") + (recent ? ", recent" : ""))
+    }
+}
+
+/// A pull request merge drawn like GitHub's: two commits on a line, the branch curving into
+/// the third. Drawn rather than taken from SF Symbols, whose merge arrow is too thin at 16pt.
+struct MergeGlyph: Shape {
+    func path(in r: CGRect) -> Path {
+        var p = Path()
+        let d = min(r.width, r.height) * 0.28
+        let left = r.minX + d / 2 + 1, right = r.maxX - d / 2 - 1
+        let top = r.minY + d / 2 + 1, bottom = r.maxY - d / 2 - 1
+        p.addEllipse(in: CGRect(x: left - d / 2, y: top - d / 2, width: d, height: d))
+        p.addEllipse(in: CGRect(x: left - d / 2, y: bottom - d / 2, width: d, height: d))
+        p.addEllipse(in: CGRect(x: right - d / 2, y: r.midY + d * 0.3 - d / 2, width: d, height: d))
+        p.move(to: CGPoint(x: left, y: top + d / 2))
+        p.addLine(to: CGPoint(x: left, y: bottom - d / 2))
+        p.move(to: CGPoint(x: left, y: top + d / 2))
+        p.addQuadCurve(to: CGPoint(x: right - d / 2, y: r.midY + d * 0.3), control: CGPoint(x: left, y: r.midY + d * 0.3))
+        return p
     }
 }

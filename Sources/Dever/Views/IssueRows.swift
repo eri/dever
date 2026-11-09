@@ -187,6 +187,15 @@ enum LinearDate {
             : d.formatted(.dateTime.month(.abbreviated).day().year())
     }
 
+    /// "19 Oct (3 weeks ago)"; the year joins the day when it is not this year.
+    static func dayAndAge(_ s: String?) -> String? {
+        guard let d = parse(s), let day = short(s) else { return nil }
+        let f = RelativeDateTimeFormatter()
+        f.dateTimeStyle = .numeric
+        f.unitsStyle = .full
+        return "\(day) (\(f.localizedString(for: d, relativeTo: Date())))"
+    }
+
     static func relative(_ s: String?) -> String? {
         parse(s).map { $0.formatted(.relative(presentation: .named)) }
     }
