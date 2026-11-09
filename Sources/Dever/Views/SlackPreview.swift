@@ -51,24 +51,28 @@ struct FilePreviewSheet: View {
                 }
                 Spacer()
                 if let local {
-                    Button { save(local) } label: {
-                        HStack(spacing: 6) {
-                            Image(systemName: "square.and.arrow.down").font(.system(size: 11, weight: .semibold))
-                            Text("Save")
-                        }
-                        .font(.system(size: 13, weight: .semibold)).foregroundStyle(Soot.ink)
-                        .padding(.horizontal, 12).frame(height: 30)
-                        .background(Soot.surface, in: Capsule())
-                        .overlay(Capsule().strokeBorder(Soot.edge))
-                        .contentShape(Capsule())
-                    }
-                    .buttonStyle(.plain).handCursor()
-                    .modifier(FocusOutline(radius: 15))
-                    .help("Save a copy of the file")
+                    Button { save(local) } label: { Label("Save", systemImage: "square.and.arrow.down") }
+                        .buttonStyle(ToolbarButton())
+                        .help("Save a copy of the file")
                 }
                 if let url = file.permalink.flatMap(URL.init(string:)) {
-                    Link(destination: url) { HStack(spacing: 4) { Text("Open in Slack"); Image(systemName: "arrow.up.right") } }
-                        .handCursor().font(.system(size: 12, weight: .semibold)).foregroundStyle(Soot.lime)
+                    Menu {
+                        Link("Open in Slack", destination: url)
+                        Button("Copy link") {
+                            NSPasteboard.general.clearContents()
+                            NSPasteboard.general.setString(url.absoluteString, forType: .string)
+                        }
+                    } label: {
+                        Image(systemName: "ellipsis").font(.system(size: 13, weight: .semibold)).foregroundStyle(Soot.ink)
+                            .frame(width: 34, height: 34)
+                            .background(Soot.surface, in: RoundedRectangle(cornerRadius: Soot.radius))
+                    }
+                    .menuStyle(.borderlessButton)
+                    .menuIndicator(.hidden)
+                    .fixedSize()
+                    .handCursor()
+                    .modifier(FocusOutline(radius: Soot.radius))
+                    .accessibilityLabel("More actions")
                 }
                 Button(action: close) {
                     Image(systemName: "xmark").font(.system(size: 12, weight: .semibold)).foregroundStyle(Soot.ink)
@@ -304,22 +308,43 @@ struct ImagePreview: View {
     let url: URL
     let name: String
     @State private var image: NSImage?
+    /// 1 is the picture's own pixels; nil fits it to the window.
+    @State private var zoom: CGFloat?
+    @State private var pinchBase: CGFloat?
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private static let steps: [CGFloat] = [0.25, 0.5, 0.75, 1, 1.5, 2, 3, 4]
 
     var body: some View {
         GeometryReader { geo in
-            Group {
+            let fit = image.map { min(1, min((geo.size.width - 40) / $0.size.width, (geo.size.height - 40) / $0.size.height)) } ?? 1
+            let scale = zoom ?? fit
+            ZStack(alignment: .bottom) {
                 if let image {
-                    Image(nsImage: image).resizable().aspectRatio(contentMode: .fit)
-                        .frame(maxWidth: min(geo.size.width - 40, image.size.width), maxHeight: min(geo.size.height - 40, image.size.height))
-                        .clipShape(RoundedRectangle(cornerRadius: 6))
-                        .accessibilityLabel(name)
+                    let size = CGSize(width: image.size.width * scale, height: image.size.height * scale)
+                    ScrollView([.horizontal, .vertical]) {
+                        Image(nsImage: image).resizable().interpolation(.high)
+                            .frame(width: size.width, height: size.height)
+                            .clipShape(RoundedRectangle(cornerRadius: scale == fit ? 6 : 0))
+                            .accessibilityLabel(name)
+                            // Centred while it fits; scrolls once it is larger than the window.
+                            .frame(minWidth: geo.size.width, minHeight: geo.size.height - 56)
+                    }
+                    .scrollBounceBehavior(.basedOnSize)
+                    .onTapGesture(count: 2) { set(zoom == nil ? 1 : nil) }
+                    .gesture(MagnifyGesture().onChanged { value in
+                        if pinchBase == nil { pinchBase = scale }
+                        zoom = min(8, max(0.1, (pinchBase ?? scale) * value.magnification))
+                    }.onEnded { _ in pinchBase = nil })
                 } else {
-                    WaitingLine().frame(width: 160)
+                    WaitingLine().frame(width: 160).frame(width: geo.size.width, height: geo.size.height)
                 }
+                if image != nil { zoomBar(scale: scale, fit: fit).padding(.bottom, 14) }
             }
             .frame(width: geo.size.width, height: geo.size.height)
         }
         .task(id: url) {
+            zoom = nil
             let loaded = await Task.detached(priority: .userInitiated) { () -> NSImage? in
                 guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
                       let cg = CGImageSourceCreateImageAtIndex(source, 0, [kCGImageSourceShouldCacheImmediately: true] as CFDictionary) else { return nil }
@@ -327,6 +352,49 @@ struct ImagePreview: View {
             }.value
             image = loaded
         }
+    }
+
+    /// Zoom out, the current level (click to fit), zoom in: a small floating strip.
+    private func zoomBar(scale: CGFloat, fit: CGFloat) -> some View {
+        HStack(spacing: 2) {
+            zoomButton("minus", help: "Zoom out") { step(-1, scale: scale) }
+                .disabled(scale <= Self.steps.first!)
+            Button { set(zoom == nil ? 1 : nil) } label: {
+                Text("\(Int((scale * 100).rounded())) %").monospacedDigit()
+                    .font(.system(size: 12, weight: .semibold)).foregroundStyle(Soot.ink)
+                    .frame(minWidth: 52, minHeight: 28)
+            }
+            .buttonStyle(.plain).handCursor()
+            .help(zoom == nil ? "Actual size" : "Fit to window")
+            .accessibilityLabel("Zoom \(Int((scale * 100).rounded())) percent")
+            .accessibilityHint(zoom == nil ? "Shows the picture at actual size" : "Fits the picture to the window")
+            zoomButton("plus", help: "Zoom in") { step(1, scale: scale) }
+                .disabled(scale >= Self.steps.last!)
+        }
+        .padding(3)
+        .background(Soot.surface, in: Capsule())
+        .overlay(Capsule().strokeBorder(Soot.line))
+        .shadow(color: .black.opacity(0.3), radius: 10, y: 4)
+    }
+
+    private func zoomButton(_ symbol: String, help: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol).font(.system(size: 12, weight: .bold)).foregroundStyle(Soot.ink)
+                .frame(width: 28, height: 28)
+        }
+        .buttonStyle(.plain).handCursor()
+        .modifier(FocusOutline(radius: 14))
+        .help(help)
+        .accessibilityLabel(help)
+    }
+
+    private func step(_ direction: Int, scale: CGFloat) {
+        let next = direction > 0 ? Self.steps.first { $0 > scale + 0.001 } : Self.steps.last { $0 < scale - 0.001 }
+        set(next ?? scale)
+    }
+
+    private func set(_ value: CGFloat?) {
+        withAnimation(reduceMotion ? nil : .snappy(duration: 0.2)) { zoom = value }
     }
 }
 
