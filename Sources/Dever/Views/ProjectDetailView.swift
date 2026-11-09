@@ -23,6 +23,8 @@ struct ProjectDetailView: View {
     @State private var lastRead: String?
     @State private var seenUpTo: String?
     @State private var markTask: Task<Void, Never>?
+    /// Names of channels linked from the messages, for "Estelle in #other-channel".
+    @State private var linkedChannels: [String: String] = [:]
     @State private var customEmoji: [String: URL] = [:]
     @State private var previewFile: SlackFile?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -697,7 +699,7 @@ struct ProjectDetailView: View {
                 EmptySection(title: "No messages yet", message: "Messages posted in #\(project.slack?.name ?? "") appear here.")
             } else {
                 SlackThreadView(messages: messages, users: users, domain: app.slack?.domain,
-                                channelID: project.slack?.id, channelName: project.slack?.name,
+                                channelID: project.slack?.id, channelName: project.slack?.name, otherChannels: linkedChannels,
                                 shown: shownMessages, railMessages: railPlan.messages, readUpTo: lastRead,
                                 railCaughtUp: railPlan.caughtUp,
                                 onSeen: { seen($0) }, roomMounted: roomMounted,
@@ -783,6 +785,10 @@ struct ProjectDetailView: View {
             merge(page.messages)
             lastLoaded[.slack] = Date()
             if messages.count <= 20 { hasEarlier = page.hasMore }
+            let linked = Set(messages.flatMap { $0.linkedChannelIDs }).subtracting([id])
+            if !linked.isSubset(of: Set(linkedChannels.keys)) {
+                linkedChannels = (try? await app.withSlack { await SlackDirectory.shared.channelNames(linked, via: $0) }) ?? linkedChannels
+            }
             // Whatever was marked from here since keeps precedence over a stale cursor.
             if let cursor = try? await app.withSlack({ try await $0.lastRead(id) }) {
                 lastRead = seenUpTo.map { SlackTS.later($0, cursor) } ?? cursor
@@ -875,8 +881,10 @@ struct ProjectDetailView: View {
 
     /// "Mark as read" in the rail: the cursor goes to the latest message.
     private func markAllRead() {
-        guard let newest = messages.first?.ts else { return }
-        seenUpTo = SlackTS.later(seenUpTo, newest)
+        // Threads with fresh replies are unread too: the cursor must pass their newest reply.
+        guard var target = messages.first?.ts else { return }
+        for m in messages { if let last = m.latest_reply { target = SlackTS.later(target, last) } }
+        seenUpTo = SlackTS.later(seenUpTo, target)
         Task { await pushCursor() }
     }
 

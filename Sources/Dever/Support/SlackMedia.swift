@@ -182,6 +182,18 @@ actor SlackDirectory {
         return users
     }
 
+    private var channelNames: [String: String] = [:]
+    private var unknownChannels: Set<String> = []
+
+    /// Names for channel ids met in links, one conversations.info each, remembered for the
+    /// session; ids the token cannot see are remembered as unknown and not asked again.
+    func channelNames(_ ids: Set<String>, via client: SlackClient) async -> [String: String] {
+        for id in ids where channelNames[id] == nil && !unknownChannels.contains(id) {
+            if let name = try? await client.channelName(id) { channelNames[id] = name } else { unknownChannels.insert(id) }
+        }
+        return channelNames.filter { ids.contains($0.key) }
+    }
+
     private var emojiCache: (team: String, emoji: [String: URL], at: Date)?
     private var emojiLoading: Task<[String: URL], Error>?
 

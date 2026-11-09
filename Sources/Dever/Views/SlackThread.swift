@@ -151,6 +151,18 @@ extension View {
 }
 
 extension SlackMessage {
+    /// Ids of other channels this message links to (message mentions, shared messages).
+    var linkedChannelIDs: Set<String> {
+        var ids = Set<String>()
+        func walk(_ e: SlackRichElement) {
+            if e.type == "message_mention", let id = e.channel_id { ids.insert(id) }
+            e.elements?.forEach(walk)
+        }
+        blocks?.forEach { $0.elements?.forEach(walk) }
+        attachments?.forEach { if let id = $0.channel_id { ids.insert(id) } }
+        return ids
+    }
+
     /// Channel events Slack posts as messages: renames, topics, pins…
     var isSystem: Bool {
         ["channel_name", "channel_purpose", "channel_topic", "pinned_item", "unpinned_item", "bot_add", "bot_remove",
@@ -386,6 +398,8 @@ struct SlackThreadView: View {
     let domain: String?
     let channelID: String?
     var channelName: String?
+    /// Names of other channels met in links, resolved by the project page.
+    var otherChannels: [String: String] = [:]
     var shown = 8
     /// How many messages the rail shows; `shown` is the room's count. Kept apart so the rail
     /// never re-renders with the room's 30 messages while it fades out.
@@ -431,8 +445,8 @@ struct SlackThreadView: View {
     private var paneBinding: Binding<Double> { openThread == nil ? $asideWidth : $threadWidth }
 
     private var channels: [String: String] {
-        guard let channelID, let channelName else { return [:] }
-        return [channelID: channelName]
+        guard let channelID, let channelName else { return otherChannels }
+        return otherChannels.merging([channelID: channelName]) { _, own in own }
     }
 
     /// The rail stops growing here and scrolls instead: about six messages' worth.
@@ -441,7 +455,11 @@ struct SlackThreadView: View {
 
     /// The thread beside the room opens, closes or changes in one movement: slides in from
     /// the right over the aside, cross-fades to another thread, slides back out.
-    private func setThread(_ m: SlackMessage?) { Motion.run(Motion.move) { openThread = m } }
+    private func setThread(_ m: SlackMessage?) {
+        Motion.run(Motion.move) { openThread = m }
+        // Opening a thread is reading it: its newest reply counts as seen.
+        if let m, let last = m.latest_reply { onSeen?(last) }
+    }
 
     var body: some View {
         // Both layouts live in one place, so the view's state (the open thread) survives the

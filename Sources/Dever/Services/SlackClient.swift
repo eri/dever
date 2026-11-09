@@ -332,6 +332,12 @@ struct SlackClient {
         return (res["channel"] as? [String: Any])?["last_read"] as? String
     }
 
+    /// A channel's name by id (conversations.info), for links to other channels.
+    func channelName(_ channelID: String) async throws -> String? {
+        let res = try await call("conversations.info", ["channel": channelID])
+        return (res["channel"] as? [String: Any])?["name"] as? String
+    }
+
     /// Moves the read cursor to `ts`: everything up to that message counts as read, in Slack too.
     func markRead(_ channelID: String, ts: String) async throws {
         _ = try await call("conversations.mark", ["channel": channelID, "ts": ts])

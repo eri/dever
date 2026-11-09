@@ -51,10 +51,20 @@ struct FilePreviewSheet: View {
                 }
                 Spacer()
                 if let local {
-                    Button { save(local) } label: { Text("Save…") }
-                        .buttonStyle(.plain).handCursor().font(.system(size: 12, weight: .semibold)).foregroundStyle(Soot.muted)
-                        .modifier(FocusOutline(radius: 4))
-                        .help("Save a copy of the file")
+                    Button { save(local) } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: "square.and.arrow.down").font(.system(size: 11, weight: .semibold))
+                            Text("Save")
+                        }
+                        .font(.system(size: 13, weight: .semibold)).foregroundStyle(Soot.ink)
+                        .padding(.horizontal, 12).frame(height: 30)
+                        .background(Soot.surface, in: Capsule())
+                        .overlay(Capsule().strokeBorder(Soot.edge))
+                        .contentShape(Capsule())
+                    }
+                    .buttonStyle(.plain).handCursor()
+                    .modifier(FocusOutline(radius: 15))
+                    .help("Save a copy of the file")
                 }
                 if let url = file.permalink.flatMap(URL.init(string:)) {
                     Link(destination: url) { HStack(spacing: 4) { Text("Open in Slack"); Image(systemName: "arrow.up.right") } }
