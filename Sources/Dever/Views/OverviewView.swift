@@ -467,6 +467,12 @@ private enum Grid {
     static let pin: CGFloat = 24
     /// Where an item's icon starts: under the project's name.
     static let itemIndent: CGFloat = 12 + 28 + 10
+
+    /// The width the columns, the status and the pin take at a row's trailing edge (gaps
+    /// included); the name, and an item's sentence, stop before it.
+    static func trailing(_ columns: [OverviewSettings.Column]) -> CGFloat {
+        columns.reduce(0) { $0 + $1.width + gap } + status + gap + pin
+    }
 }
 
 private struct ColumnHeader: View {
@@ -527,7 +533,7 @@ private struct ProjectBlock: View {
             if !entry.waiting.isEmpty {
                 VStack(alignment: .leading, spacing: 0) {
                     ForEach(items) { item in
-                        ItemRow(item: item, density: density) { openItem(item) }
+                        ItemRow(item: item, density: density, trailing: Grid.trailing(columns)) { openItem(item) }
                             .transition(Motion.rise)
                     }
                     if entry.waiting.count > 3 {
@@ -551,6 +557,8 @@ private struct ProjectBlock: View {
 private struct ItemRow: View {
     let item: WaitingItem
     let density: OverviewSettings.Density
+    /// The row's columns and status: the sentence never runs under them.
+    let trailing: CGFloat
     let action: () -> Void
 
     var body: some View {
@@ -568,7 +576,7 @@ private struct ItemRow: View {
                 Spacer(minLength: 12)
             }
             .padding(.leading, Grid.itemIndent)
-            .padding(.trailing, 12 + Grid.pin + Grid.gap)
+            .padding(.trailing, 12 + trailing)
             .frame(height: density == .compact ? 28 : 32)
         }
         .buttonStyle(RowButton(lift: .ground))
@@ -598,13 +606,9 @@ private struct ProjectRow: View {
         Button(action: open) {
             HStack(spacing: Grid.gap) {
                 name.frame(minWidth: Grid.nameMin, maxWidth: .infinity, alignment: .leading)
-                ForEach(columns) { column in
-                    cell(column).frame(width: column.width, alignment: .leading)
-                }
-                // Room for the status and the pin, which sit on top of the row: an incomplete
-                // project's link button and the pin take their own clicks.
-                Color.clear.frame(width: Grid.status)
-                Color.clear.frame(width: Grid.pin)
+                // Room for the columns, the status and the pin, drawn on top of the row so a
+                // link button and the pin take their own clicks; the rest lets the click through.
+                Color.clear.frame(width: Grid.trailing(columns))
             }
             .padding(.horizontal, 12)
             .frame(height: density.rowHeight)
@@ -612,7 +616,13 @@ private struct ProjectRow: View {
         .buttonStyle(RowButton(lift: .ground))
         .overlay(alignment: .trailing) {
             HStack(spacing: Grid.gap) {
+                ForEach(columns) { column in
+                    cell(column).frame(width: column.width, alignment: .leading)
+                        .allowsHitTesting(column == .linear && (project.linear == nil
+                            || snapshot?.errors[.linear]?.needsConnecting == true))
+                }
                 status.frame(width: Grid.status, alignment: .leading)
+                    .allowsHitTesting({ if case .link = current { true } else { false } }())
                 pin
             }
             .padding(.trailing, 12)
@@ -683,7 +693,6 @@ private struct ProjectRow: View {
         case loading
         case link(ProjectEditorSheet.Step, String)
         case blocked(symbol: String, tint: Color, text: String, help: String)
-        case shipped(Delivery)
         case quiet(String)
     }
 
@@ -692,10 +701,13 @@ private struct ProjectRow: View {
         return t < Calendar.current.startOfDay(for: Date()) && l.done < l.total
     }
 
+    /// What blocks the project, and nothing else. A missing link shows here only when no
+    /// column holds it: Linear's goes in the Issues shipped column when that column shows.
     private var current: Status {
-        if project.linear == nil { return .link(.linear, "Link Linear") }
+        let linearColumn = columns.contains(.linear)
+        if project.linear == nil, !linearColumn { return .link(.linear, "Link Linear") }
         if project.slack == nil { return .link(.slack, "Link Slack") }
-        guard let s = snapshot else { return .loading }
+        guard let s = snapshot else { return project.linear == nil ? .quiet("") : .loading }
         if s.github?.pipeline == .failing {
             let repos = s.github?.failingRepositories ?? []
             return .blocked(symbol: "xmark.circle.fill", tint: Theme.negative, text: "CI failing",
@@ -713,14 +725,8 @@ private struct ProjectRow: View {
             return .blocked(symbol: "clock.fill", tint: Theme.chart3, text: "#\(w.number) waiting \(Brief.ago(w.since))",
                             help: "Pull request #\(w.number) has waited for a review since \(w.since.formatted(.relative(presentation: .named)))")
         }
-        if let state = s.errors[.linear], state.needsConnecting { return .link(.linear, "Reconnect Linear") }
-        // With the Linear column on, the issues are already in the row: the status keeps only
-        // what blocks or what is missing.
-        if columns.contains(.linear) { return .quiet("") }
-        if let d = s.delivery {
-            return d.total == 0 ? .quiet("No issues") : .shipped(d)
-        }
-        return .quiet("—")
+        if let state = s.errors[.linear], state.needsConnecting, !linearColumn { return .link(.linear, "Reconnect Linear") }
+        return .quiet("")
     }
 
     private var statusWords: String {
@@ -728,7 +734,6 @@ private struct ProjectRow: View {
         case .loading: "loading"
         case .link(_, let title): "missing a link: \(title)"
         case .blocked(_, _, let text, _): text
-        case .shipped(let d): "\(d.shipped) of \(d.total) shipped"
         case .quiet(let text): text == "—" ? "" : text
         }
     }
@@ -738,14 +743,7 @@ private struct ProjectRow: View {
         case .loading:
             HStack(spacing: 8) { Skeleton(width: 40, height: 6, radius: 3); Skeleton(width: 64, height: 12) }
         case .link(let step, let title):
-            Button { link(step) } label: {
-                Label(title, systemImage: title.hasPrefix("Reconnect") ? "arrow.clockwise" : "link")
-                    .labelStyle(.titleAndIcon)
-            }
-            .buttonStyle(SecondaryButton(size: .panel))
-            .fixedSize()
-            .help(title.hasPrefix("Reconnect") ? "Reconnect Linear in Settings" : "\(title) to see what is left to ship")
-            .transition(.opacity)
+            linkButton(step, title)
         case .blocked(let symbol, let tint, let text, let help):
             HStack(spacing: 6) {
                 Image(systemName: symbol).font(.system(size: 12, weight: .semibold)).foregroundStyle(tint)
@@ -754,18 +752,10 @@ private struct ProjectRow: View {
             }
             .help(help)
             .transition(.opacity)
-        case .shipped(let d):
-            HStack(spacing: 8) {
-                ShipBar(delivery: d).frame(width: 40)
-                Text("\(d.shipped)/\(d.total) shipped").font(.system(size: 13)).foregroundStyle(Soot.ink).monospacedDigit()
-                    .contentTransition(.numericText(value: Double(d.shipped)))
-                    .animation(reduceMotion ? nil : .easeOut(duration: 0.25), value: d.shipped)
-                    .lineLimit(1)
-            }
-            .help("\(d.shipped) of \(d.total) issues done, or merged in GitHub")
-            .transition(.opacity)
         case .quiet(let text):
-            if !text.isEmpty { Text(text).font(.system(size: 13)).foregroundStyle(Soot.muted) }
+            // Empty still holds the column's width, so the columns before it stay aligned.
+            if text.isEmpty { Color.clear.frame(height: 1) }
+            else { Text(text).font(.system(size: 13)).foregroundStyle(Soot.muted) }
         }
     }
 
@@ -790,12 +780,26 @@ private struct ProjectRow: View {
             }
             .help("\(d.shipped) of \(d.total) issues shipped")
         } else if project.linear == nil {
-            dash("No Linear project linked")
+            linkButton(.linear, "Link Linear")
+        } else if let state = snapshot?.errors[.linear], state.needsConnecting {
+            linkButton(.linear, "Reconnect Linear")
         } else if let state = snapshot?.errors[.linear] {
             unavailable(.linear, state)
         } else {
             HStack(spacing: 8) { Skeleton(width: 72, height: 6, radius: 3); Skeleton(width: 32, height: 12) }
         }
+    }
+
+    /// The one link a project lacks, as a button that opens the editor on that step.
+    private func linkButton(_ step: ProjectEditorSheet.Step, _ title: String) -> some View {
+        Button { link(step) } label: {
+            Label(title, systemImage: title.hasPrefix("Reconnect") ? "arrow.clockwise" : "link")
+                .labelStyle(.titleAndIcon)
+        }
+        .buttonStyle(SecondaryButton(size: .panel))
+        .fixedSize()
+        .help(title.hasPrefix("Reconnect") ? "Reconnect Linear in Settings" : "\(title) to see what is left to ship")
+        .transition(.opacity)
     }
 
     @ViewBuilder private var github: some View {

@@ -79,7 +79,7 @@ struct OverviewSettings: Codable, Equatable {
         /// The column's width in points; the project column takes the rest.
         var width: CGFloat {
             switch self {
-            case .linear: 124
+            case .linear: 140
             case .github: 120
             case .preview: 80
             case .target: 72
@@ -90,9 +90,9 @@ struct OverviewSettings: Codable, Equatable {
     var sort: Sort = .forYou
     var group: Group = .none
     var density: Density = .comfortable
-    /// None: the row says what waits, what happened last and what blocks on its own. The
-    /// columns are there for whoever wants the numbers side by side.
-    var columns: Set<Column> = []
+    /// Issues shipped: where the project stands, or the "Link Linear" it lacks. The status
+    /// beside it only says what blocks.
+    var columns: Set<Column> = [.linear]
     /// Projects whose every Linear issue is done leave the list.
     var hideFinished = false
 

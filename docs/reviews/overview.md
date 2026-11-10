@@ -152,3 +152,10 @@ project and an incomplete one; `quiet` is the same with nothing waiting.
 **Not verified by hand.** Real unread counts and mentions against a live channel, review requests
 on live pull requests (the workspace had none asked of the viewer), the deep links landing on the
 message and on the issue page, VoiceOver.
+
+**Round 3, second pass.** Two columns by default, each with one job. Issues shipped holds where
+the project stands (bar and `shipped/total`, or "No issues"), or the "Link Linear" / "Reconnect
+Linear" button it lacks. Status only says what blocks (CI failing, preview failed, past due date,
+a pull request waiting for review) and stays empty otherwise; a missing Slack channel, and
+Linear's link when the Issues shipped column is hidden, are the only buttons it shows. The lines
+of what waits stop before the columns, so a long message never runs under them.
