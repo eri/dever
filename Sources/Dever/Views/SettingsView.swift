@@ -246,13 +246,8 @@ private struct AccountsSection: View {
             ChannelPrefixCard(prefix: $channelPrefix)
             .padding(.top, 20)
         }
-        // A click anywhere else on the section closes the open menu.
-        .background {
-            if menu != nil {
-                Color.black.opacity(0.001)
-                    .onTapGesture { Motion.run(Motion.ui, fade: true) { menu = nil } }
-            }
-        }
+        // A click anywhere else in the window closes the open menu.
+        .closesOnOutsideClick(menu != nil) { Motion.run(Motion.ui, fade: true) { menu = nil } }
         .onExitCommand { if menu != nil { Motion.run(Motion.ui, fade: true) { menu = nil } } }
     }
 }
@@ -433,6 +428,7 @@ private struct ServiceRow: View {
         .overlay(alignment: .topTrailing) {
             if menuOpen {
                 statusMenu
+                    .keepsMenuOpen()
                     .offset(x: -16, y: 64 - 8)
                     .transition(Motion.pop.combined(with: .offset(y: Motion.reduced ? 0 : -4)))
             }
@@ -597,6 +593,7 @@ private struct ServiceRow: View {
             .frame(height: 32)
             }
             .buttonStyle(MenuTriggerButton(open: menuOpen, fill: Soot.ground.opacity(0.7), edge: false))
+            .keepsMenuOpen()
         .help(statusTitle)
         .accessibilityLabel("\(service.label) status: \(statusTitle)")
         .accessibilityHint("Shows the status, Check status and Disconnect")

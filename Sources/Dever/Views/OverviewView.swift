@@ -116,21 +116,16 @@ struct OverviewView: View {
                     VStack(alignment: .leading, spacing: 20) {
                         head.zIndex(1)
                         table
-                            .overlay {
-                                // A click anywhere under the open menu closes it.
-                                if showMany {
-                                    Color.clear.contentShape(Rectangle())
-                                        .onTapGesture { Motion.run(Motion.ui, fade: true) { showMany = false } }
-                                }
-                            }
-                    }
+                        }
                     .padding(.horizontal, 28)
                     .padding(.vertical, 24)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 .searchable(text: $search, placement: .toolbar, prompt: "Search projects")
-            }
-        }
+                // A click anywhere else in the window closes the Add-many menu.
+                .closesOnOutsideClick(showMany) { Motion.run(Motion.ui, fade: true) { showMany = false } }
+                }
+                }
         .background(Soot.ground)
         .navigationTitle("Overview")
         .windowTitleHidden()
@@ -360,11 +355,13 @@ private struct AddProjectControl: View {
         .frame(height: 34)
         .background(Soot.lime, in: RoundedRectangle(cornerRadius: Soot.radius))
         .clipShape(RoundedRectangle(cornerRadius: Soot.radius))
+        .keepsMenuOpen()
         // The menu hangs from the button's trailing edge, inside the window, over the table.
         .overlay(alignment: .topTrailing) {
             if showMany {
                 AddManyMenu(addMany: { source in toggle(false); addMany(source) }, close: { toggle(false) })
                     .fixedSize()
+                    .keepsMenuOpen()
                     .offset(y: 34 + 6)
                     .transition(Motion.pop.combined(with: .offset(y: Motion.reduced ? 0 : -4)))
             }

@@ -596,3 +596,61 @@ struct ButtonGallery: View {
         .buttonStyle(SegmentButton(on: on))
     }
 }
+
+// MARK: - In-window menus
+
+/// Frames (window coordinates) a click may land in without closing the menu that is open:
+/// the trigger and the menu itself. Marked with `keepsMenuOpen()`, read by `closesOnOutsideClick`.
+private struct MenuInsideFramesKey: PreferenceKey {
+    static var defaultValue: [CGRect] = []
+    static func reduce(value: inout [CGRect], nextValue: () -> [CGRect]) { value += nextValue() }
+}
+
+/// Closes an in-window menu (the Add project ⌄ menu, an account's status menu) on any click
+/// outside it, wherever in the window the click lands, and swallows that click, like a system
+/// menu would. Mark the trigger and the menu with `keepsMenuOpen()` so their own clicks pass.
+private struct ClosesOnOutsideClick: ViewModifier {
+    let isOpen: Bool
+    let close: () -> Void
+    @State private var inside: [CGRect] = []
+    @State private var monitor: Any?
+
+    func body(content: Content) -> some View {
+        content
+            .onPreferenceChange(MenuInsideFramesKey.self) { inside = $0 }
+            .onChange(of: isOpen, initial: true) { _, open in open ? install() : remove() }
+            .onDisappear(perform: remove)
+    }
+
+    private func install() {
+        guard monitor == nil else { return }
+        monitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { event in
+            guard let window = event.window, window.isKeyWindow, let content = window.contentView else { return event }
+            // SwiftUI's global space is the content view with a top-left origin; AppKit's is bottom-left.
+            let local = content.convert(event.locationInWindow, from: nil)
+            let point = CGPoint(x: local.x, y: content.isFlipped ? local.y : content.bounds.height - local.y)
+            if inside.contains(where: { $0.contains(point) }) { return event }
+            DispatchQueue.main.async(execute: close)
+            return nil
+        }
+    }
+
+    private func remove() {
+        if let monitor { NSEvent.removeMonitor(monitor) }
+        monitor = nil
+    }
+}
+
+extension View {
+    /// While `isOpen`, a click anywhere else in the window runs `close` and goes no further.
+    func closesOnOutsideClick(_ isOpen: Bool, close: @escaping () -> Void) -> some View {
+        modifier(ClosesOnOutsideClick(isOpen: isOpen, close: close))
+    }
+
+    /// Part of an open menu (its trigger or its body): clicks here do not close it.
+    func keepsMenuOpen() -> some View {
+        background(GeometryReader { geo in
+            Color.clear.preference(key: MenuInsideFramesKey.self, value: [geo.frame(in: .global)])
+        })
+    }
+}
