@@ -531,13 +531,13 @@ struct SlackThreadView: View {
                 // latest whenever it was showing it. A reader who scrolled up is left in place.
                 .modifier(FollowsGrowth { wasAtEnd in
                     guard wide else { return }
-                    if let focus { if Date() < followUntil { proxy.scrollTo(focus, anchor: .center) } }
+                    if let focus { if Date() < followUntil { proxy.scrollTo(focus, anchor: Self.focusAnchor) } }
                     else if wasAtEnd { proxy.scrollTo("slack-end", anchor: .bottom) }
                 })
                 // Each open lands on the clicked message or on the latest, once rows have measured.
                 .onAppear { land(proxy) }
                 .onChange(of: wide) { _, isWide in if isWide { land(proxy) } }
-                .onChange(of: focus) { _, ts in if let ts { Motion.run(Motion.ui) { proxy.scrollTo(ts, anchor: .center) } } }
+                .onChange(of: focus) { _, ts in if let ts { Motion.run(Motion.ui) { proxy.scrollTo(ts, anchor: Self.focusAnchor) } } }
             }
             .frame(maxWidth: 1200, maxHeight: .infinity, alignment: .topLeading)
             // The messages take their new width at once when the pane widens or narrows.
@@ -575,9 +575,13 @@ struct SlackThreadView: View {
         }
     }
 
+    /// A message the room was opened on lands at the top, a little below the edge, so it is
+    /// the first thing read.
+    private static let focusAnchor = UnitPoint(x: 0.5, y: 0.04)
+
     private func land(_ proxy: ScrollViewProxy) {
         followUntil = Date().addingTimeInterval(2)
-        let go = { proxy.scrollTo(focus ?? "slack-end", anchor: focus == nil ? .bottom : .center) }
+        let go = { proxy.scrollTo(focus ?? "slack-end", anchor: focus == nil ? .bottom : Self.focusAnchor) }
         DispatchQueue.main.async(execute: go)
         // Before macOS 15 there is no growth to follow: land again once pictures have had a moment.
         if #unavailable(macOS 15.0) {
@@ -634,6 +638,7 @@ struct SlackThreadView: View {
                     MessageRow(message: m, user: m.user.flatMap { users[$0] }, users: users, channels: channels,
                                customEmoji: customEmoji, grouped: grouped, wide: wide,
                                selected: openThread?.ts == m.ts || focus == m.ts,
+                               highlighted: focus == m.ts,
                                read: readUpTo.map { SlackTS.isAtOrBefore(m.ts, $0) } ?? true,
                                newReplies: readUpTo.map { r in m.latest_reply.map { !SlackTS.isAtOrBefore($0, r) } ?? false } ?? false,
                                permalink: permalink(m),
@@ -1299,6 +1304,9 @@ private struct MessageRow: View {
     let grouped: Bool
     var wide = false
     var selected = false
+    /// The message the room was opened on: a lime glow pulses on it a few times, then fades.
+    var highlighted = false
+    @State private var glow = 0.0
     /// Already read (Slack's cursor): the rail dims it when it is only there for context.
     var read = true
     /// The thread has replies newer than the cursor.
@@ -1309,6 +1317,19 @@ private struct MessageRow: View {
     var openThread: ((SlackMessage) -> Void)? = nil
     /// In the compact view a click on the message opens the wide view on it.
     var openWide: ((SlackMessage) -> Void)? = nil
+    /// Three soft pulses of lime (a steady tint under Reduce Motion), then it fades on its own.
+    private func flash() {
+        if Motion.reduced {
+            withAnimation(.easeOut(duration: 0.2)) { glow = 0.16 }
+        } else {
+            glow = 0
+            withAnimation(.easeInOut(duration: 0.45).repeatCount(5, autoreverses: true)) { glow = 0.22 }
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.6) {
+            withAnimation(.easeOut(duration: 0.8)) { glow = 0 }
+        }
+    }
+
     @State private var picking = false
     @State private var expanded = false
     @State private var hovering = false
@@ -1404,6 +1425,9 @@ private struct MessageRow: View {
         .padding(.horizontal, 8)
         .padding(.trailing, 4)
         .background(selected ? Soot.ground : (hovering ? Soot.ground.opacity(0.6) : Color.clear), in: RoundedRectangle(cornerRadius: 6))
+        .overlay(RoundedRectangle(cornerRadius: 6).fill(Soot.lime.opacity(glow)).allowsHitTesting(false))
+        .onAppear { if highlighted { flash() } }
+        .onChange(of: highlighted) { _, on in if on { flash() } else { withAnimation(.easeOut(duration: 0.6)) { glow = 0 } } }
         .padding(.leading, selected ? 8 : 0)
         .overlay(alignment: .leading) {
             if selected { RoundedRectangle(cornerRadius: 2).fill(Soot.lime).frame(width: 3).padding(.vertical, 6).transition(.opacity) }
