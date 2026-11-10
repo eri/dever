@@ -682,7 +682,7 @@ private struct CaughtUp: View {
             Text("You're all caught up").font(.system(size: 15, weight: .semibold)).foregroundStyle(Soot.ink)
             if let last {
                 let who = last.user.flatMap { users[$0]?.name }
-                Text("Last message \(last.date.formatted(.relative(presentation: .named)))\(who.map { " by \($0)" } ?? "")\(channelName.map { " in #\($0)" } ?? "")")
+                Text("Last message \(last.date.formatted(.relative(presentation: .named)))\(who.map { " by \($0)" } ?? "")")
                     .font(.system(size: 12)).foregroundStyle(Soot.muted)
                     .multilineTextAlignment(.center)
                     .fixedSize(horizontal: false, vertical: true)
