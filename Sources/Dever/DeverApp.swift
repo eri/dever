@@ -12,8 +12,11 @@ struct DeverApp: App {
             ContentView()
                 .environmentObject(app)
                 .environmentObject(store)
-                .frame(minWidth: 1080, minHeight: 680)
+                // No upper bound: zooming (double-click on the title bar or on an edge) may take
+                // the whole screen. Without it, SwiftUI caps the window at the content's ideal size.
+                .frame(minWidth: 1080, maxWidth: .infinity, minHeight: 680, maxHeight: .infinity)
         }
+        .windowResizability(.contentMinSize)
         .commands {
             CommandGroup(after: .help) {
                 Button("Welcome to Dever…") {
@@ -25,8 +28,25 @@ struct DeverApp: App {
 }
 
 final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate {
+    private var titleBarClicks: Any?
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         UNUserNotificationCenter.current().delegate = self
+        // The content view runs under the transparent title bar, so a double-click there
+        // reaches SwiftUI instead of the frame and the window never zooms. Do what the
+        // frame would have done: the action set in System Settings for a title bar
+        // double-click (zoom by default).
+        titleBarClicks = NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown) { event in
+            guard event.clickCount == 2, let window = event.window, window.canBecomeMain,
+                  window.styleMask.contains(.fullSizeContentView),
+                  event.locationInWindow.y > window.contentLayoutRect.maxY else { return event }
+            switch UserDefaults.standard.string(forKey: "AppleActionOnDoubleClick") {
+            case "None": return event
+            case "Minimize": window.performMiniaturize(nil)
+            default: window.performZoom(nil)
+            }
+            return nil
+        }
     }
 
     /// Show banners even while Dever is in front.

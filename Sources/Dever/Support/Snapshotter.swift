@@ -28,6 +28,26 @@ enum Snapshotter {
                 window.setContentSize(NSSize(width: parts[0], height: parts[1]))
             }
         }
+        // DEVER_SNAPSHOT_ZOOM=1 zooms the window; DEVER_SNAPSHOT_ZOOM=click sends it a
+        // double-click on its title bar instead. Both write the resulting frame next to the
+        // screen's, to check that zoom can fill it.
+        if let zoom = ProcessInfo.processInfo.environment["DEVER_SNAPSHOT_ZOOM"], zoom == "1" || zoom == "click",
+           let window = NSApp.windows.first(where: { $0.canBecomeMain }) {
+            if zoom == "click" {
+                let point = NSPoint(x: window.frame.width / 2, y: window.frame.height - 20)
+                for (type, count) in [(NSEvent.EventType.leftMouseDown, 1), (.leftMouseUp, 1), (.leftMouseDown, 2), (.leftMouseUp, 2)] {
+                    if let event = NSEvent.mouseEvent(with: type, location: point, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                                                      windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: count, pressure: 1) {
+                        NSApp.sendEvent(event)
+                    }
+                }
+            } else {
+                window.zoom(nil)
+            }
+            try? await Task.sleep(nanoseconds: 500_000_000)
+            let screen = window.screen?.visibleFrame ?? .zero
+            try? "window \(window.frame)\nscreen \(screen)\n".write(to: dir.appendingPathComponent("zoom.txt"), atomically: true, encoding: .utf8)
+        }
         // In front and unoccluded: SwiftUI pauses animations in a covered window, which would
         // freeze every transition mid-way in the pictures.
         NSApp.activate(ignoringOtherApps: true)
