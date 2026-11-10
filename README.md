@@ -1,3 +1,8 @@
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/brand/dever-mark-lime.svg">
+  <img src="docs/brand/dever-mark-green.svg" width="56" height="56" alt="Dever">
+</picture>
+
 # Dever
 
 macOS app (SwiftUI) that brings together, per project, its Slack channel, its Linear project and its GitHub repository.

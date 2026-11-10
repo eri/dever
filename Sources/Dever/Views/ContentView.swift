@@ -279,19 +279,34 @@ struct ContentView: View {
     }
 }
 
-/// Dever's mark: three bars of a delivery strip, shipped to to-do.
+/// Dever's mark: a D with a calm eye. The same geometry as `docs/brand/dever-mark.svg`,
+/// on a 64-unit grid: a panel whose right side is fully round, and an 8-unit hole at (43, 23).
+/// Lime on dark, deep green on light (`Soot.lime`), like every action.
 struct DeverMark: View {
     var body: some View {
-        GeometryReader { geo in
-            let h = geo.size.height
-            let bar = h * 0.22
-            VStack(alignment: .leading, spacing: (h - bar * 3) / 2) {
-                Capsule().fill(Theme.chart1).frame(width: geo.size.width, height: bar)
-                Capsule().fill(Theme.chart1.opacity(0.6)).frame(width: geo.size.width * 0.72, height: bar)
-                Capsule().fill(Theme.chart1.opacity(0.3)).frame(width: geo.size.width * 0.44, height: bar)
-            }
-        }
-        .accessibilityHidden(true)
+        DeverMarkShape()
+            .fill(Soot.lime, style: FillStyle(eoFill: true))
+            .aspectRatio(1, contentMode: .fit)
+            .accessibilityHidden(true)
+    }
+}
+
+struct DeverMarkShape: Shape {
+    func path(in rect: CGRect) -> Path {
+        let s = min(rect.width, rect.height) / 64
+        let o = CGPoint(x: rect.midX - 32 * s, y: rect.midY - 32 * s)
+        func p(_ x: CGFloat, _ y: CGFloat) -> CGPoint { CGPoint(x: o.x + x * s, y: o.y + y * s) }
+        var path = Path()
+        path.move(to: p(14, 4))
+        path.addLine(to: p(32, 4))
+        path.addArc(center: p(32, 32), radius: 28 * s, startAngle: .degrees(-90), endAngle: .degrees(90), clockwise: false)
+        path.addLine(to: p(14, 60))
+        path.addArc(center: p(14, 50), radius: 10 * s, startAngle: .degrees(90), endAngle: .degrees(180), clockwise: false)
+        path.addLine(to: p(4, 14))
+        path.addArc(center: p(14, 14), radius: 10 * s, startAngle: .degrees(180), endAngle: .degrees(270), clockwise: false)
+        path.closeSubpath()
+        path.addEllipse(in: CGRect(x: o.x + 35 * s, y: o.y + 15 * s, width: 16 * s, height: 16 * s))
+        return path
     }
 }
 

@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" width="96" height="96">
+  <!-- Dever mark on the lime tile (the onboarding card): soot ink. -->
+  <rect width="96" height="96" rx="16" fill="#DAFA9C"/>
+  <path transform="translate(16 16)" fill="#0F0F0F" fill-rule="evenodd" d="M14 4h18a28 28 0 0 1 0 56H14A10 10 0 0 1 4 50V14A10 10 0 0 1 14 4ZM43 15a8 8 0 1 0 0 16a8 8 0 1 0 0-16Z"/>
+</svg>
