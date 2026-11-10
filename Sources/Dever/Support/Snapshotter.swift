@@ -15,7 +15,10 @@ enum Snapshotter {
         var screens: [(String, SidebarItem)] = [("overview", .overview)]
         // DEVER_SNAPSHOT_PROJECT=<index> picks another project than the first.
         let index = ProcessInfo.processInfo.environment["DEVER_SNAPSHOT_PROJECT"].flatMap(Int.init) ?? 0
-        if projects.indices.contains(index) { screens.append(("project", .project(projects[index].id))) }
+        // The Overview demo replaces the projects: their pages do not exist, only the Overview is captured.
+        if projects.indices.contains(index), ProcessInfo.processInfo.environment["DEVER_SNAPSHOT_OVERVIEW_DEMO"] == nil {
+            screens.append(("project", .project(projects[index].id)))
+        }
         screens.append(("settings", .settings))
 
         // Let the first refresh land before the first picture; DEVER_SNAPSHOT_WAIT=0 captures
