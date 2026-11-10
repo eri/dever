@@ -718,21 +718,29 @@ private struct SeenReporter: ViewModifier {
     let active: Bool
     let onSeen: ((String) -> Void)?
     @State private var dwell: Task<Void, Never>?
+    @State private var visible = false
 
     func body(content: Content) -> some View {
         content.onGeometryChange(for: Bool.self, of: { proxy in
             let frame = proxy.frame(in: .named("slack-room"))
             let height = proxy.bounds(of: .named("slack-room"))?.height ?? 0
             return frame.maxY > 0 && frame.minY < height && height > 0
-        }) { visible in
-            dwell?.cancel()
-            guard visible, active, let onSeen else { return }
-            dwell = Task { @MainActor in
-                try? await Task.sleep(nanoseconds: 1_000_000_000)
-                if !Task.isCancelled { onSeen(ts) }
-            }
+        }) { now in
+            visible = now
+            arm()
         }
-        .onChange(of: active) { _, on in if !on { dwell?.cancel() } }
+        // A message already on screen when the room turns on (opened on it from the Overview,
+        // say) has to start its dwell then: its visibility does not change any more.
+        .onChange(of: active) { _, _ in arm() }
+    }
+
+    private func arm() {
+        dwell?.cancel()
+        guard visible, active, let onSeen else { return }
+        dwell = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 1_000_000_000)
+            if !Task.isCancelled { onSeen(ts) }
+        }
     }
 }
 

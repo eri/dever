@@ -614,6 +614,8 @@ struct ProjectDetailView: View {
             }
             slackFocus = ts
             if !slackExpanded { toggleSlackWide() }
+            // You opened it on purpose: it is read, and so is what came before it.
+            seen(ts)
             try? await Task.sleep(nanoseconds: 4_000_000_000)
             if slackFocus == ts { Motion.run(Motion.ui, fade: true) { slackFocus = nil } }
         case .pull(let identifier, _):
@@ -743,7 +745,11 @@ struct ProjectDetailView: View {
         guard let id = project.slack?.id, let seen = seenUpTo,
               lastRead.map({ !SlackTS.isAtOrBefore(seen, $0) }) ?? true else { return }
         Motion.run(Motion.ui, fade: true) { lastRead = seen }
-        do { try await app.withSlack { try await $0.markRead(id, ts: seen) } } catch { app.report(error) }
+        do {
+            try await app.withSlack { try await $0.markRead(id, ts: seen) }
+            // The Overview's "for you" follows at once, without a refresh.
+            store.slackRead(project.id, upTo: seen)
+        } catch { app.report(error) }
     }
 
     /// "Mark as read" in the rail: the cursor goes to the latest message.

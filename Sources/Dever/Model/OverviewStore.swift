@@ -28,6 +28,8 @@ struct ProjectSnapshot {
         var lastUnreadAt: Date?
         /// The unread messages that name you, newest first.
         var mentions: [Mention] = []
+        /// Every unread message's `ts`, so reading part of the channel can be subtracted.
+        var unreadTS: [String] = []
 
         struct Mention: Equatable {
             var ts: String
@@ -226,6 +228,18 @@ final class OverviewStore: ObservableObject {
         }
     }
 
+    /// The channel was read up to `ts` in Dever: what came before it leaves the project's
+    /// "for you" at once, without reloading anything.
+    func slackRead(_ project: UUID, upTo ts: String) {
+        guard var s = snapshots[project]?.slack else { return }
+        s.mentions.removeAll { SlackTS.isAtOrBefore($0.ts, ts) }
+        s.unreadTS.removeAll { SlackTS.isAtOrBefore($0, ts) }
+        if s.unread != nil { s.unread = s.unreadTS.count }
+        s.firstUnreadTS = s.unreadTS.min { (Double($0) ?? 0) < (Double($1) ?? 0) }
+        if s.unreadTS.isEmpty { s.lastUnreadAt = nil }
+        snapshots[project]?.slack = s
+    }
+
     func refresh(_ app: AppState) async {
         // Snapshots: a made-up workspace instead of the linked one (Support/OverviewDemo.swift).
         if let demo = OverviewDemo.scene {
@@ -348,6 +362,7 @@ final class OverviewStore: ObservableObject {
             if let cursor = try? await app.withSlack({ try await $0.lastRead(id) }) {
                 let unread = recent.filter { !SlackTS.isAtOrBefore($0.ts, cursor) && $0.user != me }
                 stats.unread = unread.count
+                stats.unreadTS = unread.map(\.ts)
                 stats.firstUnreadTS = unread.min { $0.ts < $1.ts }?.ts
                 stats.lastUnreadAt = unread.map(\.date).max()
                 if let me {
