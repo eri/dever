@@ -24,7 +24,35 @@ invalidates, budget, loading, failure, exits, cost: the template is in
 ## Interface
 
 - Skeletons, not spinners.
-- Button roles come from `Sources/Dever/Views/Buttons.swift`; motion from `Sources/Dever/Views/Motion.swift`.
+- Motion comes from `Sources/Dever/Views/Motion.swift` (`Motion.run`, `.motion(value:)`, the four curves).
+
+### Buttons and links: one role each, nothing hand-made
+
+Every clickable thing uses one of the roles in `Sources/Dever/Views/Buttons.swift`
+(inventory and the reasoning: [docs/reviews/buttons.md](docs/reviews/buttons.md)). A role gives
+the hover tone, the press, the lime focus ring, the pointing hand, the disabled state and the
+150 ms fades; a button that draws these itself gets some of them wrong, and this one did
+(a "Show more" with `PressButton` showed nothing on hover).
+
+| You are adding | Use |
+|---|---|
+| the one action of a view or sheet | `PrimaryButton(size: .sheet / .panel)` |
+| a peer action beside it, Cancel, Retry | `SecondaryButton()` |
+| a text link: Show more, Show all 15, Skip, Mark as read | `TertiaryButton(tint: .lime / .ink / .muted, lift: Soot.ground on a panel / Soot.surface on the page, font:)` |
+| a link that opens a URL | `ExternalLink("Open in X", destination:)` (adds ↗) or `HoverLink` for a custom label |
+| a glyph only: close, back, pin, zoom, expand | `GlyphButton(symbol:label:)` (tooltip and accessible name are required) or `IconButton(fill:radius:)` |
+| a page-toolbar action with a glyph and a verb | `ToolbarButton(busy:)` |
+| a capsule: a tab with a count, a PR chip, a toggle chip | `ChipButton(on:fill:)` |
+| a segment of a picker | `SegmentButton(on:)` inside `SegmentPicker` |
+| a row or tile that opens something | `RowButton(lift: .ground / .surface / .tone / .none)` |
+| a trigger that opens a menu or a popover | `MenuTriggerButton(open:)`; a SwiftUI `Menu` gets `.menuStyle(.button)` + this style + `.menuIndicator(.hidden)` |
+| an action that removes something, outside a system dialog | `DestructiveButton()` |
+
+Never write, on a button or a link: `.buttonStyle(.plain)`, `PressButton()`, `.handCursor()`,
+`.onHover` to tint it, `FocusOutline`, or a font and a colour that stand in for a role. If no
+role fits, add one to Buttons.swift (and a row to the gallery) rather than a one-off.
+Check your button in the gallery: `DEVER_SNAPSHOT_SCREENS=0 DEVER_SNAPSHOT_GALLERY=1` writes every
+role in every state to `buttons-dark.png` / `buttons-light.png`.
 
 ## Repository
 
