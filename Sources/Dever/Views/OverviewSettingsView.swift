@@ -22,22 +22,36 @@ struct OverviewSettingsView: View {
                     .padding(.top, 16)
                     .padding(.bottom, 4)
                 VStack(alignment: .leading, spacing: 0) {
-                    choices
+                    sorting
+                    row(title: "Density") {
+                        SegmentPicker(label: "Row density",
+                                      options: OverviewSettings.Density.allCases.map { (label: $0.label, value: $0) },
+                                      selection: settings.density)
+                    }
                     row(title: "Columns") { ColumnChips(columns: settings.columns, alignment: .leading) }
                     hideFinished
                 }
                 .padding(.horizontal, 16).padding(.bottom, 16)
             } else {
                 SectionHead(title: "Overview")
-                // The list in miniature: it follows every choice below, and its column
-                // heads are the switches for the columns.
-                ListMiniature(settings: settings)
-                Text("Click a column to hide it · Pinned projects always come first")
-                    .font(.system(size: 13)).foregroundStyle(Soot.muted)
-                    .padding(.top, 12)
-                    .padding(.bottom, 20)
+                // Columns: the list in miniature. It follows every choice below, and its
+                // column heads are the switches for the columns.
+                VStack(alignment: .leading, spacing: 14) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Columns").font(.system(size: 14, weight: .medium)).foregroundStyle(Soot.ink)
+                        Text("Click a column to show or hide it").font(.system(size: 12)).foregroundStyle(Soot.muted)
+                    }
+                    ListMiniature(settings: settings)
+                }
+                .padding(16)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Soot.surface, in: RoundedRectangle(cornerRadius: 12))
+                .padding(.bottom, 12)
                 SettingRows {
-                    choices
+                    SettingRow(title: "Density", detail: "The height of a row") {
+                        DensityPicker(selection: settings.density)
+                    }
+                    sorting
                     SettingRow(title: "Quiet after", detail: "Without a Slack message") {
                         SegmentPicker(label: "A project is quiet after",
                                       options: Preferences.quietChoices.map { (label: "\($0) days", value: $0) },
@@ -58,7 +72,7 @@ struct OverviewSettingsView: View {
         }
     }
 
-    @ViewBuilder private var choices: some View {
+    @ViewBuilder private var sorting: some View {
         row(title: "Sort by") {
             SegmentPicker(label: "Sort projects by",
                           options: OverviewSettings.Sort.allCases.map { (label: $0.label, value: $0) },
@@ -68,11 +82,6 @@ struct OverviewSettingsView: View {
             SegmentPicker(label: "Group projects by",
                           options: OverviewSettings.Group.allCases.map { (label: $0.label, value: $0) },
                           selection: settings.group)
-        }
-        row(title: "Density") {
-            SegmentPicker(label: "Row density",
-                          options: OverviewSettings.Density.allCases.map { (label: $0.label, value: $0) },
-                          selection: settings.density)
         }
     }
 
@@ -106,9 +115,60 @@ struct OverviewSettingsView: View {
     }
 }
 
+/// Density as two pictures of the list: a few tall rows, or more short ones. A lime ring
+/// marks the choice and travels between them.
+private struct DensityPicker: View {
+    @Binding var selection: OverviewSettings.Density
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Namespace private var ring
+
+    var body: some View {
+        HStack(spacing: 8) {
+            ForEach(OverviewSettings.Density.allCases) { option in
+                let on = selection == option
+                Button {
+                    withAnimation(reduceMotion ? nil : .spring(response: 0.3, dampingFraction: 0.85)) { selection = option }
+                } label: {
+                    VStack(spacing: 6) {
+                        VStack(spacing: option == .compact ? 3 : 7) {
+                            ForEach(0..<(option == .compact ? 5 : 3), id: \.self) { i in
+                                HStack(spacing: 5) {
+                                    Capsule().fill(Soot.ink).frame(width: [22, 16, 26, 18, 24][i], height: 3)
+                                    Spacer(minLength: 0)
+                                    Capsule().fill(Soot.muted.opacity(0.55)).frame(width: 14, height: 3)
+                                }
+                            }
+                        }
+                        .padding(.horizontal, 10)
+                        .frame(width: 84, height: 40)
+                        .background(Soot.ground, in: RoundedRectangle(cornerRadius: 8))
+                        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Soot.edge))
+                        .overlay {
+                            if on {
+                                RoundedRectangle(cornerRadius: 8).strokeBorder(Soot.lime, lineWidth: 2)
+                                    .matchedGeometryEffect(id: "ring", in: ring)
+                            }
+                        }
+                        Text(option.label).font(.system(size: 12, weight: on ? .semibold : .medium))
+                            .foregroundStyle(on ? Soot.ink : Soot.muted)
+                    }
+                    .padding(4)
+                }
+                .buttonStyle(RowButton(lift: .tone, radius: 8))
+                .accessibilityLabel("\(option.label) rows")
+                .accessibilityAddTraits(on ? .isSelected : [])
+            }
+        }
+        .padding(.vertical, 8)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Row density")
+    }
+}
+
 /// The project list drawn small: a pinned row on top, the groups, the row height and the
-/// finished row follow the settings. Each column's head is a chip that shows or hides it;
-/// a hidden column keeps its place, empty, so the heads never move under the pointer.
+/// finished row follow the settings. Each column is headed by a chip that shows or hides
+/// it (a check when shown, a plus when hidden); a hidden column keeps its place, empty, so
+/// the heads never move under the pointer.
 private struct ListMiniature: View {
     @Binding var settings: OverviewSettings
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -123,45 +183,60 @@ private struct ListMiniature: View {
     }
 
     private let lines = [
-        Line(id: 0, pinned: true, name: 64, progress: 0.6, health: Soot.lime),
-        Line(id: 1, name: 48, progress: 0.3, health: Theme.negative),
-        Line(id: 2, name: 72, progress: 0.8, health: Soot.lime),
-        Line(id: 3, finished: true, name: 56, progress: 1, health: Soot.muted),
+        Line(id: 0, pinned: true, name: 52, progress: 0.6, health: Soot.lime),
+        Line(id: 1, name: 40, progress: 0.3, health: Theme.negative),
+        Line(id: 2, finished: true, name: 58, progress: 1, health: Soot.muted),
     ]
 
     private var rowHeight: CGFloat { settings.density == .compact ? 16 : 24 }
     private var grouped: Bool { settings.group != .none }
 
     var body: some View {
-        VStack(spacing: 0) {
-            HStack(spacing: 4) {
-                Color.clear.frame(width: 92, height: 1)
-                ForEach(OverviewSettings.Column.allCases) { column in
-                    head(column).frame(maxWidth: .infinity)
+        HStack(alignment: .top, spacing: 0) {
+            column(width: 76, alignment: .leading) {
+                Color.clear.frame(height: 26)
+            } group: { line in
+                Capsule().fill(Soot.muted).frame(width: line.id == 0 ? 40 : 30, height: 4)
+            } cell: { line in
+                HStack(spacing: 6) {
+                    Image(systemName: "pin.fill").font(.system(size: 8)).foregroundStyle(Soot.lime)
+                        .opacity(line.pinned ? 1 : 0)
+                    Capsule().fill(Soot.ink).frame(width: line.name, height: 5)
                 }
             }
-            .padding(.bottom, 8)
-            ForEach(lines) { line in
-                if grouped, line.id == 0 || line.id == 2 {
-                    HStack {
-                        Capsule().fill(Soot.muted).frame(width: line.id == 0 ? 40 : 30, height: 4)
-                        Spacer()
-                    }
-                    .frame(height: 16)
-                    .transition(.opacity)
-                }
-                if !(line.finished && settings.hideFinished) {
-                    row(line).transition(.opacity)
+            ForEach(OverviewSettings.Column.allCases) { kind in
+                Spacer(minLength: 4)
+                column(width: nil, alignment: .center) {
+                    head(kind)
+                } group: { _ in
+                    Color.clear
+                } cell: { line in
+                    mark(kind, line).opacity(settings.columns.contains(kind) ? 1 : 0)
                 }
             }
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 14)
-        .frame(maxWidth: .infinity)
-        .background(Soot.surface, in: RoundedRectangle(cornerRadius: 12))
         .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: settings)
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel("Columns")
+    }
+
+    /// One column: its head, then a cell per line, with the group labels' rows kept in step.
+    private func column<Head: View, GroupMark: View, Cell: View>(
+        width: CGFloat?, alignment: HorizontalAlignment,
+        @ViewBuilder head: () -> Head,
+        @ViewBuilder group: @escaping (Line) -> GroupMark,
+        @ViewBuilder cell: @escaping (Line) -> Cell
+    ) -> some View {
+        VStack(alignment: alignment, spacing: 0) {
+            head().padding(.bottom, 8)
+            ForEach(lines) { line in
+                if grouped, line.id != 1 {
+                    group(line).frame(height: 16).transition(.opacity).accessibilityHidden(true)
+                }
+                if !(line.finished && settings.hideFinished) {
+                    cell(line).frame(height: rowHeight).transition(.opacity).accessibilityHidden(true)
+                }
+            }
+        }
+        .frame(width: width, alignment: Alignment(horizontal: alignment, vertical: .top))
     }
 
     private func head(_ column: OverviewSettings.Column) -> some View {
@@ -169,41 +244,28 @@ private struct ListMiniature: View {
         return Button {
             if on { settings.columns.remove(column) } else { settings.columns.insert(column) }
         } label: {
-            Text(column.chip)
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(on ? Soot.limeInk : Soot.muted)
-                .lineLimit(1)
-                .fixedSize()
-                .padding(.horizontal, 9)
-                .frame(height: 26)
+            HStack(spacing: 4) {
+                Image(systemName: on ? "checkmark" : "plus")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(on ? Soot.limeInk : Soot.muted)
+                    .accessibilityHidden(true)
+                Text(column.chip)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(on ? Soot.limeInk : Soot.ink)
+            }
+            .lineLimit(1)
+            .fixedSize()
+            .padding(.horizontal, 8)
+            .frame(height: 26)
         }
-        .buttonStyle(ChipButton(on: on, fill: Soot.surface))
+        .buttonStyle(ColumnHead(on: on))
         .help(column.detail)
         .accessibilityLabel("\(column.chip) column")
         .accessibilityValue(on ? "Shown" : "Hidden")
         .accessibilityAddTraits(.isToggle)
     }
 
-    private func row(_ line: Line) -> some View {
-        HStack(spacing: 4) {
-            HStack(spacing: 6) {
-                Image(systemName: "pin.fill").font(.system(size: 8)).foregroundStyle(Soot.lime)
-                    .opacity(line.pinned ? 1 : 0)
-                Capsule().fill(Soot.ink).frame(width: line.name, height: 5)
-                Spacer(minLength: 0)
-            }
-            .frame(width: 92)
-            ForEach(OverviewSettings.Column.allCases) { column in
-                cell(column, line)
-                    .frame(maxWidth: .infinity)
-                    .opacity(settings.columns.contains(column) ? 1 : 0)
-            }
-        }
-        .frame(height: rowHeight)
-        .accessibilityHidden(true)
-    }
-
-    @ViewBuilder private func cell(_ column: OverviewSettings.Column, _ line: Line) -> some View {
+    @ViewBuilder private func mark(_ column: OverviewSettings.Column, _ line: Line) -> some View {
         let quiet = Soot.muted.opacity(0.55)
         switch column {
         case .slack:
@@ -229,6 +291,32 @@ private struct ListMiniature: View {
                 Circle().fill(line.health).frame(width: 6, height: 6)
                 Capsule().fill(quiet).frame(width: 22, height: 4)
             }
+        }
+    }
+}
+
+/// A column's head in the miniature: lime when the column shows, an outline when hidden.
+/// Hover and press tint it with its label's ink, like every chip.
+private struct ColumnHead: ButtonStyle {
+    let on: Bool
+    func makeBody(configuration: Configuration) -> some View { Face(configuration: configuration, on: on) }
+
+    private struct Face: View {
+        let configuration: Configuration
+        let on: Bool
+        @State private var hovering = false
+
+        var body: some View {
+            let tone = configuration.isPressed ? 0.16 : hovering ? 0.08 : 0
+            configuration.label
+                .background(Capsule().fill(on ? Soot.lime : Color.clear))
+                .overlay(Capsule().fill((on ? Soot.limeInk : Soot.ink).opacity(tone)))
+                .overlay(RoundedRectangle(cornerRadius: 13, style: .circular).strokeBorder(Soot.edge.opacity(on ? 0 : 1)))
+                .contentShape(Capsule())
+                .modifier(FocusOutline(radius: 13))
+                .onHover { hovering = $0 }
+                .handCursor()
+                .animation(.easeOut(duration: 0.12), value: hovering)
         }
     }
 }

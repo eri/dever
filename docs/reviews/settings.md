@@ -167,7 +167,7 @@ in the spirit of the Appearance thumbnails.
 - **It follows every choice.** Density changes the row height, Group by adds group labels, Hide
   finished projects fades the finished row out (200 ms ease-out, none under Reduce Motion).
 - **"Pinned projects first" is removed.** A pin that does not move the project means nothing, so
-  pinned projects always come first. The miniature shows a pinned row on top and the caption says so.
+  pinned projects always come first. The miniature shows a pinned row on top.
 - **New: Quiet after** (7, 14 or 30 days without a Slack message). It was a constant; it now drives
   `Project.status` and the "No Slack activity" signal.
 - **Accessibility.** Each head is a toggle named "Slack column" with the value Shown or Hidden; the
@@ -175,3 +175,16 @@ in the spirit of the Appearance thumbnails.
   inside equal slots wider than 24 pt (WCAG 2.5.8). An off chip is muted text with a 3:1 edge.
 - **Reset to defaults** also resets Quiet after.
 
+### Second pass: it has to read as a control
+
+The miniature looked like an illustration, and nothing said it could be clicked.
+
+- **The card has a title.** "Columns", then "Click a column to show or hide it". Every setting on the
+  page now has a title, and a detail line only where the title is not enough.
+- **Chips say their state twice.** A shown column is a lime chip with a check; a hidden one is an
+  outlined chip with a plus, in full ink. The plus is the invitation to click.
+- **Density is a picture.** Two tiles draw three airy rows or five tight ones, with a 2px lime ring on
+  the chosen one and its name underneath, like the Appearance thumbnails. The segment stays in the
+  Overview page's View popover, where space is short.
+- **Fix.** The off chip's edge is a rounded rectangle (radius 13), not a `Capsule` stroke, which drew
+  stray ticks beside the chip's ends.
