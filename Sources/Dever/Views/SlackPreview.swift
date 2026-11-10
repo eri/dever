@@ -219,6 +219,7 @@ struct RichTextLabel: NSViewRepresentable {
             }
             attrs[.font] = font
             if intent.contains(.strikethrough) { attrs[.strikethroughStyle] = NSUnderlineStyle.single.rawValue }
+            if run.appKit.underlineStyle != nil { attrs[.underlineStyle] = NSUnderlineStyle.single.rawValue }
             if let fg = run.foregroundColor { attrs[.foregroundColor] = NSColor(fg) }
             if let bg = run.backgroundColor { attrs[.backgroundColor] = NSColor(bg) }
             if let link = run.link {

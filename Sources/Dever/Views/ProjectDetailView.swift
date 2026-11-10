@@ -865,9 +865,9 @@ struct ProjectDetailView: View {
 
     private var slackActions: SlackMessageActions {
         SlackMessageActions(
-            reply: { m, text in
+            reply: { m, draft in
                 guard let id = project.slack?.id else { return }
-                try await app.withSlack { try await $0.reply(id, threadTS: m.ts, text: text) }
+                try await app.withSlack { try await $0.reply(id, threadTS: m.ts, text: draft.text, blocks: draft.blocks) }
                 await loadSlack()
             },
             react: { m, name, on in

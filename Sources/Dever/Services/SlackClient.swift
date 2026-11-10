@@ -133,6 +133,7 @@ struct SlackRichElement: Codable {
         var bold: Bool?
         var italic: Bool?
         var strike: Bool?
+        var underline: Bool?
         var code: Bool?
     }
     var type: String
@@ -372,8 +373,11 @@ struct SlackClient {
     }
 
     /// Posts `text` as a reply in the thread of `threadTS`, as the signed-in user.
-    func reply(_ channelID: String, threadTS: String, text: String) async throws {
-        _ = try await call("chat.postMessage", ["channel": channelID, "thread_ts": threadTS, "text": text])
+    /// `blocks` is rich_text JSON for a formatted reply; `text` is then its fallback.
+    func reply(_ channelID: String, threadTS: String, text: String, blocks: String? = nil) async throws {
+        var params = ["channel": channelID, "thread_ts": threadTS, "text": text]
+        if let blocks { params["blocks"] = blocks }
+        _ = try await call("chat.postMessage", params)
     }
 
     /// Adds or removes the signed-in user's reaction `name` ("+1", "heart") on a message.

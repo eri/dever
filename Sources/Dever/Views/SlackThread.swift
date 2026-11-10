@@ -342,6 +342,7 @@ enum SlackRichText {
             if style.strike == true { intent.insert(.strikethrough) }
             if style.code == true { intent.insert(.code) }
             if !intent.isEmpty { s.inlinePresentationIntent = intent }
+            if style.underline == true { s.appKit.underlineStyle = .single }
         }
         return s
     }
@@ -373,7 +374,7 @@ enum SlackRichText {
 
 /// What a row can do to its message, provided by the project page.
 struct SlackMessageActions {
-    var reply: (SlackMessage, String) async throws -> Void = { _, _ in }
+    var reply: (SlackMessage, SlackDraft) async throws -> Void = { _, _ in }
     var react: (SlackMessage, String, Bool) async throws -> Void = { _, _, _ in }
     var replies: (SlackMessage) async throws -> [SlackMessage] = { _ in [] }
 }
@@ -1131,7 +1132,6 @@ private struct ThreadPane: View {
     let close: () -> Void
     @State private var replies: [SlackMessage]?
     @State private var failed = false
-    @State private var draft = ""
     @State private var sending = false
     @State private var parentOpen = false
 
@@ -1193,13 +1193,14 @@ private struct ThreadPane: View {
             .id(parent.ts)
             .transition(.opacity)
             .motion(Motion.ui, fade: true, value: parent.ts)
-            ReplyComposer(draft: $draft, sending: sending, autofocus: false, send: { await send() }, cancel: { draft = "" })
+            ReplyComposer(sending: sending, autofocus: false, fill: Soot.surface, send: { await send($0) }, cancel: {})
+                .id(parent.ts)
         }
         .padding(18)
         .frame(maxHeight: .infinity, alignment: .top)
         .background(Soot.ground, in: RoundedRectangle(cornerRadius: 12))
         .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Soot.line))
-        .task(id: parent.ts) { replies = nil; draft = ""; await load() }
+        .task(id: parent.ts) { replies = nil; await load() }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Thread")
     }
@@ -1209,56 +1210,15 @@ private struct ThreadPane: View {
         do { replies = try await actions.replies(parent) } catch { failed = true }
     }
 
-    private func send() async {
-        let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty, !sending else { return }
+    private func send(_ draft: SlackDraft) async -> Bool {
+        guard !draft.text.isEmpty, !sending else { return false }
         sending = true
         defer { sending = false }
         do {
-            try await actions.reply(parent, text)
-            draft = ""
+            try await actions.reply(parent, draft)
             await load()
-        } catch { app.report(error) }
-    }
-}
-
-/// One line to answer in a thread: Return sends, Escape clears.
-private struct ReplyComposer: View {
-    @Binding var draft: String
-    let sending: Bool
-    var autofocus = true
-    let send: () async -> Void
-    let cancel: () -> Void
-    @FocusState private var focused: Bool
-
-    private var empty: Bool { draft.trimmingCharacters(in: .whitespaces).isEmpty }
-
-    var body: some View {
-        HStack(spacing: 8) {
-            TextField("Reply in thread", text: $draft)
-                .textFieldStyle(.plain)
-                .font(.system(size: 13))
-                .foregroundStyle(Soot.ink)
-                .focused($focused)
-                .onSubmit { Task { await send() } }
-                .onExitCommand(perform: cancel)
-                .padding(.horizontal, 10)
-                .frame(height: 32)
-                .background(Soot.ground, in: RoundedRectangle(cornerRadius: 8))
-                .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(focused ? Soot.lime : Soot.edge))
-                .disabled(sending)
-            Button {
-                Task { await send() }
-            } label: {
-                Text("Send").font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(empty || sending ? Soot.muted : Soot.limeInk)
-                    .padding(.horizontal, 10).frame(height: 28)
-            }
-            .buttonStyle(ChipButton(on: !(empty || sending), edge: false))
-            .disabled(empty || sending)
-        }
-        .padding(.top, 4)
-        .onAppear { if autofocus { focused = true } }
+            return true
+        } catch { app.report(error); return false }
     }
 }
 
@@ -1336,7 +1296,6 @@ private struct MessageRow: View {
     @State private var thread: [SlackMessage]?
     @State private var threadFailed = false
     @State private var replying = false
-    @State private var draft = ""
     @State private var sending = false
     @State private var reactions: [SlackReaction] = []
     @FocusState private var stripFocus: Int?
@@ -1415,7 +1374,7 @@ private struct MessageRow: View {
                     ThreadReplies(replies: thread, failed: threadFailed, users: users, channels: channels, customEmoji: customEmoji, actions: actions)
                 }
                 if replying, openThread == nil {
-                    ReplyComposer(draft: $draft, sending: sending, send: { await send() }, cancel: { replying = false; draft = "" })
+                    ReplyComposer(sending: sending, send: { await send($0) }, cancel: { replying = false })
                 }
             }
         }
@@ -1528,18 +1487,17 @@ private struct MessageRow: View {
         }
     }
 
-    private func send() async {
-        let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty, !sending else { return }
+    private func send(_ draft: SlackDraft) async -> Bool {
+        guard !draft.text.isEmpty, !sending else { return false }
         sending = true
         defer { sending = false }
         do {
-            try await actions.reply(message, text)
-            draft = ""
+            try await actions.reply(message, draft)
             replying = false
             threadOpen = true
             await loadThread()
-        } catch { app.report(error) }
+            return true
+        } catch { app.report(error); return false }
     }
 
     private func loadThread() async {
