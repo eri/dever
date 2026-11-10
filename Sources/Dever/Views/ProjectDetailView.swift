@@ -560,7 +560,7 @@ struct ProjectDetailView: View {
                                     slackFocus = m.ts
                                     toggleSlackWide()
                                     Task {
-                                        try? await Task.sleep(nanoseconds: 3_000_000_000)
+                                        try? await Task.sleep(nanoseconds: 2_000_000_000)
                                         if slackFocus == m.ts { Motion.run(Motion.ui, fade: true) { slackFocus = nil } }
                                     }
                                 },
@@ -624,7 +624,7 @@ struct ProjectDetailView: View {
             if !slackExpanded { toggleSlackWide() }
             // You opened it on purpose: it is read, and so is what came before it.
             seen(ts)
-            try? await Task.sleep(nanoseconds: 4_000_000_000)
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
             if slackFocus == ts { Motion.run(Motion.ui, fade: true) { slackFocus = nil } }
         case .pull(let identifier, _):
             guard let identifier, let issue = issues.first(where: { $0.identifier == identifier }) else { return }

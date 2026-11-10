@@ -1315,16 +1315,17 @@ private struct MessageRow: View {
     var openThread: ((SlackMessage) -> Void)? = nil
     /// In the compact view a click on the message opens the wide view on it.
     var openWide: ((SlackMessage) -> Void)? = nil
-    /// Three soft pulses of lime (a steady tint under Reduce Motion), then it fades on its own.
+    /// Three soft pulses of lime (a steady tint under Reduce Motion), then it fades: two seconds.
     private func flash() {
         if Motion.reduced {
             withAnimation(.easeOut(duration: 0.2)) { glow = 0.16 }
         } else {
             glow = 0
-            withAnimation(.easeInOut(duration: 0.45).repeatCount(5, autoreverses: true)) { glow = 0.22 }
+            withAnimation(.easeInOut(duration: 0.35).repeatCount(3, autoreverses: true)) { glow = 0.22 }
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2.6) {
-            withAnimation(.easeOut(duration: 0.8)) { glow = 0 }
+        // Two seconds in all: three pulses, then the fade.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+            withAnimation(.easeOut(duration: 0.5)) { glow = 0 }
         }
     }
 
