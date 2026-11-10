@@ -26,7 +26,7 @@ struct OverviewSettingsView: View {
                     row(title: "Density") {
                         SegmentPicker(label: "Row density",
                                       options: OverviewSettings.Density.allCases.map { (label: $0.label, value: $0) },
-                                      selection: settings.density)
+                                      selection: settings.density, width: nil, track: Soot.surface)
                     }
                     row(title: "Columns") { ColumnChips(columns: settings.columns, alignment: .leading) }
                     hideFinished
@@ -55,7 +55,7 @@ struct OverviewSettingsView: View {
                     SettingRow(title: "Quiet after", detail: "Without a Slack message") {
                         SegmentPicker(label: "A project is quiet after",
                                       options: Preferences.quietChoices.map { (label: "\($0) days", value: $0) },
-                                      selection: $quietAfter)
+                                      selection: $quietAfter, width: Buttons.controlWidth)
                     }
                     hideFinished
                 }
@@ -76,12 +76,14 @@ struct OverviewSettingsView: View {
         row(title: "Sort by") {
             SegmentPicker(label: "Sort projects by",
                           options: OverviewSettings.Sort.allCases.map { (label: $0.label, value: $0) },
-                          selection: settings.sort)
+                          selection: settings.sort, width: compact ? nil : Buttons.controlWidth,
+                          track: compact ? Soot.surface : Soot.ground)
         }
         row(title: "Group by") {
             SegmentPicker(label: "Group projects by",
                           options: OverviewSettings.Group.allCases.map { (label: $0.label, value: $0) },
-                          selection: settings.group)
+                          selection: settings.group, width: compact ? nil : Buttons.controlWidth,
+                          track: compact ? Soot.surface : Soot.ground)
         }
     }
 

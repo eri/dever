@@ -357,8 +357,8 @@ and `buttons-light.png`.
   menus gained tooltips in this pass.
 - **Segment pickers and column chips** (Settings › Overview, Launch, the View popover): track 32px,
   segments 28px in a 360px column of equal widths; unchosen words `Soot.muted` (5.9:1 dark / 5.5:1
-  light on the ground track), chosen `Soot.limeInk` on lime (16.6 / 7.1:1); a hidden column's chip is
-  muted on ground with a dash, a shown one ink on surface with a lime check and a 3:1 edge.
+  light on the ground track, 5.4 / 6.1:1 on the popover's surface track), chosen `Soot.limeInk` on
+  lime (16.6 / 7.1:1).
 - **Targets** (2.5.8): primaries 44 in sheets / 36 in panels, toolbar 34, chips 26–30, text
   links 28 (32 in onboarding), icon buttons 26–40, rows 36–64. The 20px label chip ("+2")
   and the 24px reaction pills stay under 24px in height but sit alone in their line.

@@ -108,7 +108,7 @@ has N H P D F ✋ through its style unless noted.
 | 26 | "Reset to defaults" | QuietButton, D | Secondary |
 | 38–50 | `SegmentPicker` ×3 | see SettingsView | Segment |
 | 56, 61 | switches | system Toggle | system; the row gets the hand |
-| 109 | `ColumnChips` (toggle a column) | `.plain` + FocusOutline: N F, on/off, lime when on | Chip: 2 × 3 of equal width in the 360 column, 32 high; shown = surface tile + edge + lime check, hidden = ground + muted + dash |
+| — | `ColumnChips` / `ListMiniature` column heads (toggle a column) | `.plain` + FocusOutline | Chip (`on:`), as drawn by the Settings redesign |
 
 ### Views/ProjectDetailView.swift
 | Line | Element | Before | Role now |
@@ -271,9 +271,8 @@ has N H P D F ✋ through its style unless noted.
   "Open Settings" are tertiary links with a hover pill (they had none); the progress marks
   show the hand and a tooltip where they lead back; the prefix choice rows lift on hover.
 - **Settings › Overview, Launch and the View popover**: the segment pickers share one 360pt column
-  with segments of equal width (edges line up from row to row), a ground track without edge, 32px
-  and 13pt; the column chips fill the same column as a 2 × 3 grid, lime only on the check. Three
-  lime pills on the page instead of nine lime patches.
+  with segments of equal width (edges line up from row to row), a track without edge (ground on a
+  card, surface in the popover), 32px and 13pt, the words not chosen muted.
 - **Settings**: section list rows, appearance thumbnails and status-menu rows lift on hover;
   the status trigger is a menu trigger that turns lime-edged while open; segments get a hover
   tone and the hand; Connect / Reconnect / Cancel / Start / Open System Settings / Copy /

@@ -1250,6 +1250,8 @@ struct SegmentPicker<Value: Hashable>: View {
     let options: [(label: String, value: Value)]
     @Binding var selection: Value
     var width: CGFloat? = Buttons.controlWidth
+    /// The track's tone: ground on a surface card, surface when the picker sits on the ground (a popover).
+    var track: Color = Soot.ground
     @Namespace private var pill
 
     var body: some View {
@@ -1274,7 +1276,7 @@ struct SegmentPicker<Value: Hashable>: View {
         .padding(2)
         .frame(width: width, height: 32)
         .frame(maxWidth: width == nil ? .infinity : nil)
-        .background(Soot.ground, in: Capsule())
+        .background(track, in: Capsule())
         .accessibilityElement(children: .contain)
         .accessibilityLabel(label)
     }
