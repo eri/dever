@@ -134,7 +134,14 @@ struct IssueDetailView: View {
 
     private func signals(_ d: LinearIssueDetail) -> some View {
         let current = row ?? d.asRow
-        let done = d.subIssues.filter { $0.state.type == "completed" }.count
+        // Sub-issues in a review or QA state are out of the developer's hands: they count
+        // towards the bar and are named, instead of reading as not done.
+        let subs = d.subIssues.filter { $0.state.type != "canceled" }
+        let done = subs.filter { $0.state.type == "completed" }.count
+        let inQA = subs.filter { $0.state.type != "completed" && Delivery.isReviewState($0.state.name) }.count
+        let subsText = inQA == 0 ? "\(done) of \(subs.count) sub-issues done"
+            : inQA == subs.count ? "All \(subs.count) sub-issues in QA"
+            : "\(done) done · \(inQA) in QA of \(subs.count) sub-issues"
         let code = (d.attachments?.nodes ?? []).compactMap { store.pullsByURL[$0.url] }
         return FlowRow(spacing: 8) {
             statusMenu(current)
@@ -156,10 +163,10 @@ struct IssueDetailView: View {
                 .help("Show the blocking issues")
                 .accessibilityHint("Scrolls to the linked issues")
             }
-            if !d.subIssues.isEmpty {
-                signal(symbol: done == d.subIssues.count ? "checklist.checked" : "checklist", text: "\(done) of \(d.subIssues.count) sub-issues done",
-                       tint: nil, label: "\(done) of \(d.subIssues.count) sub-issues done") {
-                    MiniBar(fraction: Double(done) / Double(d.subIssues.count))
+            if !subs.isEmpty {
+                signal(symbol: done == subs.count ? "checklist.checked" : "checklist", text: subsText,
+                       tint: nil, label: subsText) {
+                    MiniBar(fraction: Double(done + inQA) / Double(subs.count))
                 }
             }
             // Merged work has its own banner below; open pull requests are a signal here.
