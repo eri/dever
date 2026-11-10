@@ -327,6 +327,14 @@ struct SlackClient {
                                 hasMore: res["has_more"] as? Bool ?? false)
     }
 
+    /// The channel's messages after `ts` (exclusive), newest first, at most `limit`; `hasMore`
+    /// says whether older ones past the limit are left out. With the read cursor: the unread.
+    func historyAfter(_ channelID: String, ts: String, limit: Int = 200) async throws -> SlackHistoryPage {
+        let res = try await call("conversations.history", ["channel": channelID, "oldest": ts, "limit": "\(limit)"])
+        return SlackHistoryPage(messages: try decode(res["messages"], as: [SlackMessage].self),
+                                hasMore: res["has_more"] as? Bool ?? false)
+    }
+
     /// Slack's own read cursor for the channel: the `ts` of the last message you read there,
     /// in Slack or here. Messages after it are unread.
     func lastRead(_ channelID: String) async throws -> String? {

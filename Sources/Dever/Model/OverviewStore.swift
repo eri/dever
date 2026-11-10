@@ -30,6 +30,8 @@ struct ProjectSnapshot {
         var mentions: [Mention] = []
         /// Every unread message's `ts`, so reading part of the channel can be subtracted.
         var unreadTS: [String] = []
+        /// More unread messages than one call brings (200): the count is shown as "200+".
+        var unreadCapped = false
 
         struct Mention: Equatable {
             var ts: String
@@ -250,7 +252,7 @@ final class OverviewStore: ObservableObject {
         s.unreadTS.removeAll { SlackTS.isAtOrBefore($0, ts) }
         if s.unread != nil { s.unread = s.unreadTS.count }
         s.firstUnreadTS = s.unreadTS.min { (Double($0) ?? 0) < (Double($1) ?? 0) }
-        if s.unreadTS.isEmpty { s.lastUnreadAt = nil }
+        if s.unreadTS.isEmpty { s.lastUnreadAt = nil; s.unreadCapped = false }
         snapshots[project]?.slack = s
     }
 
@@ -417,9 +419,12 @@ final class OverviewStore: ObservableObject {
             let me = await app.slack?.userID
             stats.lastAuthor = latest?.user.flatMap { users[$0]?.name }
             // What arrived since your last read, from others; mentions of you put forward.
-            if let cursor = try? await app.withSlack({ try await $0.lastRead(id) }) {
-                let unread = recent.filter { !SlackTS.isAtOrBefore($0.ts, cursor) && $0.user != me }
+            // Everything since your read position, however old: one call from the cursor on.
+            if let cursor = try? await app.withSlack({ try await $0.lastRead(id) }),
+               let page = try? await app.withSlack({ try await $0.historyAfter(id, ts: cursor) }) {
+                let unread = page.messages.filter { spoken($0) && $0.user != me && !SlackTS.isAtOrBefore($0.ts, cursor) }
                 stats.unread = unread.count
+                stats.unreadCapped = page.hasMore
                 stats.unreadTS = unread.map(\.ts)
                 stats.firstUnreadTS = unread.min { $0.ts < $1.ts }?.ts
                 stats.lastUnreadAt = unread.map(\.date).max()

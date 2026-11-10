@@ -41,8 +41,9 @@ extension ProjectSnapshot {
         }
         if let s = slack, let unread = s.unread, unread > s.mentions.count, let first = s.firstUnreadTS {
             let rest = unread - s.mentions.count
+            let count = s.unreadCapped ? "\(rest)+" : "\(rest)"
             let place = channel.map { " in #\($0)" } ?? ""
-            out.append(.init(kind: .unread, text: s.mentions.isEmpty ? "\(rest) unread\(place)" : "\(rest) more unread\(place)",
+            out.append(.init(kind: .unread, text: s.mentions.isEmpty ? "\(count) unread\(place)" : "\(count) more unread\(place)",
                              date: s.lastUnreadAt ?? Date(), target: .slack(ts: first)))
         }
         return out
