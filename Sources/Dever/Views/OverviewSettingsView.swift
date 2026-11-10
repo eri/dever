@@ -270,12 +270,6 @@ private struct ListMiniature: View {
     @ViewBuilder private func mark(_ column: OverviewSettings.Column, _ line: Line) -> some View {
         let quiet = Soot.muted.opacity(0.55)
         switch column {
-        case .slack:
-            HStack(alignment: .bottom, spacing: 2) {
-                ForEach(0..<4, id: \.self) { i in
-                    Capsule().fill(quiet).frame(width: 3, height: CGFloat(3 + (i * 5 + line.id * 3) % 8))
-                }
-            }
         case .linear:
             Capsule().fill(quiet).frame(width: 36, height: 4)
                 .overlay(alignment: .leading) { Capsule().fill(Soot.lime).frame(width: 36 * line.progress, height: 4) }
@@ -325,10 +319,10 @@ private struct ColumnChips: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        // Two rows (three, then the rest): the chips do not fit one row beside their label.
+        // Two rows of two: the chips do not fit one row beside their label.
         let all = OverviewSettings.Column.allCases
         VStack(alignment: alignment, spacing: 6) {
-            ForEach([Array(all.prefix(3)), Array(all.dropFirst(3))], id: \.first) { line in
+            ForEach([Array(all.prefix(2)), Array(all.dropFirst(2))], id: \.first) { line in
                 HStack(spacing: 6) {
                     ForEach(line) { column in chip(column) }
                 }

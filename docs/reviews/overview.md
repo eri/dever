@@ -128,8 +128,9 @@ are not in this list.
 (that order), Activity and Name.
 
 **Columns.** None by default: the row already says what waits, what happened last and what
-blocks. Slack (unread messages), Linear, GitHub, Preview and Due date stay available in the View
-popover and in Settings › Overview. The Health column is gone: the trailing status says it in
+blocks. Linear, GitHub, Preview and Due date stay available in the View popover and in
+Settings › Overview. The Slack column is gone too: "All read" on every row said nothing, and
+unread messages already show under their project when there are any. The Health column is gone: the trailing status says it in
 words. The settings moved to the `overview.v2` key, so the table's saved choice (every column on)
 does not carry over.
 

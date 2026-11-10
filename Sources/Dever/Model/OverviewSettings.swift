@@ -48,11 +48,10 @@ struct OverviewSettings: Codable, Equatable {
     /// The optional columns between the project's name and its status, in the order they are
     /// drawn. The status at the trailing edge (what blocks, or issues shipped) always shows.
     enum Column: String, CaseIterable, Identifiable, Codable {
-        case slack, linear, github, preview, target
+        case linear, github, preview, target
         var id: String { rawValue }
         var label: String {
             switch self {
-            case .slack: "Slack"
             case .linear: "Issues shipped"
             case .github: "GitHub"
             case .preview: "Preview"
@@ -62,7 +61,6 @@ struct OverviewSettings: Codable, Equatable {
         /// The column's name on a Settings chip, where the tool's name is enough.
         var chip: String {
             switch self {
-            case .slack: "Slack"
             case .linear: "Linear"
             case .github: "GitHub"
             case .preview: "Preview"
@@ -72,7 +70,6 @@ struct OverviewSettings: Codable, Equatable {
         /// What the column shows, for the Settings row and the column header's tooltip.
         var detail: String {
             switch self {
-            case .slack: "Unread messages in the channel"
             case .linear: "Linear issues done, or merged in GitHub, out of all"
             case .github: "Pipeline, open pull requests"
             case .preview: "The followed pull request's preview"
@@ -82,7 +79,6 @@ struct OverviewSettings: Codable, Equatable {
         /// The column's width in points; the project column takes the rest.
         var width: CGFloat {
             switch self {
-            case .slack: 88
             case .linear: 124
             case .github: 120
             case .preview: 80

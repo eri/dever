@@ -635,8 +635,6 @@ private struct ProjectRow: View {
         else if let last = entry.last { parts.append("\(last.text), \(last.date.formatted(.relative(presentation: .named)))") }
         for column in columns {
             switch column {
-            case .slack:
-                if let n = snapshot?.slack?.unread { parts.append(n == 0 ? "Slack all read" : "\(n) unread in Slack") }
             case .linear:
                 if let d = snapshot?.delivery, d.total > 0 { parts.append("Linear: \(d.shipped) of \(d.total) shipped") }
             case .github:
@@ -772,39 +770,10 @@ private struct ProjectRow: View {
 
     @ViewBuilder private func cell(_ column: OverviewSettings.Column) -> some View {
         switch column {
-        case .slack: slack
         case .linear: linear
         case .github: github
         case .preview: preview
         case .target: target
-        }
-    }
-
-    @ViewBuilder private var slack: some View {
-        if let s = snapshot?.slack, let n = s.unread {
-            HStack(spacing: 4) {
-                if n == 0 {
-                    Text("All read").font(.system(size: 13)).foregroundStyle(Soot.muted)
-                } else {
-                    Text(n, format: .number).font(.system(size: 13, weight: .medium)).foregroundStyle(Soot.ink)
-                        .monospacedDigit()
-                        .contentTransition(.numericText(value: Double(n)))
-                        .animation(reduceMotion ? nil : .easeOut(duration: 0.25), value: n)
-                    Text("unread").font(.system(size: 13)).foregroundStyle(Soot.muted)
-                }
-            }
-            .lineLimit(1)
-            .help(n == 0 ? "Nothing new in #\(project.slack?.name ?? "the channel") since you last read it"
-                         : "\(n) messages in #\(project.slack?.name ?? "the channel") since you last read it")
-            .transition(.opacity)
-        } else if snapshot?.slack != nil {
-            dash("Slack's read position could not be loaded")
-        } else if project.slack == nil {
-            dash("No Slack channel linked")
-        } else if let state = snapshot?.errors[.slack] {
-            unavailable(.slack, state)
-        } else {
-            Skeleton(width: 64, height: 12)
         }
     }
 
