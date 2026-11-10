@@ -188,3 +188,24 @@ The miniature looked like an illustration, and nothing said it could be clicked.
   Overview page's View popover, where space is short.
 - **Fix.** The off chip's edge is a rounded rectangle (radius 13), not a `Capsule` stroke, which drew
   stray ticks beside the chip's ends.
+
+## Follow-up: the channel prefix as a choice
+
+The prefix was one field, and "no prefix" meant knowing to empty it. The card now asks the
+onboarding's question again, in the Overview page's language.
+
+- **Project channels** is a choice between two pictures, like Density: three channel names with the
+  same lime start ("Shared prefix"), or three plain ones ("No prefix"). A 2px lime ring marks the
+  choice, and the line under the title says what it does ("Dever finds them in Slack by their
+  prefix", "You pick them yourself when you import").
+- **Prefix** is a second row that only exists with a shared prefix. Its line is the proof, in the
+  user's own channels: "8 channels  #23-ai-tips  #23-impact-center…", the prefix in lime, the full
+  list in the tooltip.
+- **Nothing is lost.** "No prefix" clears the stored prefix but keeps the typed one, so switching
+  back restores it. With nothing typed, the prefix most of the user's channels share is proposed and
+  the field takes focus.
+- **States.** Slack not connected: "Import offers the channels that start with it". Empty field:
+  "What your project channels start with". No match says so in words.
+- **Accessibility.** Each tile is a button named by its label with the selected trait; the field
+  keeps the name "Slack channel prefix". The row fades in and out (none under Reduce Motion).
+

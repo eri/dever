@@ -287,58 +287,123 @@ private struct StatusMenuRow: View {
     }
 }
 
-/// The channel prefix as a plain setting row: the title, one line on what it does (with the
-/// user's own channels when Slack is connected), and a normal field on the right.
+/// How Dever finds project channels in Slack, the onboarding's question again: by a shared
+/// prefix, or by hand. Two pictures make the choice. With a prefix, a second row holds the
+/// field and names the user's own channels that start with it.
 private struct ChannelPrefixCard: View {
     @EnvironmentObject var app: AppState
     @Binding var prefix: String
+    @State private var shared = true
+    @State private var draft = ""
     @State private var channels: [String]?
     @FocusState private var focused: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Namespace private var ring
 
-    private var trimmed: String { prefix.trimmingCharacters(in: .whitespaces) }
+    private var trimmed: String { draft.trimmingCharacters(in: .whitespaces) }
     private var matches: [String] {
         guard let channels, !trimmed.isEmpty else { return [] }
         return channels.filter { $0.hasPrefix(trimmed) }.sorted()
     }
 
-    /// What the prefix does, said with real channels when there are some.
-    private var effect: String {
-        if trimmed.isEmpty { return "No prefix: you pick channels when you import" }
-        guard app.slack != nil, channels != nil else { return "Import offers the channels that start with it" }
-        switch matches.count {
-        case 0: return "None of your channels start with \(trimmed)"
-        case 1: return "Import offers 1 channel: #\(matches[0])"
-        case 2: return "Import offers 2 channels: #\(matches[0]), #\(matches[1])"
-        default: return "Import offers \(matches.count) channels: #\(matches[0]), #\(matches[1])…"
+    var body: some View {
+        SettingRows {
+            SettingRow(title: "Project channels",
+                       detail: shared ? "Dever finds them in Slack by their prefix" : "You pick them yourself when you import",
+                       divided: shared) {
+                HStack(spacing: 8) {
+                    tile(on: shared, label: "Shared prefix", marked: true) { choose(true) }
+                    tile(on: !shared, label: "No prefix", marked: false) { choose(false) }
+                }
+                .padding(.vertical, 8)
+                .accessibilityElement(children: .contain)
+                .accessibilityLabel("Project channels")
+            }
+            if shared {
+                HStack(alignment: .center, spacing: 16) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Prefix").font(.system(size: 14, weight: .medium)).foregroundStyle(Soot.ink)
+                        effect.font(.system(size: 12)).foregroundStyle(Soot.muted).lineLimit(1)
+                            .help(matches.map { "#" + $0 }.joined(separator: "\n"))
+                    }
+                    Spacer(minLength: 16)
+                    TextField("Prefix", text: $draft, prompt: Text("proj-").foregroundStyle(Soot.muted))
+                        .textFieldStyle(.plain)
+                        .font(.system(size: 14)).foregroundStyle(Soot.ink)
+                        .focused($focused)
+                        .padding(.horizontal, 12)
+                        .frame(width: 120, height: 36)
+                        .background(Soot.ground, in: RoundedRectangle(cornerRadius: Soot.radius))
+                        .overlay(RoundedRectangle(cornerRadius: Soot.radius)
+                            .strokeBorder(focused ? Soot.lime : Soot.edge, lineWidth: focused ? 2 : 1))
+                        .accessibilityLabel("Slack channel prefix")
+                }
+                .frame(minHeight: 56)
+                .transition(.opacity)
+            }
         }
+        .onAppear {
+            // Snapshots: DEVER_SNAPSHOT_NO_PREFIX shows the "No prefix" choice.
+            shared = !prefix.isEmpty && ProcessInfo.processInfo.environment["DEVER_SNAPSHOT_NO_PREFIX"] == nil
+            draft = prefix
+        }
+        .onChange(of: draft) { if shared { prefix = trimmed } }
+        .task(id: app.slack?.teamID) { await load() }
     }
 
-    var body: some View {
-        HStack(alignment: .center, spacing: 16) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Slack channel prefix").font(.system(size: 14, weight: .medium)).foregroundStyle(Soot.ink)
-                Text(effect).font(.system(size: 12)).foregroundStyle(Soot.muted).lineLimit(1)
-                    .help(matches.map { "#" + $0 }.joined(separator: "\n"))
-                    .contentTransition(.opacity)
-                    .motion(Motion.quick, fade: true, value: effect)
-            }
-            Spacer(minLength: 16)
-            TextField("Prefix", text: $prefix, prompt: Text("proj-").foregroundStyle(Soot.muted))
-                .textFieldStyle(.plain)
-                .font(.system(size: 14)).foregroundStyle(Soot.ink)
-                .focused($focused)
-                .padding(.horizontal, 12)
-                .frame(width: 120, height: 36)
-                .background(Soot.ground, in: RoundedRectangle(cornerRadius: Soot.radius))
-                .overlay(RoundedRectangle(cornerRadius: Soot.radius)
-                    .strokeBorder(focused ? Soot.lime : Soot.edge, lineWidth: focused ? 2 : 1))
-                .accessibilityLabel("Slack channel prefix")
+    /// What the prefix does, said with the user's own channels (their prefix in lime) when
+    /// there are some.
+    private var effect: Text {
+        if trimmed.isEmpty { return Text("What your project channels start with") }
+        guard app.slack != nil, channels != nil else { return Text("Import offers the channels that start with it") }
+        if matches.isEmpty { return Text("None of your channels start with \(trimmed)") }
+        var line = Text(Plural.text("^[\(matches.count) channel](inflect: true)")).foregroundColor(Soot.ink)
+        for name in matches.prefix(2) {
+            line = line + Text("  #") + Text(trimmed).foregroundColor(Soot.lime) + Text(name.dropFirst(trimmed.count))
         }
-        .padding(.horizontal, 16)
-        .frame(minHeight: 64)
-        .background(Soot.surface, in: RoundedRectangle(cornerRadius: 12))
-        .accessibilityElement(children: .contain)
-        .task(id: app.slack?.teamID) { await load() }
+        return matches.count > 2 ? line + Text("…") : line
+    }
+
+    /// One choice as a picture of three channel names: with the same lime start, or without.
+    private func tile(on: Bool, label: String, marked: Bool, select: @escaping () -> Void) -> some View {
+        Button(action: select) {
+            VStack(spacing: 6) {
+                VStack(alignment: .leading, spacing: 7) {
+                    ForEach(0..<3, id: \.self) { i in
+                        HStack(spacing: 2) {
+                            if marked { Capsule().fill(Soot.lime).frame(width: 12, height: 3) }
+                            Capsule().fill(Soot.ink).frame(width: marked ? [26, 16, 34][i] : [36, 22, 44][i], height: 3)
+                        }
+                    }
+                }
+                .padding(.horizontal, 12)
+                .frame(width: 84, height: 40, alignment: .leading)
+                .background(Soot.ground, in: RoundedRectangle(cornerRadius: 8))
+                .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Soot.edge))
+                .overlay {
+                    if on {
+                        RoundedRectangle(cornerRadius: 8).strokeBorder(Soot.lime, lineWidth: 2)
+                            .matchedGeometryEffect(id: "ring", in: ring)
+                    }
+                }
+                Text(label).font(.system(size: 12, weight: on ? .semibold : .medium))
+                    .foregroundStyle(on ? Soot.ink : Soot.muted)
+            }
+            .padding(4)
+        }
+        .buttonStyle(RowButton(lift: .tone, radius: 8))
+        .accessibilityLabel(label)
+        .accessibilityAddTraits(on ? .isSelected : [])
+    }
+
+    /// "No prefix" clears the stored prefix but keeps the typed one, so coming back restores
+    /// it; with nothing typed yet, the prefix most of the user's channels share is proposed.
+    private func choose(_ usesPrefix: Bool) {
+        guard usesPrefix != shared else { return }
+        if usesPrefix, trimmed.isEmpty { draft = Naming.commonPrefix(in: channels ?? [])?.prefix ?? "" }
+        withAnimation(reduceMotion ? nil : .spring(response: 0.3, dampingFraction: 0.85)) { shared = usesPrefix }
+        prefix = usesPrefix ? trimmed : ""
+        focused = usesPrefix && trimmed.isEmpty
     }
 
     /// The channels the user is in, once per workspace.
