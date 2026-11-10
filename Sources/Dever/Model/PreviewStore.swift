@@ -6,8 +6,8 @@ import SwiftUI
 // it unless the PR carries `preview:keep`). Dever reads the workflows' own comments and runs
 // and drives them the way a person would: by posting those comments.
 
-/// The team's deploy targets. Hostnames are deterministic from the PR number; only the
-/// targets the diff touched exist.
+/// The team's deploy targets. Hostnames are deterministic from the PR number
+/// (`pr-<N>-<target>.<domain>`); only the targets the diff touched exist.
 enum PreviewTarget: String, CaseIterable, Identifiable, Hashable {
     case app, api, bo, boapi, clienthub, clienthubAPI = "clienthub-api"
     var id: String { rawValue }
@@ -23,13 +23,20 @@ enum PreviewTarget: String, CaseIterable, Identifiable, Hashable {
         }
     }
 
+    /// The domain the team's previews are served under (dever.json › `preview.domain`).
+    static var domain: String { DeverConfig.shared.preview?.domain ?? "preview.example.com" }
+
+    private static func host(_ target: PreviewTarget, pull: Int) -> String {
+        "pr-\(pull)-\(target.rawValue).\(domain)"
+    }
+
     static func url(_ target: PreviewTarget, pull: Int) -> URL {
-        URL(string: "https://pr-\(pull)-\(target.rawValue).preview.mendo.cloud")!
+        URL(string: "https://\(host(target, pull: pull))")!
     }
 
     /// The target of a preview URL found in a comment, if any.
     static func parse(_ url: String, pull: Int) -> PreviewTarget? {
-        for target in allCases where url.contains("pr-\(pull)-\(target.rawValue).preview.mendo.cloud") {
+        for target in allCases where url.contains(host(target, pull: pull)) {
             // "clienthub" is a prefix of "clienthub-api": the host must end right after it.
             if target == .clienthub, url.contains("pr-\(pull)-clienthub-api.") { continue }
             return target
@@ -173,7 +180,7 @@ final class PreviewStore: ObservableObject {
     /// state from sample data, without network.
     static let simulation: String? = ProcessInfo.processInfo.environment["DEVER_SNAPSHOT_PREVIEW"]
     static let samplePullNumber = 4714
-    static let sampleRepo = "Mendo-SAS/mendoverse"
+    static let sampleRepo = "acme/platform"
 
     /// Open pull requests for the editor's picker in a snapshot run.
     static var samplePulls: [GitHubPull] {
@@ -181,16 +188,16 @@ final class PreviewStore: ObservableObject {
             GitHubPull(id: n, number: n, title: title, html_url: "https://github.com/\(sampleRepo)/pull/\(n)", draft: draft,
                        user: .init(login: login), updated_at: "2026-11-05T09:00:00Z", head: .init(ref: ref), merged_at: nil)
         }
-        return [pull(4714, "feat(app): guided lab intro with the new side panel [INA-1050]", "eri", "feat/ina-1050-lab-intro"),
-                pull(4720, "fix(api): rate-limit tip translations [INA-1055]", "captixn", "fix/ina-1055-translations"),
-                pull(4718, "chore: bump node to 22", "Baflee", "chore/node-22", draft: true),
-                pull(4711, "feat(bo): client hub billing export", "syd2", "feat/billing-export")]
+        return [pull(4714, "feat(app): guided lab intro with the new side panel [ENG-1050]", "ada", "feat/eng-1050-lab-intro"),
+                pull(4720, "fix(api): rate-limit tip translations [ENG-1055]", "grace", "fix/eng-1055-translations"),
+                pull(4718, "chore: bump node to 22", "linus", "chore/node-22", draft: true),
+                pull(4711, "feat(bo): client hub billing export", "margaret", "feat/billing-export")]
     }
 
     static func sample(_ mode: String) -> PreviewStatus? {
-        let pull = PreviewStatus.Pull(number: samplePullNumber, title: "feat(app): guided lab intro with the new side panel [INA-1050]",
+        let pull = PreviewStatus.Pull(number: samplePullNumber, title: "feat(app): guided lab intro with the new side panel [ENG-1050]",
                                       url: URL(string: "https://github.com/\(sampleRepo)/pull/\(samplePullNumber)")!,
-                                      author: "eri", state: .open, headRef: "feat/ina-1050-lab-intro")
+                                      author: "ada", state: .open, headRef: "feat/eng-1050-lab-intro")
         let run = PreviewStatus.Run(url: URL(string: "https://github.com/\(sampleRepo)/actions/runs/19284738291")!,
                                     inProgress: false, failed: false, step: nil, createdAt: Date().addingTimeInterval(-12 * 60))
         var s = PreviewStatus(phase: .live, pull: pull)

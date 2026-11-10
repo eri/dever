@@ -9,5 +9,8 @@
   },
   "github": {
     "clientID": null
+  },
+  "preview": {
+    "domain": "preview.example.com"
   }
 }

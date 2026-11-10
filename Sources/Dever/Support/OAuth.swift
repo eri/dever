@@ -19,9 +19,15 @@ struct DeverConfig: Decodable {
         var clientID: String?
     }
 
+    struct Preview: Decodable {
+        /// Where the team's preview environments are served: `pr-<N>-<target>.<domain>`.
+        var domain: String
+    }
+
     var slack: Slack?
     var linear: Linear?
     var github: GitHub?
+    var preview: Preview?
 
     static let shared: DeverConfig = {
         guard let url = Bundle.main.url(forResource: "dever", withExtension: "json"),

@@ -28,7 +28,7 @@ installed in this session) and the superfuture rubric, on the captures listed un
 | HIGH | Accessibility | `PreviewPanel.swift` actions | "Copy app URL" disabled when the preview has no App host | Not shown when there is no App host | Same rule: disabled means unavailable, and the help text was the only explanation |
 | MEDIUM | Colors | `KeepPill` | Edge `Soot.lime.opacity(0.6)` | Edge `Soot.lime` | The 60 % lime over white measures 2.9:1, under the 3:1 bar for a component boundary (1.4.11); full lime is 7:1 light, 14:1 dark |
 | MEDIUM | Layout | `PanelHeader(link:)` | Header "Open ↗" to the App host, beside an "App ↗" chip opening the same URL | Header link removed | Two controls for one destination split the eye; the chip already names what it opens (prefer delete) |
-| MEDIUM | Writing | `PanelHeader(subtitle:)` | `pr-4714-app.preview.mendo.cloud` | `preview.mendo.cloud · pull request #4714` | The App host is not always deployed; the subtitle named a URL that may not exist |
+| MEDIUM | Writing | `PanelHeader(subtitle:)` | `pr-4714-app.preview.example.com` | `preview.example.com · pull request #4714` | The App host is not always deployed; the subtitle named a URL that may not exist |
 | MEDIUM | Writing | Primary action, live | "Update" | "Update preview" | Verb plus object: "Update" alone could read as updating the project |
 | LOW | Writing | Protect confirmation | Button "Redeploy with --keep" | "Protect and redeploy" | The button says what happens, the message carries the flag |
 | LOW | Accessibility | Status row | The "·" separator read by VoiceOver | `accessibilityHidden(true)` | Decorative punctuation in the reading order |

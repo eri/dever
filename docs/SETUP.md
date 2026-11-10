@@ -81,3 +81,9 @@ blocks it on first launch. Right-click Dever.app → **Open** → **Open**, or:
 ```bash
 xattr -dr com.apple.quarantine /Applications/Dever.app
 ```
+
+## Preview environments (optional)
+
+Teams whose pull requests deploy preview environments at `pr-<N>-<target>.<domain>` put that domain in
+`preview.domain` of `config/dever.json`. Without it the Preview panel still follows the workflow's
+comments and runs, but finds no deployed target to open or probe.
