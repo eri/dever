@@ -127,9 +127,14 @@ are not in this list.
 (the newer of the last message and the last merge). Settings › Overview › Sort offers For you
 (that order), Activity and Name.
 
-**Columns.** Slack shows unread messages ("7 unread", "All read"); it is the only column on by
-default. Linear, GitHub, Preview and Due date stay available in the View popover and in
-Settings › Overview. The Health column is gone: the trailing status says it in words.
+**Columns.** None by default: the row already says what waits, what happened last and what
+blocks. Slack (unread messages), Linear, GitHub, Preview and Due date stay available in the View
+popover and in Settings › Overview. The Health column is gone: the trailing status says it in
+words. The settings moved to the `overview.v2` key, so the table's saved choice (every column on)
+does not carry over.
+
+**People only.** Joins, renames, pins, topics and what apps and bots post (an alerting bot added
+to the channel, say) neither count as unread nor become the last activity.
 
 **Motion.** Items enter with `Motion.rise`, the chip with `Motion.pop`, reorders on `Motion.move`,
 counts roll; all fade only under Reduce Motion.

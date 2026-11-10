@@ -94,12 +94,14 @@ struct OverviewSettings: Codable, Equatable {
     var sort: Sort = .forYou
     var group: Group = .none
     var density: Density = .comfortable
-    /// Slack's unread count only: what blocks and what shipped are in the status already.
-    var columns: Set<Column> = [.slack]
+    /// None: the row says what waits, what happened last and what blocks on its own. The
+    /// columns are there for whoever wants the numbers side by side.
+    var columns: Set<Column> = []
     /// Projects whose every Linear issue is done leave the list.
     var hideFinished = false
 
-    static let key = "overview"
+    /// "overview" held the table's settings (every column on); the list starts from its own defaults.
+    static let key = "overview.v2"
 
     /// The columns to draw, in their fixed order.
     var shownColumns: [Column] { Column.allCases.filter { columns.contains($0) } }

@@ -325,9 +325,10 @@ private struct ColumnChips: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        // Two rows of three: the six chips do not fit a 56px row beside their label.
+        // Two rows (three, then the rest): the chips do not fit one row beside their label.
+        let all = OverviewSettings.Column.allCases
         VStack(alignment: alignment, spacing: 6) {
-            ForEach([Array(OverviewSettings.Column.allCases.prefix(3)), Array(OverviewSettings.Column.allCases.suffix(3))], id: \.first) { line in
+            ForEach([Array(all.prefix(3)), Array(all.dropFirst(3))], id: \.first) { line in
                 HStack(spacing: 6) {
                     ForEach(line) { column in chip(column) }
                 }

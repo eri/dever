@@ -326,21 +326,27 @@ final class OverviewStore: ObservableObject {
         guard let id = p.slack?.id else { return .success(nil) }
         do {
             let weekAgo = Date().addingTimeInterval(-7 * 86_400)
+            let team = await app.slack?.teamID ?? ""
+            let users = (try? await app.withSlack { try await SlackDirectory.shared.users(team: team, via: $0) }) ?? [:]
+            // People only: joins, renames, pins, topics and what apps and bots post are not
+            // something a person said, so they neither count nor make "the last activity".
+            func spoken(_ m: SlackMessage) -> Bool {
+                guard [nil, "thread_broadcast", "file_share"].contains(m.subtype), let user = m.user else { return false }
+                return users[user]?.isBot != true
+            }
             var recent = try await app.withSlack { try await $0.history(id, limit: 200, since: weekAgo) }
-            recent.removeAll { $0.subtype == "channel_join" || $0.subtype == "channel_leave" }
+            recent.removeAll { !spoken($0) }
             var stats = ProjectSnapshot.SlackStats(messagesThisWeek: recent.count, lastActivity: recent.map(\.date).max())
             var latest = recent.max { $0.ts < $1.ts }
             if latest == nil {
-                latest = try await app.withSlack { try await $0.history(id, limit: 1) }.first
+                latest = try await app.withSlack { try await $0.history(id, limit: 20) }.filter(spoken).max { $0.ts < $1.ts }
                 stats.lastActivity = latest?.date
             }
             let me = await app.slack?.userID
-            let team = await app.slack?.teamID ?? ""
-            let users = (try? await app.withSlack { try await SlackDirectory.shared.users(team: team, via: $0) }) ?? [:]
             stats.lastAuthor = latest?.user.flatMap { users[$0]?.name }
             // What arrived since your last read, from others; mentions of you put forward.
             if let cursor = try? await app.withSlack({ try await $0.lastRead(id) }) {
-                let unread = recent.filter { !SlackTS.isAtOrBefore($0.ts, cursor) && $0.user != me && $0.subtype == nil }
+                let unread = recent.filter { !SlackTS.isAtOrBefore($0.ts, cursor) && $0.user != me }
                 stats.unread = unread.count
                 stats.firstUnreadTS = unread.min { $0.ts < $1.ts }?.ts
                 stats.lastUnreadAt = unread.map(\.date).max()
