@@ -103,14 +103,12 @@ private struct Identity: View {
                     withAnimation(.easeOut(duration: 0.2)) { seed = GenerativeAvatar.reseed() }
                 } label: {
                     Image(systemName: "arrow.2.squarepath")
-                        .font(.system(size: 11, weight: .semibold)).foregroundStyle(Soot.ink)
+                        .font(.system(size: 11, weight: .semibold))
                         .frame(width: 26, height: 26)
-                        .background(Soot.surface, in: Circle())
-                        .overlay(Circle().strokeBorder(Soot.ground, lineWidth: 2))
-                }
-                .buttonStyle(.plain)
-                .modifier(FocusOutline(radius: 13))
-                .offset(x: 4, y: 4)
+                    }
+                    .buttonStyle(IconButton())
+                    .overlay(Circle().strokeBorder(Soot.ground, lineWidth: 2))
+                    .offset(x: 4, y: 4)
                 .help("Draw another picture")
                 .accessibilityLabel("Draw another picture")
             }
@@ -142,12 +140,10 @@ private struct Identity: View {
                                     .matchedGeometryEffect(id: "row", in: marker)
                             }
                         }
-                        .contentShape(RoundedRectangle(cornerRadius: Soot.radius))
-                    }
-                    .buttonStyle(.plain)
-                    .modifier(FocusOutline(radius: Soot.radius))
-                    .accessibilityAddTraits(on ? .isSelected : [])
-                }
+                        }
+                        .buttonStyle(RowButton(lift: .tone, radius: Soot.radius))
+                        .accessibilityAddTraits(on ? .isSelected : [])
+                        }
             }
             .padding(.top, 32)
             .accessibilityElement(children: .contain)
@@ -223,6 +219,7 @@ struct SettingRow<Control: View>: View {
             .frame(minHeight: 56)
             .contentShape(Rectangle())
             .onTapGesture { tap?() }
+            .handCursor(tap != nil)
             if divided { Rectangle().fill(Soot.line).frame(height: 1) }
         }
     }
@@ -269,8 +266,6 @@ private struct StatusMenuRow: View {
     var destructive = false
     var busy = false
     let action: () -> Void
-    @State private var hovering = false
-    @Environment(\.isEnabled) private var isEnabled
 
     var body: some View {
         Button(action: action) {
@@ -289,16 +284,10 @@ private struct StatusMenuRow: View {
             }
             .padding(.horizontal, 10)
             .frame(height: 46)
-            .background(hovering && isEnabled ? Soot.surface : Color.clear, in: RoundedRectangle(cornerRadius: Soot.radius))
             .overlay(alignment: .bottom) { if busy { WaitingLine().padding(.horizontal, 8) } }
             .clipShape(RoundedRectangle(cornerRadius: Soot.radius))
-            .contentShape(RoundedRectangle(cornerRadius: Soot.radius))
-        }
-        .buttonStyle(.plain)
-        .modifier(FocusOutline(radius: Soot.radius))
-        .motion(Motion.quick, fade: true, value: hovering)
-        .onHover { hovering = $0 }
-        .handCursor()
+            }
+            .buttonStyle(RowButton(lift: .surface, radius: Soot.radius))
         .accessibilityLabel(destructive ? "\(title). \(detail)" : title)
     }
 }
@@ -548,11 +537,11 @@ private struct ServiceRow: View {
         if running {
             HStack(spacing: 10) {
                 Text("Approve in your browser…").font(.system(size: 12)).foregroundStyle(Soot.muted).lineLimit(1)
-                Button("Cancel") { flow.cancel() }.buttonStyle(QuietButton())
+                Button("Cancel") { flow.cancel() }.buttonStyle(SecondaryButton())
             }
         } else if expired {
             HStack(spacing: 10) {
-                Button("Reconnect") { flow.start(service, app: app) }.buttonStyle(LimeButton())
+                Button("Reconnect") { flow.start(service, app: app) }.buttonStyle(PrimaryButton())
                 statusTrigger
             }
         } else if connected {
@@ -563,7 +552,7 @@ private struct ServiceRow: View {
                     Text(error.message).font(.system(size: 12)).foregroundStyle(Theme.negative).lineLimit(1)
                         .help(error.message)
                 }
-                Button("Connect") { flow.start(service, app: app) }.buttonStyle(LimeButton())
+                Button("Connect") { flow.start(service, app: app) }.buttonStyle(PrimaryButton())
                     .accessibilityLabel("Connect \(service.label)")
                     .help(service == .github ? "Sign in with a code on github.com" : "Approve Dever in your browser")
             }
@@ -606,12 +595,8 @@ private struct ServiceRow: View {
             }
             .padding(.horizontal, 10)
             .frame(height: 32)
-            .background(Soot.ground.opacity(menuOpen ? 1 : 0.7), in: RoundedRectangle(cornerRadius: Soot.radius))
-            .contentShape(RoundedRectangle(cornerRadius: Soot.radius))
-        }
-        .buttonStyle(.plain)
-        .modifier(FocusOutline(radius: Soot.radius))
-        .handCursor()
+            }
+            .buttonStyle(MenuTriggerButton(open: menuOpen, fill: Soot.ground.opacity(0.7), edge: false))
         .help(statusTitle)
         .accessibilityLabel("\(service.label) status: \(statusTitle)")
         .accessibilityHint("Shows the status, Check status and Disconnect")
@@ -854,10 +839,8 @@ private struct AppearanceSection: View {
                                 .foregroundStyle(on ? Soot.ink : Soot.muted)
                         }
                         .frame(width: 128, height: 112)
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(PressButton())
-                    .modifier(FocusOutline(radius: 8))
+                        }
+                        .buttonStyle(RowButton(lift: .tone, radius: 8))
                     .accessibilityLabel("\(option.label) appearance")
                     .accessibilityHint(option.meaning)
                     .accessibilityAddTraits(on ? .isSelected : [])
@@ -1002,16 +985,16 @@ private struct AlertsSection: View {
                             NSWorkspace.shared.open(url)
                         }
                     }
-                    .buttonStyle(QuietButton())
-                }
-            case .notDetermined:
+                    .buttonStyle(SecondaryButton())
+                    }
+                    case .notDetermined:
                 VStack(alignment: .leading, spacing: 12) {
                     Text("When a pipeline fails or a project slips")
                         .font(.system(size: 13)).foregroundStyle(Soot.muted)
                     Button("Turn on alerts") {
                         Task { _ = await Notifier.shared.requestAuthorization(); await refresh() }
                     }
-                    .buttonStyle(LimeButton())
+                    .buttonStyle(PrimaryButton())
                 }
             default:
                 SettingRows {
@@ -1121,10 +1104,8 @@ struct SegmentPicker<Value: Hashable>: View {
                         .background {
                             if on { Capsule().fill(Soot.lime).matchedGeometryEffect(id: "pill", in: pill) }
                         }
-                        .contentShape(Capsule())
-                }
-                .buttonStyle(.plain)
-                .modifier(SegmentFocus(on: on))
+                        }
+                        .buttonStyle(SegmentButton(on: on))
                 .accessibilityAddTraits(on ? .isSelected : [])
             }
         }
@@ -1136,20 +1117,6 @@ struct SegmentPicker<Value: Hashable>: View {
         .clipShape(Capsule())
         .accessibilityElement(children: .contain)
         .accessibilityLabel(label)
-    }
-}
-
-/// The focus ring of a segment, drawn inside it: ink on the lime pill, lime on the track,
-/// so it reads whichever segment has it (2.4.7) and never crosses the picker's edge.
-private struct SegmentFocus: ViewModifier {
-    let on: Bool
-    @Environment(\.isFocused) private var isFocused
-
-    func body(content: Content) -> some View {
-        content.overlay(
-            Capsule().strokeBorder(on ? Soot.limeInk : Soot.lime, lineWidth: 2)
-                .opacity(isFocused ? 1 : 0)
-        )
     }
 }
 
@@ -1166,17 +1133,13 @@ private struct AboutSection: View {
             SectionHead(title: "About", detail: "Dever \(version)")
             SettingRows {
                 SettingRow(title: "Updates", detail: "Releases on GitHub") {
-                    HoverLink(destination: URL(string: "https://github.com/eri/dever/releases")!, hoverTint: Soot.ground) {
-                        HStack(spacing: 4) { Text("Check for updates"); Image(systemName: "arrow.up.right") }
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundStyle(Soot.lime)
-                    }
-                    .padding(.trailing, -8)
+                    ExternalLink("Check for updates", destination: URL(string: "https://github.com/eri/dever/releases")!)
+                        .padding(.trailing, -8)
                     .accessibilityLabel("Check for updates on GitHub")
                 }
                 SettingRow(title: "Welcome tour", detail: "The first-launch setup again; nothing is reset", divided: false) {
                     Button("Start") { NotificationCenter.default.post(name: .showOnboarding, object: nil) }
-                        .buttonStyle(QuietButton())
+                        .buttonStyle(SecondaryButton())
                         .accessibilityLabel("Start the welcome tour")
                 }
             }
@@ -1214,8 +1177,8 @@ struct GitHubLoginSheet: View {
                             copied = true
                         } label: {
                             Label(copied ? "Copied" : "Copy", systemImage: copied ? "checkmark" : "doc.on.doc")
-                        }
-                        .buttonStyle(QuietButton())
+                            }
+                            .buttonStyle(SecondaryButton(size: .sheet))
                     }
                     // Waiting: a light travelling along the bottom edge, like the onboarding rows.
                     HStack(spacing: 12) {
@@ -1230,8 +1193,10 @@ struct GitHubLoginSheet: View {
                     .overlay(alignment: .bottom) { WaitingLine() }
                     .clipShape(RoundedRectangle(cornerRadius: Soot.fieldRadius))
                     .accessibilityElement(children: .combine)
-                    Link(destination: URL(string: code.verification_uri)!) { Text("Open GitHub") }
-                        .buttonStyle(LimeButton())
+                    Link(destination: URL(string: code.verification_uri)!) {
+                        HStack(spacing: 6) { Text("Open GitHub"); Image(systemName: "arrow.up.right").font(.system(size: 12, weight: .semibold)) }
+                    }
+                    .buttonStyle(PrimaryButton(size: .sheet))
                 } else {
                     StepTitle(text: "Connect GitHub")
                     VStack(spacing: 8) {

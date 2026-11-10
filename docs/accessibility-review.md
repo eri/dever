@@ -291,3 +291,70 @@ Findings and rejections are in `docs/reviews/animations.md`; the vocabulary live
   whole screen except the 150 ms screen dissolve.
 - Not verified at runtime: the behaviour with Reduce Motion switched on mid-session (the
   `NSWorkspace` flag is read at each animation, the environment value at each render).
+
+## Buttons (the role system, `Views/Buttons.swift`)
+
+Every button and link now uses one of the roles in docs/reviews/buttons.md. Contrast is
+computed from the palette for each state (hover and press tones are blended at their real
+opacity); the gallery captures (`DEVER_SNAPSHOT_GALLERY=1`) are `docs/reviews/shots/buttons-dark.png`
+and `buttons-light.png`.
+
+| Pair | Dark | Light | Need | Result |
+|---|---|---|---|---|
+| Primary label · normal (limeInk on lime) | 16.55:1 | 7.08:1 | 4.5 | ✅ |
+| Primary label · hover (lime + limeInk 8 %) | 14.08:1 | 5.85:1 | 4.5 | ✅ |
+| Primary label · pressed (lime + limeInk 16 %) | 11.86:1 | 4.85:1 | 4.5 | ✅ |
+| Primary / secondary / destructive · disabled (muted on surface) | 5.38:1 | 6.05:1 | 4.5 | ✅ |
+| Secondary label · normal (ink on surface) | 17.40:1 | 18.88:1 | 4.5 | ✅ |
+| Secondary label · hover (surface + ink 6 %) | 14.79:1 | 16.68:1 | 4.5 | ✅ |
+| Secondary label · pressed (surface + ink 12 %) | 12.18:1 | 14.64:1 | 4.5 | ✅ |
+| Secondary / chip / menu edge on surface (non-text) | 3.51:1 | 3.45:1 | 3 | ✅ |
+| Secondary / chip / menu edge on ground (non-text) | 3.87:1 | 3.13:1 | 3 | ✅ |
+| Tertiary lime · normal on surface | 15.03:1 | 7.08:1 | 4.5 | ✅ |
+| Tertiary lime · normal on ground | 16.55:1 | 6.43:1 | 4.5 | ✅ |
+| Tertiary lime · hover (pill: ground 85 % over surface) | 16.35:1 | 6.52:1 | 4.5 | ✅ |
+| Tertiary lime · hover (pill: surface 85 % over ground) | 15.28:1 | 6.98:1 | 4.5 | ✅ |
+| Tertiary muted · normal on surface | 5.38:1 | 6.05:1 | 4.5 | ✅ |
+| Tertiary muted · normal on ground | 5.93:1 | 5.49:1 | 4.5 | ✅ |
+| Tertiary muted · hover (ink on pill) | 18.93:1 | 17.40:1 | 4.5 | ✅ |
+| Tertiary · disabled (muted on ground) | 5.93:1 | 5.49:1 | 4.5 | ✅ |
+| Icon glyph · normal (ink on surface) | 17.40:1 | 18.88:1 | 4.5 | ✅ |
+| Icon glyph · disabled (muted on surface) | 5.38:1 | 6.05:1 | 4.5 | ✅ |
+| Destructive label · normal (pill-negative ink on surface) | 6.48:1 | 9.77:1 | 4.5 | ✅ |
+| Destructive label · hover (surface + negative 6 %) | 6.09:1 | 8.88:1 | 4.5 | ✅ |
+| Destructive label · pressed (surface + negative 12 %) | 5.65:1 | 8.05:1 | 4.5 | ✅ |
+| Destructive edge (negative on surface, non-text) | 4.88:1 | 5.78:1 | 3 | ✅ |
+| Toolbar label · normal (ink on surface) | 17.40:1 | 18.88:1 | 4.5 | ✅ |
+| Toolbar label · disabled (muted on surface) | 5.38:1 | 6.05:1 | 4.5 | ✅ |
+| Chip off · label (ink on ground) | 19.17:1 | 17.15:1 | 4.5 | ✅ |
+| Chip off · count (muted on ground) | 5.93:1 | 5.49:1 | 4.5 | ✅ |
+| Chip off · hover (ink on ground + ink 6 %) | 16.78:1 | 15.16:1 | 4.5 | ✅ |
+| Chip on · label (limeInk on lime) | 16.55:1 | 7.08:1 | 4.5 | ✅ |
+| Chip on · count (limeInk 80 % on lime; was 70 %, 4.41:1 light) | 9.60:1 | 5.21:1 | 4.5 | fixed |
+| Chip on · hover (lime + limeInk 8 %) | 14.08:1 | 5.85:1 | 4.5 | ✅ |
+| Chip on · disabled (limeInk on muted fill) | 5.93:1 | 5.49:1 | 4.5 | ✅ |
+| Row · hover lift (ink on ground 70 % over surface) | 18.69:1 | 17.66:1 | 4.5 | ✅ |
+| Row · hover lift (ink on surface over ground) | 17.40:1 | 18.88:1 | 4.5 | ✅ |
+| Menu trigger · label (ink on surface) | 17.40:1 | 18.88:1 | 4.5 | ✅ |
+| Menu trigger · open edge (lime on surface, non-text) | 15.03:1 | 7.08:1 | 3 | ✅ |
+| Focus ring (lime on ground, non-text) | 16.55:1 | 6.43:1 | 3 | ✅ |
+| Focus ring (lime on surface, non-text) | 15.03:1 | 7.08:1 | 3 | ✅ |
+| Primary segment · focus ring inside (limeInk on lime, non-text) | 16.55:1 | 7.08:1 | 3 | ✅ |
+
+- **Disabled** is surface fill, edge at half, `Soot.muted` label, arrow cursor, no hover:
+  never lime, never under 4.5:1. The destructive role first used `Theme.negative` as its
+  label, which fell to 4.49:1 on hover (dark); it now uses the negative pill's ink.
+- **Hover is visible on every text link** (WCAG 1.4.13 is not at stake, but 2.4.7's intent
+  is): a pill one tone from the surface fades in over 150 ms, a muted label turns ink.
+  Hover tones are dissolves, so they stay under Reduce Motion; the 0.97 press scale goes.
+- **Focus** (2.4.7): every role draws the 2px lime ring 3px outside its shape (inside for
+  segments and the split Add project). The gallery's "Focus" column forces it through the
+  style's override, so it is checked without a keyboard.
+- **Cursor**: the pointing hand comes from the style (`handCursor(isEnabled)`), so no
+  button can forget it; a disabled button shows the arrow.
+- **Names** (4.1.2): icon-only buttons go through `GlyphButton`, which requires a label used
+  both as tooltip and accessible name; the Slack hover strip's three glyphs and both "⋯"
+  menus gained tooltips in this pass.
+- **Targets** (2.5.8): primaries 44 in sheets / 36 in panels, toolbar 34, chips 26–30, text
+  links 28 (32 in onboarding), icon buttons 26–40, rows 36–64. The 20px label chip ("+2")
+  and the 24px reaction pills stay under 24px in height but sit alone in their line.

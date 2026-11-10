@@ -151,38 +151,6 @@ struct SectionHeader<Accessory: View>: View {
     }
 }
 
-/// Flat near-black primary button (inverted on dark).
-struct PrimaryButtonStyle: ButtonStyle {
-    @Environment(\.isEnabled) private var isEnabled
-
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .font(Theme.bodyStrong)
-            .foregroundStyle(Theme.sheet)
-            .padding(.horizontal, 12)
-            .frame(height: 32)
-            .background(Theme.text.opacity(configuration.isPressed ? 0.8 : 1),
-                        in: RoundedRectangle(cornerRadius: Theme.radiusControl))
-            .opacity(isEnabled ? 1 : 0.4)
-            .pressScale(configuration.isPressed)
-    }
-}
-
-/// Quiet bordered button for secondary actions.
-struct SecondaryButtonStyle: ButtonStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .font(Theme.bodyStrong)
-            .foregroundStyle(Theme.text)
-            .padding(.horizontal, 12)
-            .frame(height: 32)
-            .background(configuration.isPressed ? Theme.active : Theme.sheet,
-                        in: RoundedRectangle(cornerRadius: Theme.radiusControl))
-            .overlay(RoundedRectangle(cornerRadius: Theme.radiusControl).strokeBorder(Theme.control))
-            .pressScale(configuration.isPressed)
-    }
-}
-
 extension View {
     /// The page's own h1 names the screen; the window title would only repeat it (macOS 15+).
     @ViewBuilder

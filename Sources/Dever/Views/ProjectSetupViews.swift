@@ -161,7 +161,7 @@ struct ProjectEditorSheet: View {
                 .frame(maxWidth: 360)
                 .accessibilityLabel("Name in Dever")
             Button(isNew ? "Continue" : "Done") { suggest(); next() }
-                .buttonStyle(LimeButton())
+                .buttonStyle(PrimaryButton(size: .sheet))
                 .keyboardShortcut(.defaultAction)
                 .disabled(!nameOK)
         }
@@ -253,13 +253,12 @@ struct ProjectEditorSheet: View {
             }
             HStack(spacing: 16) {
                 Button(isNew ? "Continue" : "Done") { next() }
-                    .buttonStyle(LimeButton())
+                    .buttonStyle(PrimaryButton(size: .sheet))
                     .keyboardShortcut(.defaultAction)
                     .disabled(app.isConnected(.github) && !catalog.loading && repos.isEmpty)
                 if app.isConnected(.github), app.repositoryMode == .perProject || ownRepositories.wrappedValue {
                     Button("Skip") { project.githubRepos = []; next() }
-                        .buttonStyle(.plain).font(.system(size: 14, weight: .medium)).foregroundStyle(Soot.muted)
-                        .modifier(FocusOutline(radius: 6))
+                        .buttonStyle(TertiaryButton(tint: .muted, lift: Soot.surface, font: .system(size: 14, weight: .medium)))
                 }
             }
         }
@@ -353,7 +352,7 @@ struct ProjectEditorSheet: View {
                         }
                         if let more, query.isEmpty {
                             Button("Show every channel", action: more)
-                                .buttonStyle(QuietButton())
+                                .buttonStyle(SecondaryButton())
                                 .frame(maxWidth: .infinity)
                                 .padding(.top, 4)
                         }
@@ -364,13 +363,12 @@ struct ProjectEditorSheet: View {
             }
             HStack(spacing: 16) {
                 Button(isNew ? "Continue" : "Done") { next() }
-                    .buttonStyle(LimeButton())
+                    .buttonStyle(PrimaryButton(size: .sheet))
                     .keyboardShortcut(.defaultAction)
                     .disabled(app.isConnected(service) && !catalog.loading && !loading && selection.wrappedValue == nil)
                 if app.isConnected(service) {
                     Button("Skip") { selection.wrappedValue = nil; next() }
-                        .buttonStyle(.plain).font(.system(size: 14, weight: .medium)).foregroundStyle(Soot.muted)
-                        .modifier(FocusOutline(radius: 6))
+                        .buttonStyle(TertiaryButton(tint: .muted, lift: Soot.surface, font: .system(size: 14, weight: .medium)))
                 }
             }
         }
@@ -409,7 +407,7 @@ struct ProjectEditorSheet: View {
             .frame(maxHeight: .infinity)
             VStack(alignment: .leading, spacing: 8) {
                 Button(saving ? "Saving…" : isNew ? "Create project" : "Save") { Task { await save() } }
-                    .buttonStyle(LimeButton())
+                    .buttonStyle(PrimaryButton(size: .sheet))
                     .keyboardShortcut(.defaultAction)
                     .disabled(saving || !nameOK)
                 ForEach(catalog.errors + [error].compactMap { $0 }, id: \.self) { ErrorLabel($0) }
@@ -454,10 +452,8 @@ struct ProjectEditorSheet: View {
             .padding(.horizontal, 14)
             .frame(height: 46)
             .background(Soot.surface, in: RoundedRectangle(cornerRadius: Soot.fieldRadius))
-            .contentShape(RoundedRectangle(cornerRadius: Soot.fieldRadius))
-            .modifier(FocusOutline(radius: Soot.fieldRadius))
-        }
-        .buttonStyle(.plain)
+            }
+            .buttonStyle(RowButton(lift: .tone, radius: Soot.fieldRadius))
         .accessibilityLabel({
             switch state {
             case .set(let v): "\(tool): \(v)"
@@ -496,13 +492,10 @@ struct ProjectEditorSheet: View {
             dismiss()
             NotificationCenter.default.post(name: .showScreen, object: SidebarItem.settings)
         } label: {
-            HStack(spacing: 6) { Text("Connect \(service.label) in Settings"); Image(systemName: "arrow.up.right") }
-                .frame(minHeight: 28)
-        }
-        .buttonStyle(.plain)
-        .font(.system(size: 14, weight: .semibold))
-        .foregroundStyle(Soot.lime)
-        .modifier(FocusOutline(radius: 6))
+            HStack(spacing: 4) { Text("Connect \(service.label) in Settings"); Image(systemName: "arrow.right") }
+            }
+            .buttonStyle(TertiaryButton(lift: Soot.surface, font: .system(size: 14, weight: .semibold)))
+            .padding(.leading, -8)
     }
 
     // MARK: Data
@@ -623,61 +616,9 @@ private struct PickRow: View {
             .frame(height: 44)
             .background(Soot.surface, in: RoundedRectangle(cornerRadius: Soot.fieldRadius))
             .overlay(RoundedRectangle(cornerRadius: Soot.fieldRadius).strokeBorder(selected ? Soot.lime : .clear, lineWidth: 1.5))
-            .contentShape(RoundedRectangle(cornerRadius: Soot.fieldRadius))
-            .modifier(FocusOutline(radius: Soot.fieldRadius))
-        }
-        .buttonStyle(.plain)
+            }
+            .buttonStyle(RowButton(lift: .tone, radius: Soot.fieldRadius))
         .accessibilityAddTraits(selected ? .isSelected : [])
-    }
-}
-
-/// "Add project" with a chevron in the same pill: the main part opens the project sheet, the
-/// chevron offers adding many at once from Slack or Linear. Each part has its own hover.
-struct AddProjectButton: View {
-    @EnvironmentObject var app: AppState
-    let add: () -> Void
-    let addMany: (ImportSheet.Source) -> Void
-    @State private var hoverMain = false
-    @State private var hoverMore = false
-
-    var body: some View {
-        HStack(spacing: 0) {
-            Button(action: add) {
-                Text("Add project")
-                    .font(Theme.bodyStrong)
-                    .foregroundStyle(Theme.sheet)
-                    .padding(.horizontal, 12)
-                    .frame(height: 32)
-                    .background(Theme.sheet.opacity(hoverMain ? 0.12 : 0))
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .onHover { hoverMain = $0 }
-            Rectangle().fill(Theme.sheet.opacity(0.25)).frame(width: 1, height: 18)
-            Menu {
-                Button { addMany(.slack) } label: {
-                    Label { Text("Add many from Slack") } icon: { BrandLogo(service: .slack, size: 14) }
-                }
-                .disabled(app.slack == nil)
-                Button { addMany(.linear) } label: {
-                    Label { Text("Add many from Linear") } icon: { BrandLogo(service: .linear, size: 14) }
-                }
-                .disabled(app.linear == nil)
-            } label: {
-                Image(systemName: "chevron.down").font(.system(size: 10, weight: .bold)).foregroundStyle(Theme.sheet)
-                    .frame(width: 28, height: 32)
-                    .contentShape(Rectangle())
-            }
-            .menuStyle(.button)
-            .buttonStyle(.plain)
-            .menuIndicator(.hidden)
-            .frame(width: 28, height: 32)
-            .background(Theme.sheet.opacity(hoverMore ? 0.12 : 0))
-            .onHover { hoverMore = $0 }
-            .accessibilityLabel("Add many projects")
-        }
-        .background(Theme.text, in: RoundedRectangle(cornerRadius: Theme.radiusControl))
-        .clipShape(RoundedRectangle(cornerRadius: Theme.radiusControl))
     }
 }
 
@@ -801,10 +742,10 @@ struct ImportSheet: View {
                 .font(.system(size: 15, weight: .medium)).foregroundStyle(Soot.ink)
             if isNarrowed {
                 Button("Find more channels") { narrowed = false }
-                    .buttonStyle(.plain).font(.system(size: 13, weight: .semibold)).foregroundStyle(Soot.lime)
-            } else if !search.isEmpty {
-                Button("Clear search") { search = "" }
-                    .buttonStyle(.plain).font(.system(size: 13, weight: .semibold)).foregroundStyle(Soot.lime)
+                    .buttonStyle(TertiaryButton(lift: Soot.surface))
+                } else if !search.isEmpty {
+                    Button("Clear search") { search = "" }
+                        .buttonStyle(TertiaryButton(lift: Soot.surface))
             }
         }
         .frame(maxWidth: .infinity)
@@ -817,18 +758,17 @@ struct ImportSheet: View {
                 Button(selection.count == candidates.count ? "Select none" : "Select all") {
                     selection = selection.count == candidates.count ? [] : Set(candidates.map(\.id))
                 }
-                .buttonStyle(.plain).font(.system(size: 13, weight: .semibold)).foregroundStyle(Soot.lime)
-                .frame(minHeight: 28)
-                .modifier(FocusOutline(radius: 6))
-            }
-            if hiddenCount > 0 {
-                Button("Find more channels") { narrowed = false }
-                    .buttonStyle(QuietButton())
+                .buttonStyle(TertiaryButton(lift: Soot.surface))
+                .padding(.leading, -8)
+                }
+                if hiddenCount > 0 {
+                    Button("Find more channels") { narrowed = false }
+                        .buttonStyle(SecondaryButton())
                     .help(Plural.text("^[\(hiddenCount) more channel](inflect: true) you're not in or without the prefix"))
             }
             Spacer()
             Button(selection.isEmpty ? "Add" : "Add ^[\(selection.count) project](inflect: true)") { importSelected() }
-                .buttonStyle(LimeButton())
+                .buttonStyle(PrimaryButton(size: .sheet))
                 .keyboardShortcut(.defaultAction)
                 .disabled(selection.isEmpty)
         }
@@ -912,10 +852,8 @@ private struct ImportRow: View {
             .background(Soot.surface, in: RoundedRectangle(cornerRadius: Soot.fieldRadius))
             .overlay(RoundedRectangle(cornerRadius: Soot.fieldRadius)
                 .strokeBorder(on ? Soot.lime : .clear, lineWidth: 1.5))
-            .contentShape(RoundedRectangle(cornerRadius: Soot.fieldRadius))
-            .modifier(FocusOutline(radius: Soot.fieldRadius))
-        }
-        .buttonStyle(.plain)
+            }
+            .buttonStyle(RowButton(lift: .tone, radius: Soot.fieldRadius))
         .accessibilityAddTraits(on ? .isSelected : [])
     }
 }

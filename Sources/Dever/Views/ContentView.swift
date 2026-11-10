@@ -187,11 +187,9 @@ struct ContentView: View {
                 .foregroundStyle(on ? Theme.text : Theme.muted)
                 .frame(width: 40, height: 40)
                 .background(on ? Theme.active : Color.clear, in: RoundedRectangle(cornerRadius: 10))
-                .contentShape(Rectangle())
                 .motion(Motion.quick, fade: true, value: on)
         }
-        .buttonStyle(PressButton())
-        .modifier(FocusOutline(radius: 10))
+        .buttonStyle(IconButton(fill: nil, radius: 10))
         .help(label)
         .accessibilityLabel(label)
         .accessibilityAddTraits(on ? .isSelected : [])
@@ -220,10 +218,8 @@ struct ContentView: View {
                 // The ring fades in (120 ms); the tile itself answers the press with a small scale.
                 .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(on ? Theme.text : .clear, lineWidth: 2))
                 .motion(Motion.quick, fade: true, value: on)
-                .contentShape(Rectangle())
         }
-        .buttonStyle(PressButton())
-        .modifier(FocusOutline(radius: 12))
+        .buttonStyle(IconButton(fill: nil, radius: 12))
         .help("\(p.name) — \(status.label)")
         .accessibilityLabel("\(p.name), \(status.label)")
         .accessibilityAddTraits(on ? .isSelected : [])
@@ -251,10 +247,8 @@ struct ContentView: View {
                 .padding(3)
                 .overlay(Circle().strokeBorder(on ? Theme.text : .clear, lineWidth: 2))
                 .motion(Motion.quick, fade: true, value: on)
-                .contentShape(Rectangle())
         }
-        .buttonStyle(PressButton())
-        .modifier(FocusOutline(radius: 20))
+        .buttonStyle(IconButton(fill: nil))
         .help(accountsHint.map { "Settings — \($0)" } ?? "Settings")
         .accessibilityLabel(accountsHint.map { "Settings, \($0)" } ?? "Settings")
         .accessibilityAddTraits(on ? .isSelected : [])
@@ -262,9 +256,9 @@ struct ContentView: View {
 
     private var addMenu: some View {
         Button { showNew = true } label: {
-            Image(systemName: "plus").foregroundStyle(Theme.muted).frame(width: 40, height: 40).contentShape(Rectangle())
+            Image(systemName: "plus").foregroundStyle(Theme.muted).frame(width: 40, height: 40)
         }
-        .buttonStyle(PressButton())
+        .buttonStyle(IconButton(fill: nil, radius: 10))
         .keyboardShortcut("n")
         .help("Add a project")
         .accessibilityLabel("Add project")

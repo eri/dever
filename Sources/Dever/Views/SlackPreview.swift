@@ -63,24 +63,18 @@ struct FilePreviewSheet: View {
                             NSPasteboard.general.setString(url.absoluteString, forType: .string)
                         }
                     } label: {
-                        Image(systemName: "ellipsis").font(.system(size: 13, weight: .semibold)).foregroundStyle(Soot.ink)
+                        Image(systemName: "ellipsis").font(.system(size: 13, weight: .semibold))
                             .frame(width: 34, height: 34)
-                            .background(Soot.surface, in: RoundedRectangle(cornerRadius: Soot.radius))
                     }
-                    .menuStyle(.borderlessButton)
+                    .menuStyle(.button)
+                    .buttonStyle(MenuTriggerButton(edge: false))
                     .menuIndicator(.hidden)
                     .fixedSize()
-                    .handCursor()
-                    .modifier(FocusOutline(radius: Soot.radius))
+                    .help("More: open in Slack, copy the link")
                     .accessibilityLabel("More actions")
                 }
-                Button(action: close) {
-                    Image(systemName: "xmark").font(.system(size: 12, weight: .semibold)).foregroundStyle(Soot.ink)
-                        .frame(width: 30, height: 30).background(Soot.surface, in: Circle())
-                }
-                .buttonStyle(.plain).handCursor().modifier(FocusOutline(radius: 15))
-                .keyboardShortcut(.cancelAction)
-                .accessibilityLabel("Close the preview")
+                GlyphButton(symbol: "xmark", label: "Close the preview", size: 30, action: close)
+                    .keyboardShortcut(.cancelAction)
             }
             .padding(.horizontal, 20).frame(height: 60)
             Rectangle().fill(Soot.line).frame(height: 1)
@@ -361,10 +355,10 @@ struct ImagePreview: View {
                 .disabled(scale <= Self.steps.first!)
             Button { set(zoom == nil ? 1 : nil) } label: {
                 Text("\(Int((scale * 100).rounded())) %").monospacedDigit()
-                    .font(.system(size: 12, weight: .semibold)).foregroundStyle(Soot.ink)
+                    .font(.system(size: 12, weight: .semibold))
                     .frame(minWidth: 52, minHeight: 28)
             }
-            .buttonStyle(.plain).handCursor()
+            .buttonStyle(IconButton(fill: nil))
             .help(zoom == nil ? "Actual size" : "Fit to window")
             .accessibilityLabel("Zoom \(Int((scale * 100).rounded())) percent")
             .accessibilityHint(zoom == nil ? "Shows the picture at actual size" : "Fits the picture to the window")
@@ -378,14 +372,7 @@ struct ImagePreview: View {
     }
 
     private func zoomButton(_ symbol: String, help: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Image(systemName: symbol).font(.system(size: 12, weight: .bold)).foregroundStyle(Soot.ink)
-                .frame(width: 28, height: 28)
-        }
-        .buttonStyle(.plain).handCursor()
-        .modifier(FocusOutline(radius: 14))
-        .help(help)
-        .accessibilityLabel(help)
+        GlyphButton(symbol: symbol, label: help, fill: nil, action: action)
     }
 
     private func step(_ direction: Int, scale: CGFloat) {

@@ -251,20 +251,14 @@ struct IssueRow: View {
 struct TileLink<Value: Hashable, Content: View>: View {
     let value: Value
     @ViewBuilder var content: () -> Content
-    @State private var hovering = false
 
     var body: some View {
         NavigationLink(value: value) {
             HStack(spacing: 12) { content() }
                 .padding(.horizontal, 12)
                 .frame(minHeight: 46)
-                .background(hovering ? Soot.ground.opacity(0.7) : Color.clear, in: RoundedRectangle(cornerRadius: 8))
-                .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
-        .modifier(FocusOutline(radius: 8))
-        .motion(Motion.quick, fade: true, value: hovering)
-        .onHover { hovering = $0 }
+        .buttonStyle(RowButton(lift: .ground))
     }
 }
 
@@ -285,7 +279,6 @@ struct ChoiceChip<Label: View, Item: Identifiable, Row: View>: View {
     @ViewBuilder var label: () -> Label
     @ViewBuilder var row: (Item) -> Row
     @State private var open = false
-    @State private var hovering = false
 
     var body: some View {
         Button { open.toggle() } label: {
@@ -295,14 +288,9 @@ struct ChoiceChip<Label: View, Item: Identifiable, Row: View>: View {
             }
             .padding(.horizontal, 10)
             .frame(height: 30)
-            .background(hovering || open ? Soot.surface.opacity(0.7) : Soot.surface, in: RoundedRectangle(cornerRadius: 8))
-            .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(open ? Soot.lime : Soot.edge))
-            .contentShape(RoundedRectangle(cornerRadius: 8))
         }
-        .buttonStyle(PressButton())
-        .modifier(FocusOutline(radius: 8))
-        .motion(Motion.quick, fade: true, value: hovering || open)
-        .onHover { hovering = $0 }
+        .buttonStyle(MenuTriggerButton(open: open))
+        .motion(Motion.quick, fade: true, value: open)
         .accessibilityLabel(accessibilityLabel)
         .accessibilityAddTraits(.isButton)
         .onAppear {
@@ -334,7 +322,6 @@ private struct ChoiceRow<Content: View>: View {
     let selected: Bool
     let action: () -> Void
     @ViewBuilder var content: () -> Content
-    @State private var hovering = false
 
     var body: some View {
         Button(action: action) {
@@ -350,13 +337,8 @@ private struct ChoiceRow<Content: View>: View {
             .padding(.horizontal, 10)
             .frame(minHeight: 32)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(hovering ? Soot.surface : Color.clear, in: RoundedRectangle(cornerRadius: 6))
-            .contentShape(Rectangle())
-            .modifier(FocusOutline(radius: 6))
         }
-        .buttonStyle(.plain)
-        .motion(Motion.quick, fade: true, value: hovering)
-        .onHover { hovering = $0 }
+        .buttonStyle(RowButton(lift: .surface, radius: 6))
         .accessibilityAddTraits(selected ? .isSelected : [])
     }
 }
@@ -364,29 +346,6 @@ private struct ChoiceRow<Content: View>: View {
 extension Notification.Name {
     /// Scrolls the issue page to its end (snapshots).
     static let scrollToEnd = Notification.Name("dever.scrollToEnd")
-}
-
-/// A text link with a hover state: a faint pill fades in behind it (120 ms), no movement.
-/// `hoverTint` is the tone one step from the surface it sits on (ground on a panel, surface on the page).
-struct HoverLink<Label: View>: View {
-    let destination: URL
-    var hoverTint: Color = Soot.ground
-    @ViewBuilder var label: () -> Label
-    @State private var hovering = false
-
-    var body: some View {
-        Link(destination: destination) {
-            label()
-                .padding(.horizontal, 8)
-                .frame(height: 28)
-                .background(hovering ? hoverTint.opacity(0.85) : Color.clear, in: Capsule())
-                .contentShape(Capsule())
-        }
-        .buttonStyle(PressButton())
-        .modifier(FocusOutline(radius: 14))
-        .motion(Motion.quick, fade: true, value: hovering)
-        .onHover { hovering = $0 }
-    }
 }
 
 /// A chip that copies a value (the issue's branch name) and says so for a moment.
@@ -416,13 +375,8 @@ struct CopyChip: View {
             }
             .padding(.horizontal, 10)
             .frame(height: 30)
-            .background(Soot.surface, in: RoundedRectangle(cornerRadius: 8))
-            .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(hovering ? Soot.edge : Soot.edge.opacity(0.5)))
-            .contentShape(RoundedRectangle(cornerRadius: 8))
         }
-        .buttonStyle(PressButton())
-        .modifier(FocusOutline(radius: 8))
-        .motion(Motion.quick, fade: true, value: hovering)
+        .buttonStyle(ChipButton(fill: Soot.surface))
         .onHover { hovering = $0 }
         .help("Copy the \(what): \(value)")
         .accessibilityLabel(copied ? "\(what) copied" : "Copy the \(what)")

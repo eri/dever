@@ -139,17 +139,6 @@ enum SlackMarkup {
     ]
 }
 
-/// The pointing hand over anything clickable that is not a system control.
-struct HandCursor: ViewModifier {
-    func body(content: Content) -> some View {
-        content.overlay(CursorArea(cursor: .pointingHand))
-    }
-}
-
-extension View {
-    func handCursor() -> some View { modifier(HandCursor()) }
-}
-
 extension SlackMessage {
     /// Ids of other channels this message links to (message mentions, shared messages).
     var linkedChannelIDs: Set<String> {
@@ -623,9 +612,8 @@ struct SlackThreadView: View {
                             .transition(.opacity)
                     } else {
                         Button("Show earlier", action: showEarlier)
-                            .buttonStyle(PressButton()).font(.system(size: 12, weight: .semibold)).foregroundStyle(Soot.lime)
-                            .padding(.horizontal, 8).padding(.bottom, 12)
-                            .modifier(FocusOutline(radius: 4))
+                            .buttonStyle(TertiaryButton(font: .system(size: 12, weight: .semibold)))
+                            .padding(.bottom, 12)
                             .transition(.opacity)
                     }
                 }
@@ -662,11 +650,8 @@ struct SlackThreadView: View {
                         Image(systemName: "arrow.up.left.and.arrow.down.right").font(.system(size: 10, weight: .semibold))
                     }
                 }
-                .buttonStyle(PressButton())
-                .handCursor()
-                .font(.system(size: 13, weight: .semibold)).foregroundStyle(Soot.lime)
-                .padding(.horizontal, 8).padding(.top, 14)
-                .modifier(FocusOutline(radius: 4))
+                .buttonStyle(TertiaryButton())
+                .padding(.top, 14)
                 .help("Read the whole conversation (⌘⇧E)")
             }
         }
@@ -709,11 +694,8 @@ private struct CaughtUp: View {
                         Image(systemName: "arrow.up.left.and.arrow.down.right").font(.system(size: 10, weight: .semibold))
                     }
                 }
-                .buttonStyle(PressButton())
-                .handCursor()
-                .font(.system(size: 13, weight: .semibold)).foregroundStyle(Soot.lime)
+                .buttonStyle(TertiaryButton())
                 .padding(.top, 6)
-                .modifier(FocusOutline(radius: 4))
                 .help("Read the whole conversation (⌘⇧E)")
             }
         }
@@ -826,8 +808,8 @@ private struct ChannelAside: View {
                     }
                     if people.count > 5 {
                         Button(allPeople ? "Show fewer" : "Show all \(people.count)") { allPeople.toggle() }
-                            .buttonStyle(.plain).handCursor().font(.system(size: 12, weight: .semibold)).foregroundStyle(Soot.lime)
-                            .padding(.top, 2).modifier(FocusOutline(radius: 4))
+                            .buttonStyle(TertiaryButton(font: .system(size: 12, weight: .semibold)))
+                            .padding(.top, 2).padding(.leading, -8)
                     }
                 }
             }
@@ -853,11 +835,9 @@ private struct ChannelAside: View {
                                 .padding(.horizontal, 8).frame(height: 40)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .background(Soot.ground, in: RoundedRectangle(cornerRadius: 8))
-                            }
-                            .buttonStyle(.plain)
-                            .handCursor()
-                            .modifier(FocusOutline(radius: 8))
-                            .help(l.url.absoluteString)
+                                }
+                                .buttonStyle(RowButton(lift: .tone))
+                                .help(l.url.absoluteString)
                         }
                     }
                 }
@@ -919,12 +899,10 @@ private struct AsideFileRow: View {
             .padding(.horizontal, 6).frame(height: 40)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(Soot.ground, in: RoundedRectangle(cornerRadius: 8))
-        }
-        .buttonStyle(.plain)
-        .handCursor()
-        .modifier(FocusOutline(radius: 8))
-        .help("Preview \(file.displayName)")
-        .disabled(!file.isReadable || file.url_private == nil)
+            }
+            .buttonStyle(RowButton(lift: .tone))
+            .help("Preview \(file.displayName)")
+            .disabled(!file.isReadable || file.url_private == nil)
         .task(id: file.id) {
             guard file.isImage, let url = file.thumb_360.flatMap(URL.init(string:)) else { return }
             thumb = try? await app.withSlack { await SlackMediaCache.shared.thumbnail(url, fileID: file.id, variant: "360", maxPixels: 720, client: $0) }
@@ -1154,17 +1132,14 @@ private struct ThreadPane: View {
                 }
                 Spacer()
                 if let permalink {
-                    Link(destination: permalink) { Image(systemName: "arrow.up.right").font(.system(size: 11, weight: .semibold)) }
-                        .foregroundStyle(Soot.muted).help("Open the thread in Slack").accessibilityLabel("Open the thread in Slack")
-                }
-                Button(action: close) {
-                    Image(systemName: "xmark").font(.system(size: 11, weight: .semibold)).foregroundStyle(Soot.ink)
-                        .frame(width: 28, height: 28).background(Soot.ground, in: Circle())
-                }
-                .buttonStyle(.plain)
-                .modifier(FocusOutline(radius: 14))
-                .keyboardShortcut(.cancelAction)
-                .accessibilityLabel("Close the thread")
+                    Link(destination: permalink) {
+                        Image(systemName: "arrow.up.right").font(.system(size: 11, weight: .semibold)).frame(width: 28, height: 28)
+                    }
+                    .buttonStyle(IconButton(fill: nil))
+                    .help("Open the thread in Slack").accessibilityLabel("Open the thread in Slack")
+                    }
+                    GlyphButton(symbol: "xmark", label: "Close the thread", glyphSize: 11, fill: Soot.ground, action: close)
+                        .keyboardShortcut(.cancelAction)
             }
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
@@ -1245,14 +1220,15 @@ private struct ReplyComposer: View {
                 .background(Soot.ground, in: RoundedRectangle(cornerRadius: 8))
                 .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(focused ? Soot.lime : Soot.edge))
                 .disabled(sending)
-            Button("Send") { Task { await send() } }
-                .buttonStyle(.plain)
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(empty || sending ? Soot.muted : Soot.limeInk)
-                .padding(.horizontal, 10).frame(height: 28)
-                .background(empty || sending ? Soot.ground : Soot.lime, in: Capsule())
-                .disabled(empty || sending)
-                .modifier(FocusOutline(radius: 14))
+            Button {
+                Task { await send() }
+            } label: {
+                Text("Send").font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(empty || sending ? Soot.muted : Soot.limeInk)
+                    .padding(.horizontal, 10).frame(height: 28)
+            }
+            .buttonStyle(ChipButton(on: !(empty || sending), edge: false))
+            .disabled(empty || sending)
         }
         .padding(.top, 4)
         .onAppear { if autofocus { focused = true } }
@@ -1358,7 +1334,8 @@ private struct MessageRow: View {
                 HStack(spacing: 12) {
                     if !wide, (message.text?.count ?? 0) > 240 {
                         Button(expanded ? "Show less" : "Show more") { expanded.toggle() }
-                            .buttonStyle(.plain).font(.system(size: 12, weight: .semibold)).foregroundStyle(Soot.muted)
+                            .buttonStyle(TertiaryButton(tint: .muted, lift: Soot.surface, font: .system(size: 12, weight: .semibold)))
+                            .padding(.leading, -8)
                     }
                     if let r = message.reply_count, r > 0 {
                         Button {
@@ -1384,11 +1361,8 @@ private struct MessageRow: View {
                                 if openThread != nil { Image(systemName: "chevron.right").font(.system(size: 9, weight: .semibold)) }
                             }
                         }
-                        .buttonStyle(.plain)
-                        .handCursor()
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(Soot.lime)
-                        .modifier(FocusOutline(radius: 4))
+                        .buttonStyle(TertiaryButton(lift: Soot.surface, font: .system(size: 12, weight: .semibold)))
+                        .padding(.leading, -8)
                         .accessibilityLabel(threadOpen ? "Hide replies" : "Show \(r) replies")
                     }
                 }
@@ -1436,21 +1410,19 @@ private struct MessageRow: View {
                     Text(SlackMarkup.emoji[name] ?? name).font(.system(size: 13))
                         .frame(width: 26, height: 24)
                         .background(on ? Soot.lime.opacity(0.2) : Color.clear, in: RoundedRectangle(cornerRadius: 5))
-                }
-                .buttonStyle(.plain)
-                .handCursor()
-                .focused($stripFocus, equals: i)
-                .modifier(FocusOutline(radius: 5))
+                        }
+                        .buttonStyle(IconButton(fill: nil, radius: 5))
+                        .focused($stripFocus, equals: i)
+                        .help(on ? "Remove \(SlackMarkup.reactionName(name))" : "React with \(SlackMarkup.reactionName(name))")
                 .accessibilityLabel(on ? "Remove \(SlackMarkup.reactionName(name))" : "React with \(SlackMarkup.reactionName(name))")
             }
             Button { picking.toggle() } label: {
-                Image(systemName: "face.smiling").font(.system(size: 13)).foregroundStyle(Soot.ink)
+                Image(systemName: "face.smiling").font(.system(size: 13))
                     .frame(width: 26, height: 24)
             }
-            .buttonStyle(.plain)
-            .handCursor()
+            .buttonStyle(IconButton(fill: nil, radius: 5))
             .focused($stripFocus, equals: 3)
-            .modifier(FocusOutline(radius: 5))
+            .help("Add a reaction")
             .accessibilityLabel("Add a reaction")
             .popover(isPresented: $picking, arrowEdge: .bottom) {
                 EmojiPicker(customEmoji: customEmoji, mine: Set(reactions.filter { mine($0.name) }.map(\.name))) { name in
@@ -1470,15 +1442,15 @@ private struct MessageRow: View {
                     }
                 }
             } label: {
-                Image(systemName: "ellipsis").font(.system(size: 12, weight: .semibold)).foregroundStyle(Soot.ink)
+                Image(systemName: "ellipsis").font(.system(size: 12, weight: .semibold))
                     .frame(width: 26, height: 24)
             }
-            .menuStyle(.borderlessButton)
+            .menuStyle(.button)
+            .buttonStyle(MenuTriggerButton(fill: .clear, radius: 5, edge: false))
             .menuIndicator(.hidden)
             .fixedSize()
-            .handCursor()
             .focused($stripFocus, equals: 2)
-            .modifier(FocusOutline(radius: 5))
+            .help("More: reply in thread, open in Slack, copy the link")
             .accessibilityLabel("More actions")
         }
         .padding(2)
@@ -1714,10 +1686,8 @@ struct EmojiPicker: View {
                             EmojiGlyph(name: r.name, custom: r.custom, size: 18)
                                 .frame(width: 32, height: 32)
                                 .background(mine.contains(r.name) ? Soot.lime.opacity(0.2) : Color.clear, in: RoundedRectangle(cornerRadius: 6))
-                        }
-                        .buttonStyle(.plain)
-                        .handCursor()
-                        .modifier(FocusOutline(radius: 6))
+                                }
+                                .buttonStyle(IconButton(fill: nil, radius: 6))
                         .help(SlackMarkup.reactionName(r.name))
                         .accessibilityLabel(SlackMarkup.reactionName(r.name))
                     }
@@ -1799,10 +1769,9 @@ private struct SlackImage: View {
                 Button { NotificationCenter.default.post(name: .previewSlackFile, object: file) } label: {
                     Image(decorative: image, scale: 2).resizable().aspectRatio(contentMode: .fill)
                         .frame(width: width, height: width / ratio)
-                }
-                .buttonStyle(.plain)
-                .handCursor()
-                .help("Preview \(file.displayName)")
+                        }
+                        .buttonStyle(RowButton(lift: .none))
+                        .help("Preview \(file.displayName)")
             } else if failed {
                 FileRow(file: file)
             } else {
@@ -1866,10 +1835,10 @@ private struct FileRow: View {
         .accessibilityLabel("\(file.displayName), \(detail)")
         if file.isReadable, file.url_private != nil {
             Button { NotificationCenter.default.post(name: .previewSlackFile, object: file) } label: { row }
-                .buttonStyle(.plain).handCursor().modifier(FocusOutline(radius: 8))
+                .buttonStyle(RowButton(lift: .tone))
                 .help("Preview \(file.displayName)")
-        } else if let url = file.permalink.flatMap(URL.init(string:)) {
-            Link(destination: url) { row }.buttonStyle(.plain).handCursor().modifier(FocusOutline(radius: 8))
+            } else if let url = file.permalink.flatMap(URL.init(string:)) {
+                Link(destination: url) { row }.buttonStyle(RowButton(lift: .tone))
                 .help("Open in Slack")
         } else {
             row
@@ -1951,7 +1920,7 @@ private struct LinkPreview: View {
             image = await SlackMediaCache.shared.publicImage(url, maxPixels: 96)
         }
         if let link {
-            Link(destination: link) { body }.buttonStyle(.plain).handCursor().modifier(FocusOutline(radius: 8))
+            Link(destination: link) { body }.buttonStyle(RowButton(lift: .tone))
         } else {
             body
         }

@@ -89,8 +89,10 @@ struct OnboardingView: View {
                     Capsule()
                         .fill(s == stage ? Soot.ink : s.rawValue < stage.rawValue ? Soot.muted : Soot.surface)
                         .frame(width: s == stage ? 28 : 8, height: 8)
+                        .padding(.vertical, 6)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(IconButton(fill: nil))
+                .help(s.rawValue < stage.rawValue ? "Back to \(["Name", "Connect", "Repositories", "Channel names", "First project"][s.rawValue])" : "")
                 .disabled(s.rawValue >= stage.rawValue)
                 .accessibilityLabel(["Name", "Connect", "Repositories", "Channel names", "First project"][s.rawValue])
                 .accessibilityAddTraits(s == stage ? .isSelected : [])
@@ -106,13 +108,7 @@ private struct SkipButton: View {
     let action: () -> Void
     var body: some View {
         Button("Skip for now", action: action)
-            .buttonStyle(PressButton())
-            .font(.system(size: 14, weight: .semibold))
-            .foregroundStyle(Soot.lime)
-            .padding(.horizontal, 8)
-            .frame(height: 32)
-            .contentShape(Capsule())
-            .modifier(FocusOutline(radius: 16))
+            .buttonStyle(TertiaryButton(lift: Soot.surface, font: .system(size: 14, weight: .semibold), height: 32))
             .padding(.leading, -8)
             .help("Go straight to Dever; set things up later in Settings.")
     }
@@ -142,7 +138,7 @@ private struct NameControls: View {
                 .onSubmit(go)
                 .accessibilityLabel("Your name")
             Button("Continue", action: go)
-                .buttonStyle(LimeButton())
+                .buttonStyle(PrimaryButton(size: .sheet))
                 .keyboardShortcut(.defaultAction)
                 .disabled(displayName.trimmingCharacters(in: .whitespaces).isEmpty)
         }
@@ -179,7 +175,7 @@ private struct ConnectControls: View {
             .frame(maxWidth: 400)
             HStack(spacing: 16) {
                 Button("Continue", action: next)
-                    .buttonStyle(LimeButton())
+                    .buttonStyle(PrimaryButton(size: .sheet))
                     .keyboardShortcut(.defaultAction)
                     .disabled(app.slack == nil || app.linear == nil)
                 Label("Stays on this Mac", systemImage: "lock")
@@ -220,11 +216,11 @@ private struct ServiceRow: View {
                     .accessibilityLabel("\(service.label) connected")
             } else if flow != nil {
                 Button("Cancel") { flow?.cancel(); flow = nil }
-                    .buttonStyle(.plain).font(.system(size: 14)).foregroundStyle(Soot.muted)
+                    .buttonStyle(TertiaryButton(tint: .muted, font: .system(size: 14, weight: .medium)))
                     .transition(.opacity)
             } else {
-                Button("Connect", action: connect).buttonStyle(.plain)
-                    .font(.system(size: 14, weight: .semibold)).foregroundStyle(Soot.lime)
+                Button("Connect", action: connect)
+                    .buttonStyle(TertiaryButton(font: .system(size: 14, weight: .semibold)))
                     .transition(.opacity)
             }
         }
@@ -351,7 +347,7 @@ private struct ChannelNamingControls: View {
                 channelPrefix = usesPrefix ? trimmed : ""
                 next()
             }
-            .buttonStyle(LimeButton())
+            .buttonStyle(PrimaryButton(size: .sheet))
             .keyboardShortcut(.defaultAction)
             .disabled(usesPrefix && prefix.trimmingCharacters(in: .whitespaces).isEmpty)
         }
@@ -383,9 +379,8 @@ private struct ChannelNamingControls: View {
             }
             .padding(.horizontal, 16)
             .frame(height: 64)
-            .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(RowButton(lift: .tone, radius: Soot.radius))
         .accessibilityAddTraits(on ? .isSelected : [])
     }
 
@@ -475,7 +470,7 @@ private struct AlertsRow: View {
                         NSWorkspace.shared.open(url)
                     }
                 }
-                .buttonStyle(.plain).font(.system(size: 14, weight: .semibold)).foregroundStyle(Soot.lime)
+                .buttonStyle(TertiaryButton(font: .system(size: 14, weight: .semibold)))
                 .help("Alerts are turned off for Dever in System Settings.")
             } else {
                 Toggle("Alerts", isOn: master)
@@ -487,6 +482,7 @@ private struct AlertsRow: View {
         .overlay(RoundedRectangle(cornerRadius: Soot.radius).strokeBorder(Soot.surface, lineWidth: 1.5))
         .contentShape(Rectangle())
         .onTapGesture { if status != .denied { master.wrappedValue.toggle() } }
+        .handCursor(status != .denied)
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(status == .denied ? [] : .isToggle)
         .accessibilityValue(status == .denied ? "Off in System Settings" : master.wrappedValue ? "On" : "Off")

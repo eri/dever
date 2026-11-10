@@ -56,7 +56,6 @@ private struct DistanceFromEnd: ViewModifier {
 /// The pill itself: an arrow and "Latest" on a raised surface, lime arrow, 32 pt high.
 private struct JumpPill: View {
     let action: () -> Void
-    @State private var hovering = false
 
     var body: some View {
         Button(action: action) {
@@ -66,16 +65,9 @@ private struct JumpPill: View {
             }
             .padding(.horizontal, 12)
             .frame(height: 32)
-            .background(hovering ? Soot.ground : Soot.surface, in: Capsule())
-            .overlay(Capsule().strokeBorder(Soot.edge))
-            .shadow(color: .black.opacity(0.18), radius: 8, y: 3)
-            .contentShape(Capsule())
         }
-        .buttonStyle(PressButton())
-        .handCursor()
-        .modifier(FocusOutline(radius: 16))
-        .motion(Motion.quick, fade: true, value: hovering)
-        .onHover { hovering = $0 }
+        .buttonStyle(ChipButton(fill: Soot.surface))
+        .shadow(color: .black.opacity(0.18), radius: 8, y: 3)
         .help("Jump to the latest message")
         .accessibilityLabel("Jump to the latest message")
     }

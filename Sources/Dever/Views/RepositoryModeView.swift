@@ -27,10 +27,8 @@ struct RepositoryModeRows: View {
                     .frame(height: 64)
                     .background(Soot.surface, in: RoundedRectangle(cornerRadius: Soot.radius))
                     .overlay(RoundedRectangle(cornerRadius: Soot.radius).strokeBorder(on ? Soot.lime.opacity(0.5) : .clear))
-                    .contentShape(Rectangle())
-                    .modifier(FocusOutline(radius: Soot.radius))
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(RowButton(lift: .tone, radius: Soot.radius))
                 .accessibilityLabel("\(option.title). \(option.detail)")
                 .accessibilityAddTraits(on ? .isSelected : [])
             }
@@ -111,7 +109,7 @@ struct RepositoryModeControls: View {
                     app.setRepositoryMode(mode, workspace: mode.usesWorkspaceRepository ? workspace : app.workspaceRepository)
                     next()
                 }
-                .buttonStyle(LimeButton())
+                .buttonStyle(PrimaryButton(size: .sheet))
                 .keyboardShortcut(.defaultAction)
                 .disabled(needsWorkspace && workspace == nil)
                 Label("Change it any time in Settings", systemImage: "arrow.triangle.2.circlepath")

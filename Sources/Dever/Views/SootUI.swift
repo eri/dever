@@ -38,83 +38,8 @@ struct Headline: View {
     }
 }
 
-struct LimeButton: ButtonStyle {
-    @Environment(\.isEnabled) private var isEnabled
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .font(.system(size: 14, weight: .semibold))
-            .foregroundStyle(isEnabled ? Soot.limeInk : Soot.muted)
-            .padding(.horizontal, 16)
-            .frame(height: 36)
-            .background(isEnabled ? Soot.lime.opacity(configuration.isPressed ? 0.8 : 1) : Soot.surface,
-                        in: RoundedRectangle(cornerRadius: Soot.radius))
-            .overlay(RoundedRectangle(cornerRadius: Soot.radius).strokeBorder(isEnabled ? Color.clear : Soot.edge))
-            .modifier(FocusOutline(radius: Soot.radius))
-            .pressScale(configuration.isPressed)
-    }
-}
-
-struct QuietButton: ButtonStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .font(.system(size: 14, weight: .medium))
-            .foregroundStyle(Soot.ink)
-            .padding(.horizontal, 16)
-            .frame(height: 36)
-            .background(Soot.surface.opacity(configuration.isPressed ? 0.7 : 1),
-                        in: RoundedRectangle(cornerRadius: Soot.radius))
-            .overlay(RoundedRectangle(cornerRadius: Soot.radius).strokeBorder(Soot.edge))
-            .modifier(FocusOutline(radius: Soot.radius))
-            .pressScale(configuration.isPressed)
-    }
-}
-
-/// A page-toolbar action: a glyph and a verb on a surface tile, 34px, no edge. Hover lifts
-/// the tile a tone and shows the hand; `busy` runs a lime line along its foot, not a spinner.
-struct ToolbarButton: ButtonStyle {
-    var busy = false
-    func makeBody(configuration: Configuration) -> some View {
-        ToolbarButtonBody(configuration: configuration, busy: busy)
-    }
-}
-
-private struct ToolbarButtonBody: View {
-    let configuration: ButtonStyle.Configuration
-    let busy: Bool
-    @Environment(\.isEnabled) private var isEnabled
-    @State private var hovering = false
-
-    var body: some View {
-        configuration.label
-            .labelStyle(ToolbarLabel())
-            .foregroundStyle(Soot.ink.opacity(isEnabled || busy ? 1 : 0.5))
-            .padding(.horizontal, 12)
-            .frame(height: 34)
-            .background(Soot.surface, in: RoundedRectangle(cornerRadius: Soot.radius))
-            .overlay(RoundedRectangle(cornerRadius: Soot.radius)
-                .fill(Soot.ink.opacity(configuration.isPressed ? 0.12 : hovering && isEnabled ? 0.06 : 0)))
-            .overlay(alignment: .bottom) {
-                if busy { WaitingLine().padding(.horizontal, 6).padding(.bottom, 1).transition(.opacity) }
-            }
-            .clipShape(RoundedRectangle(cornerRadius: Soot.radius))
-            .contentShape(RoundedRectangle(cornerRadius: Soot.radius))
-            .modifier(FocusOutline(radius: Soot.radius))
-            .pressScale(configuration.isPressed)
-            .motion(Motion.quick, fade: true, value: hovering)
-            .motion(Motion.ui, fade: true, value: busy)
-            .onHover { hovering = $0 }
-            .handCursor()
-    }
-}
-
-private struct ToolbarLabel: LabelStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        HStack(spacing: 6) {
-            configuration.icon.font(.system(size: 12, weight: .semibold)).accessibilityHidden(true)
-            configuration.title.font(.system(size: 13, weight: .semibold))
-        }
-    }
-}
+// Button styles live in Buttons.swift (PrimaryButton, SecondaryButton, TertiaryButton, IconButton,
+// DestructiveButton, ToolbarButton, ChipButton, RowButton, MenuTriggerButton).
 
 /// A linked tool as a chip: its logo and its name; a click opens it in the tool.
 /// Without a URL (the tool is linked but not connected yet) it stays a quiet label.
@@ -126,7 +51,6 @@ struct ToolChip: View {
     var body: some View {
         if let url {
             HoverLink(destination: url, hoverTint: Soot.surface) { face }
-                .handCursor()
                 .help("Open \(text) in \(service.label)")
                 .accessibilityLabel("Open \(text) in \(service.label)")
         } else {
@@ -152,7 +76,6 @@ struct OptionRow: View {
     let recommended: Bool
     let enabled: Bool
     let action: () -> Void
-    @State private var hovering = false
 
     var body: some View {
         Button(action: action) {
@@ -171,17 +94,12 @@ struct OptionRow: View {
             }
             .padding(.horizontal, 16)
             .frame(height: 64)
-            .background(hovering && enabled ? Soot.surface.opacity(0.7) : Soot.surface,
-                        in: RoundedRectangle(cornerRadius: Soot.radius))
+            .background(Soot.surface, in: RoundedRectangle(cornerRadius: Soot.radius))
             .overlay(RoundedRectangle(cornerRadius: Soot.radius)
                 .strokeBorder(recommended && enabled ? Soot.lime.opacity(0.5) : .clear))
-            .contentShape(Rectangle())
         }
-        .buttonStyle(PressButton())
+        .buttonStyle(RowButton(lift: .tone, radius: Soot.radius))
         .disabled(!enabled)
-        .opacity(enabled ? 1 : 0.45)
-        .motion(Motion.quick, fade: true, value: hovering)
-        .onHover { hovering = $0 }
     }
 }
 
@@ -229,11 +147,8 @@ struct ChipPicker<Value: Hashable>: View {
                             if on { Capsule().fill(Soot.lime).matchedGeometryEffect(id: "pill", in: marker) }
                             else { Capsule().fill(Soot.surface) }
                         }
-                        .overlay(Capsule().strokeBorder(on ? Color.clear : Soot.edge))
-                        .contentShape(Capsule())
                 }
-                .buttonStyle(PressButton())
-                .modifier(FocusOutline(radius: 14))
+                .buttonStyle(ChipButton(on: on, drawsFill: false))
                 .accessibilityAddTraits(on ? .isSelected : [])
             }
         }
@@ -310,14 +225,8 @@ struct SheetTitle<Mark: View>: View {
             Text(title).font(.system(size: 22, weight: .semibold)).tracking(-0.5).foregroundStyle(Soot.ink)
                 .accessibilityAddTraits(.isHeader)
             Spacer()
-            Button(action: close) {
-                Image(systemName: "xmark").font(.system(size: 12, weight: .semibold)).foregroundStyle(Soot.ink)
-                    .frame(width: 28, height: 28).background(Soot.surface, in: Circle())
-                    .modifier(FocusOutline(radius: 14))
-            }
-            .buttonStyle(PressButton())
-            .keyboardShortcut(.cancelAction)
-            .accessibilityLabel("Close")
+            GlyphButton(symbol: "xmark", label: "Close", action: close)
+                .keyboardShortcut(.cancelAction)
         }
     }
 }
@@ -327,13 +236,14 @@ struct SheetTitle<Mark: View>: View {
 struct FocusOutline: ViewModifier {
     var radius: CGFloat
     @Environment(\.isFocused) private var isFocused
+    @Environment(\.buttonStateOverride) private var override
 
     func body(content: Content) -> some View {
         content.overlay(
             RoundedRectangle(cornerRadius: radius + 3)
                 .strokeBorder(Soot.lime, lineWidth: 2)
                 .padding(-3)
-                .opacity(isFocused ? 1 : 0)
+                .opacity((override?.focused ?? isFocused) ? 1 : 0)
         )
     }
 }
@@ -365,10 +275,10 @@ struct RadioRow: View {
                 Spacer(minLength: 0)
             }
             .padding(.vertical, 6)
-            .contentShape(Rectangle())
-            .modifier(FocusOutline(radius: 6))
+            .padding(.horizontal, 8)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(RowButton(lift: .tone, radius: 6))
+        .padding(.horizontal, -8)
         .accessibilityAddTraits(selected ? [.isSelected] : [])
         .accessibilityHint(detail ?? "")
     }
@@ -451,6 +361,7 @@ struct SwitchRow: View {
         .frame(maxWidth: 420, minHeight: 32, alignment: .leading)
         .contentShape(Rectangle())
         .onTapGesture { isOn.toggle() }
+        .handCursor()
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(.isToggle)
         .accessibilityValue(isOn ? "On" : "Off")
@@ -503,10 +414,8 @@ struct ChoiceCard<Nested: View>: View {
                 .padding(.horizontal, 14)
                 .padding(.vertical, 12)
                 .frame(minHeight: 48)
-                .contentShape(Rectangle())
-                .modifier(FocusOutline(radius: Soot.fieldRadius))
             }
-            .buttonStyle(.plain)
+            .buttonStyle(RowButton(lift: .tone, radius: Soot.fieldRadius))
             .accessibilityAddTraits(selected ? [.isSelected] : [])
             if selected && !(Nested.self == EmptyView.self) {
                 VStack(alignment: .leading, spacing: 12) { nested() }
@@ -553,15 +462,9 @@ struct StepSheet<Content: View>: View {
             .frame(width: Self.size.width, height: Self.size.height, alignment: .topLeading)
             .background(Soot.ground)
             .modifier(SheetEntrance())
-            Button(action: close) {
-                Image(systemName: "xmark").font(.system(size: 12, weight: .semibold)).foregroundStyle(Soot.ink)
-                    .frame(width: 28, height: 28).background(Soot.surface, in: Circle())
-                    .modifier(FocusOutline(radius: 14))
-            }
-            .buttonStyle(PressButton())
-            .keyboardShortcut(.cancelAction)
-            .accessibilityLabel("Close")
-            .padding(40)
+            GlyphButton(symbol: "xmark", label: "Close", action: close)
+                .keyboardShortcut(.cancelAction)
+                .padding(40)
         }
     }
 }
@@ -601,13 +504,7 @@ struct StepMarks: View {
 struct BackButton: View {
     let action: () -> Void
     var body: some View {
-        Button(action: action) {
-            Image(systemName: "chevron.left").font(.system(size: 12, weight: .semibold)).foregroundStyle(Soot.ink)
-                .frame(width: 28, height: 28).background(Soot.surface, in: Circle())
-                .modifier(FocusOutline(radius: 14))
-        }
-        .buttonStyle(PressButton())
-        .accessibilityLabel("Back")
+        GlyphButton(symbol: "chevron.left", label: "Back", action: action)
     }
 }
 
@@ -737,14 +634,9 @@ struct SearchPicker: View {
             .font(.system(size: 14))
             .padding(.horizontal, 14)
             .frame(height: Soot.fieldHeight)
-            .background(Soot.surface, in: RoundedRectangle(cornerRadius: Soot.fieldRadius))
-            .overlay(RoundedRectangle(cornerRadius: Soot.fieldRadius)
-                .strokeBorder(open ? Soot.lime : Soot.edge, lineWidth: open ? 2 : 1))
-            .contentShape(RoundedRectangle(cornerRadius: Soot.fieldRadius))
-            .modifier(FocusOutline(radius: Soot.fieldRadius))
             .motion(Motion.quick, fade: true, value: open)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(MenuTriggerButton(open: open, radius: Soot.fieldRadius))
         .accessibilityLabel(label)
         .accessibilityValue(current?.title ?? "None")
         .onAppear {
@@ -825,7 +717,6 @@ private struct PickerRow: View {
     let isAction: Bool
     let selected: Bool
     let action: () -> Void
-    @State private var hovering = false
 
     var body: some View {
         Button(action: action) {
@@ -855,13 +746,9 @@ private struct PickerRow: View {
             .padding(.horizontal, 12)
             .padding(.vertical, 6)
             .frame(minHeight: 36)
-            .background(hovering ? Soot.surface : Color.clear, in: RoundedRectangle(cornerRadius: Soot.radius))
-            .contentShape(Rectangle())
-            .modifier(FocusOutline(radius: Soot.radius))
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .buttonStyle(.plain)
-        .motion(Motion.quick, fade: true, value: hovering)
-        .onHover { hovering = $0 }
+        .buttonStyle(RowButton(lift: .surface, radius: Soot.radius))
         .accessibilityAddTraits(selected ? .isSelected : [])
     }
 }

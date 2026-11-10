@@ -211,7 +211,7 @@ struct PreviewPanel: View {
                     Button(sending ? "Sending…" : "Deploy preview") {
                         Task { await send { try await store.deploy(project, app: app, options: options) } }
                     }
-                    .buttonStyle(LimeButton()).disabled(sending)
+                    .buttonStyle(PrimaryButton()).disabled(sending)
                     .help("Posts \(options.command) on the pull request; about ten minutes")
                 case .live, .deploying, .updating, .deleting:
                     // The preview is there or on its way: nothing presses for attention.
@@ -243,11 +243,11 @@ struct PreviewPanel: View {
                 Button("Refresh") { Task { await store.load(project, app: app, force: true) } }
             } label: {
                 Label("More", systemImage: "ellipsis").labelStyle(.iconOnly)
-                    .font(.system(size: 13, weight: .bold)).foregroundStyle(Soot.ink)
-                    .frame(width: 20, height: 36)
+                    .font(.system(size: 13, weight: .bold))
+                    .frame(width: 36, height: 36)
             }
             .menuStyle(.button)
-            .buttonStyle(QuietButton())
+            .buttonStyle(MenuTriggerButton())
             .menuIndicator(.hidden)
             .fixedSize()
             .help("More: redeploy, protect, delete, open on GitHub, change the pull request")
@@ -271,9 +271,9 @@ struct PreviewPanel: View {
             }
             HStack(spacing: 10) {
                 Button(sending ? "Sending…" : "Deploy") { Task { await send { try await store.deploy(project, app: app, options: options) }; optionsOpen = false } }
-                    .buttonStyle(LimeButton()).disabled(sending)
+                    .buttonStyle(PrimaryButton()).disabled(sending)
                     .keyboardShortcut(.defaultAction)
-                Button("Cancel") { optionsOpen = false }.buttonStyle(QuietButton()).keyboardShortcut(.cancelAction)
+                Button("Cancel") { optionsOpen = false }.buttonStyle(SecondaryButton()).keyboardShortcut(.cancelAction)
                 Text(verbatim: options.command).font(.system(size: 12, weight: .medium, design: .monospaced))
                     .foregroundStyle(Soot.muted).lineLimit(1).truncationMode(.middle)
                     .accessibilityLabel("Comment to post: \(options.command)")
@@ -364,7 +364,6 @@ enum PreviewProduct: String, CaseIterable, Identifiable {
 private struct ProductChip: View {
     let product: PreviewProduct
     let status: PreviewStatus
-    @State private var hovering = false
 
     private var frontUp: Bool? { status.targets[product.front] ?? nil }
     private var apiUp: Bool? { status.targets[product.api] ?? nil }
@@ -392,14 +391,8 @@ private struct ProductChip: View {
             .font(.system(size: 13, weight: .semibold))
             .padding(.horizontal, 10)
             .frame(height: 30)
-            .background(hovering ? Soot.ground : Soot.surface, in: Capsule())
-            .overlay(Capsule().strokeBorder(Soot.edge))
-            .contentShape(Capsule())
         }
-        .buttonStyle(.plain)
-        .handCursor()
-        .modifier(FocusOutline(radius: 15))
-        .onHover { hovering = $0 }
+        .buttonStyle(ChipButton(fill: Soot.surface))
         .help(detail)
         .accessibilityLabel("\(product.label), \(mark.word)")
         .accessibilityHint("Opens in the browser")
@@ -438,12 +431,11 @@ private struct PodsStepper: View {
 
     private func stepButton(_ symbol: String, enabled: Bool, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            Image(systemName: symbol).font(.system(size: 11, weight: .bold)).foregroundStyle(enabled ? Soot.ink : Soot.muted)
-                .frame(width: 30, height: 30).contentShape(Rectangle())
+            Image(systemName: symbol).font(.system(size: 11, weight: .bold))
+                .frame(width: 30, height: 30)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(IconButton(fill: nil, radius: Soot.radius))
         .disabled(!enabled)
-        .modifier(FocusOutline(radius: Soot.radius))
         .accessibilityLabel(symbol == "plus" ? "More \(label.lowercased())" : "Fewer \(label.lowercased())")
     }
 }
@@ -462,6 +454,7 @@ private struct OptionSwitch: View {
         .frame(minHeight: 28)
         .contentShape(Rectangle())
         .onTapGesture { isOn.toggle() }
+        .handCursor()
         .help(detail ?? title)
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(.isToggle)

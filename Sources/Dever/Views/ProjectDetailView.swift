@@ -230,14 +230,8 @@ struct ProjectDetailView: View {
                         Image(systemName: "plus").font(.system(size: 11, weight: .semibold))
                         Text("Link a tool")
                     }
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(Soot.lime)
-                    .padding(.horizontal, 8)
-                    .frame(height: 28)
-                    .contentShape(Capsule())
-                    .modifier(FocusOutline(radius: 14))
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(TertiaryButton(lift: Soot.surface, font: .system(size: 13, weight: .medium)))
                 .help("Link a Slack channel, a Linear project or a GitHub repository")
             }
         }
@@ -653,13 +647,8 @@ struct ProjectDetailView: View {
                         }
                         .font(.system(size: 13, weight: .semibold)).foregroundStyle(Soot.ink)
                         .padding(.horizontal, 10).frame(height: 30)
-                        .background(Soot.surface, in: Capsule())
-                        .overlay(Capsule().strokeBorder(Soot.edge))
-                        .contentShape(Capsule())
                     }
-                    .buttonStyle(PressButton())
-                    .handCursor()
-                    .modifier(FocusOutline(radius: 15))
+                    .buttonStyle(ChipButton(fill: Soot.surface))
                     .help("Back to the project (⌘⇧E)")
                     .accessibilityLabel("Back to the project")
                     .keyboardShortcut("e", modifiers: [.command, .shift])
@@ -669,21 +658,16 @@ struct ProjectDetailView: View {
             }, accessory: { EmptyView() }, trailing: {
                 if project.slack != nil, !slackExpanded, loaded, lastRead != nil, !railPlan.caughtUp, railPlan.unread > 0 {
                     Button("Mark as read") { markAllRead() }
-                        .buttonStyle(PressButton())
-                        .handCursor()
-                        .font(.system(size: 12, weight: .semibold)).foregroundStyle(Soot.muted)
-                        .modifier(FocusOutline(radius: 4))
+                        .buttonStyle(TertiaryButton(tint: .muted, font: .system(size: 12, weight: .semibold)))
                         .help("Mark the whole channel as read, in Slack too")
                         .transition(.opacity)
                 }
                 if project.slack != nil, !slackExpanded {
                     Button { toggleSlackWide() } label: {
                         Image(systemName: "arrow.up.left.and.arrow.down.right").font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(Soot.ink).frame(width: 30, height: 30).background(Soot.ground, in: Circle())
+                            .frame(width: 30, height: 30)
                     }
-                    .buttonStyle(PressButton())
-                    .handCursor()
-                    .modifier(FocusOutline(radius: 15))
+                    .buttonStyle(IconButton(fill: Soot.ground))
                     .help("Read the conversation full width (⌘⇧E)")
                     .accessibilityLabel("Read the conversation full width")
                     .keyboardShortcut("e", modifiers: [.command, .shift])

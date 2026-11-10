@@ -160,6 +160,24 @@ enum Snapshotter {
                 }
             }
         }
+        if ProcessInfo.processInfo.environment["DEVER_SNAPSHOT_GALLERY"] == "1" {
+            // Every button role in every state (hover and press forced through the style's
+            // override), in its own window, in both modes: buttons-dark.png, buttons-light.png.
+            for (themeName, appearance) in [("dark", NSAppearance.Name.darkAqua), ("light", .aqua)] {
+                let host = NSHostingView(rootView: ButtonGallery())
+                host.frame = NSRect(origin: .zero, size: host.fittingSize)
+                let window = NSWindow(contentRect: host.frame, styleMask: [.borderless], backing: .buffered, defer: false)
+                window.appearance = NSAppearance(named: appearance)
+                window.contentView = host
+                window.orderFront(nil)
+                try? await Task.sleep(nanoseconds: 1_500_000_000)
+                if let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) {
+                    host.cacheDisplay(in: host.bounds, to: rep)
+                    try? rep.representation(using: .png, properties: [:])?.write(to: dir.appendingPathComponent("buttons-\(themeName).png"))
+                }
+                window.orderOut(nil)
+            }
+        }
         NSApp.terminate(nil)
     }
 

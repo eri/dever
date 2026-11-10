@@ -255,10 +255,10 @@ struct OverviewView: View {
         HStack(spacing: 12) {
             if !search.isEmpty {
                 Text("No project matches \u{201C}\(search)\u{201D}").foregroundStyle(Soot.muted)
-                Button("Clear search") { search = "" }.buttonStyle(QuietButton())
+                Button("Clear search") { search = "" }.buttonStyle(SecondaryButton())
             } else {
                 Text("Every project is finished and hidden").foregroundStyle(Soot.muted)
-                Button("Show finished projects") { app.overview.hideFinished = false }.buttonStyle(QuietButton())
+                Button("Show finished projects") { app.overview.hideFinished = false }.buttonStyle(SecondaryButton())
             }
             Spacer()
         }
@@ -276,14 +276,14 @@ struct OverviewView: View {
                 .font(.system(size: 13)).foregroundStyle(Soot.muted)
                 .padding(.top, 4)
             HStack(spacing: 10) {
-                Button("Add project", action: newProject).buttonStyle(LimeButton())
+                Button("Add project", action: newProject).buttonStyle(PrimaryButton())
                 if app.slack != nil {
                     Button { importFrom(.slack) } label: { Label("Add many from Slack", systemImage: "number") }
-                        .buttonStyle(QuietButton())
+                        .buttonStyle(SecondaryButton())
                 }
                 if app.linear != nil {
                     Button { importFrom(.linear) } label: { Label("Add many from Linear", systemImage: "checklist") }
-                        .buttonStyle(QuietButton())
+                        .buttonStyle(SecondaryButton())
                 }
             }
             .padding(.top, 24)
@@ -291,10 +291,9 @@ struct OverviewView: View {
                 Button("Connect Slack and Linear in Settings to start from what you already have") {
                     openSettings()
                 }
-                .buttonStyle(.plain)
-                .font(.system(size: 13)).foregroundStyle(Soot.lime)
-                .modifier(FocusOutline(radius: 4))
+                .buttonStyle(TertiaryButton(lift: Soot.surface, font: .system(size: 13, weight: .medium)))
                 .padding(.top, 16)
+                .padding(.leading, -8)
             }
         }
         .padding(.horizontal, 28)
@@ -337,7 +336,7 @@ private struct AddProjectControl: View {
                 }
                 .padding(.horizontal, 12)
             }
-            .buttonStyle(LimeSegment())
+            .buttonStyle(PrimarySegment())
             .help("Add a project (⌘N)")
             Rectangle().fill(Soot.limeInk.opacity(0.28)).frame(width: 1, height: 18)
                 .accessibilityHidden(true)
@@ -347,7 +346,7 @@ private struct AddProjectControl: View {
                     .motion(Motion.ui, value: showMany)
                     .frame(width: 32)
             }
-            .buttonStyle(LimeSegment(open: showMany))
+            .buttonStyle(PrimarySegment(open: showMany))
             .help("Add many projects at once")
             .accessibilityLabel("Add many projects")
             .onAppear {
@@ -371,34 +370,6 @@ private struct AddProjectControl: View {
             }
         }
         .onExitCommand { if showMany { toggle(false) } }
-    }
-}
-
-/// One part of a split lime button: a tone on hover and press, the focus ring inside it.
-private struct LimeSegment: ButtonStyle {
-    var open = false
-    func makeBody(configuration: Configuration) -> some View {
-        LimeSegmentBody(configuration: configuration, open: open)
-    }
-}
-
-private struct LimeSegmentBody: View {
-    let configuration: ButtonStyle.Configuration
-    let open: Bool
-    @State private var hovering = false
-    @Environment(\.isFocused) private var focused
-
-    var body: some View {
-        configuration.label
-            .frame(maxHeight: .infinity)
-            .background(Soot.limeInk.opacity(configuration.isPressed ? 0.16 : hovering || open ? 0.08 : 0))
-            .overlay(RoundedRectangle(cornerRadius: Soot.radius - 2).strokeBorder(Soot.limeInk, lineWidth: 2)
-                .padding(2).opacity(focused ? 1 : 0))
-            .contentShape(Rectangle())
-            .motion(Motion.quick, fade: true, value: hovering)
-            .motion(Motion.quick, fade: true, value: open)
-            .onHover { hovering = $0 }
-            .handCursor()
     }
 }
 
@@ -448,7 +419,6 @@ private struct MenuRow: View {
     let detail: String
     let connected: Bool
     let action: () -> Void
-    @State private var hovering = false
 
     var body: some View {
         Button(action: action) {
@@ -466,21 +436,14 @@ private struct MenuRow: View {
                 Spacer(minLength: 8)
                 Image(systemName: connected ? "arrow.right" : "arrow.up.right")
                     .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(hovering && connected ? Soot.limeInk : Soot.muted)
+                    .foregroundStyle(Soot.muted)
                     .frame(width: 26, height: 26)
-                    .background(hovering && connected ? Soot.lime : Color.clear, in: Circle())
                     .accessibilityHidden(true)
             }
             .padding(.horizontal, 10)
             .frame(height: 52)
-            .background(hovering ? Soot.surface : Color.clear, in: RoundedRectangle(cornerRadius: Soot.radius))
-            .contentShape(RoundedRectangle(cornerRadius: Soot.radius))
         }
-        .buttonStyle(.plain)
-        .modifier(FocusOutline(radius: Soot.radius))
-        .motion(Motion.quick, fade: true, value: hovering)
-        .onHover { hovering = $0 }
-        .handCursor()
+        .buttonStyle(RowButton(lift: .surface, radius: Soot.radius))
         .accessibilityLabel("\(title). \(detail)")
     }
 }
@@ -560,15 +523,10 @@ private struct ProjectRow: View {
             }
             .padding(.horizontal, 12)
             .frame(height: density.rowHeight)
-            .contentShape(RoundedRectangle(cornerRadius: 8))
         }
-        .buttonStyle(.plain)
-        .background(hovering ? Soot.ground.opacity(0.7) : Color.clear, in: RoundedRectangle(cornerRadius: 8))
-        .animation(.easeOut(duration: 0.15), value: hovering)
+        .buttonStyle(RowButton(lift: .ground))
         .overlay(alignment: .trailing) { pin.padding(.trailing, 12) }
-        .modifier(FocusOutline(radius: 8))
         .onHover { hovering = $0 }
-        .handCursor()
         .contextMenu {
             Button("Open \(project.name)", action: open)
             Button(favorite ? "Unpin from top" : "Pin to top") { favorite.toggle() }
@@ -844,11 +802,9 @@ private struct PinButton: View {
                 .foregroundStyle(on ? Soot.lime : Soot.muted)
                 .frame(width: 28, height: 28)
                 .background(hovering ? Soot.surface : Color.clear, in: Circle())
-                .contentShape(Circle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(IconButton(fill: nil))
         .focused($focused)
-        .modifier(FocusOutline(radius: 14))
         .opacity(visible || hovering || focused ? 1 : 0)
         .animation(.easeOut(duration: 0.15), value: visible || hovering)
         .onHover { hovering = $0 }

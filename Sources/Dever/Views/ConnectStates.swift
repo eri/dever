@@ -167,11 +167,11 @@ struct ConnectControl: View {
         } else if flow.running == service {
             HStack(spacing: 12) {
                 Text("Approve in your browser…").font(.system(size: 13)).foregroundStyle(Soot.muted)
-                Button("Cancel") { flow.cancel() }.buttonStyle(QuietButton())
+                Button("Cancel") { flow.cancel() }.buttonStyle(SecondaryButton())
             }
         } else {
             Button("\(verb) \(service.label)") { flow.start(service, app: app) }
-                .buttonStyle(LimeButton())
+                .buttonStyle(PrimaryButton())
                 .help(service == .github ? "Sign in with a code on github.com" : "Approve Dever in your browser")
         }
     }
@@ -314,7 +314,7 @@ struct ServiceFailureRow: View {
                     } else if state == .unauthorized {
                         ConnectControl(service: service, flow: flow, verb: "Reconnect")
                     } else if let retry {
-                        Button("Retry", action: retry).buttonStyle(QuietButton())
+                        Button("Retry", action: retry).buttonStyle(SecondaryButton())
                     }
                 }
                 if let error = flow.error, error.service == service { ErrorLabel(error.message) }

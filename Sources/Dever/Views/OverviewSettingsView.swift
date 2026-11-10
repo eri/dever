@@ -26,7 +26,7 @@ struct OverviewSettingsView: View {
                 Button("Reset to defaults") {
                     withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) { app.overview = OverviewSettings() }
                 }
-                .buttonStyle(QuietButton())
+                .buttonStyle(SecondaryButton())
                 .padding(.top, 16)
                 .disabled(app.overview == OverviewSettings())
             }
@@ -75,6 +75,7 @@ struct OverviewSettingsView: View {
                 }
                 .contentShape(Rectangle())
                 .onTapGesture { tap?() }
+                .handCursor(tap != nil)
                 if tap == nil { control() }
             }
             .padding(.vertical, 8)
@@ -122,12 +123,8 @@ private struct ColumnChips: View {
             .foregroundStyle(on ? Soot.limeInk : Soot.ink)
             .padding(.horizontal, 10)
             .frame(height: 26)
-            .background(on ? Soot.lime : Soot.ground, in: Capsule())
-            .overlay(Capsule().strokeBorder(on ? Color.clear : Soot.edge))
-            .contentShape(Capsule())
         }
-        .buttonStyle(.plain)
-        .modifier(FocusOutline(radius: 13))
+        .buttonStyle(ChipButton(on: on))
         .help(column.detail)
         .accessibilityLabel("\(column.chip) column")
         .accessibilityValue(on ? "Shown" : "Hidden")

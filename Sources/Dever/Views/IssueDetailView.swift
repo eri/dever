@@ -94,23 +94,16 @@ struct IssueDetailView: View {
                 .foregroundStyle(Soot.ink)
                 .padding(.horizontal, 10)
                 .frame(height: 30)
-                .background(Soot.surface, in: Capsule())
-                .overlay(Capsule().strokeBorder(Soot.edge))
-                .contentShape(Capsule())
             }
-            .buttonStyle(.plain)
-            .modifier(FocusOutline(radius: 15))
+            .buttonStyle(ChipButton(fill: Soot.surface))
             .keyboardShortcut("[", modifiers: .command)
             .help("Back to the project (⌘[)")
             .accessibilityLabel("Back to the project")
             Spacer()
             if let url = URL(string: route.url) {
-                HoverLink(destination: url, hoverTint: Soot.surface) {
-                    HStack(spacing: 4) { Text("Open in Linear"); Image(systemName: "arrow.up.right") }
-                        .font(.system(size: 13, weight: .semibold)).foregroundStyle(Soot.lime)
-                }
-                .padding(.trailing, -8)
-                .help("Open \(route.identifier) in Linear")
+                ExternalLink("Open in Linear", destination: url, lift: Soot.surface)
+                    .padding(.trailing, -8)
+                    .help("Open \(route.identifier) in Linear")
             }
         }
     }
@@ -159,8 +152,7 @@ struct IssueDetailView: View {
                 Button { jumpToLinks() } label: {
                     signal(symbol: "hand.raised.fill", text: text, tint: open == 0 ? nil : Theme.chart3, label: text)
                 }
-                .buttonStyle(.plain)
-                .modifier(FocusOutline(radius: 8))
+                .buttonStyle(RowButton(lift: .ground, radius: 8))
                 .help("Show the blocking issues")
                 .accessibilityHint("Scrolls to the linked issues")
             }
@@ -209,9 +201,8 @@ struct IssueDetailView: View {
                     .help("Pull request #\(number): \(title)")
             }
             Spacer(minLength: 16)
-            HoverLink(destination: pull.url) {
-                HStack(spacing: 5) { BrandLogo(service: .github, size: 13); Text("Open on GitHub"); Image(systemName: "arrow.up.right") }
-                    .font(.system(size: 13, weight: .semibold)).foregroundStyle(Soot.ink)
+            ExternalLink(destination: pull.url, tint: .ink) {
+                HStack(spacing: 5) { BrandLogo(service: .github, size: 13); Text("Open on GitHub") }
             }
             .help("Open pull request #\(number) on GitHub")
         }
@@ -281,15 +272,16 @@ struct IssueDetailView: View {
                             FlowRow(spacing: 4) {
                                 ForEach(shown) { LabelPill(label: $0) }
                                 if labels.count > 2 {
-                                    Button(labelsExpanded ? "Less" : "+\(labels.count - 2)") { labelsExpanded.toggle() }
-                                        .buttonStyle(.plain)
-                                        .font(.system(size: 11, weight: .semibold))
-                                        .foregroundStyle(Soot.ink)
-                                        .padding(.horizontal, 7)
-                                        .frame(height: 20)
-                                        .overlay(Capsule().strokeBorder(Soot.edge))
-                                        .contentShape(Capsule())
-                                        .modifier(FocusOutline(radius: 10))
+                                    Button {
+                                        labelsExpanded.toggle()
+                                    } label: {
+                                        Text(labelsExpanded ? "Less" : "+\(labels.count - 2)")
+                                            .font(.system(size: 11, weight: .semibold))
+                                            .foregroundStyle(Soot.ink)
+                                            .padding(.horizontal, 7)
+                                            .frame(height: 20)
+                                    }
+                                        .buttonStyle(ChipButton(fill: .clear))
                                         .help(labelsExpanded ? "Show fewer labels" : labels.dropFirst(2).map(\.name).joined(separator: ", "))
                                         .accessibilityLabel(labelsExpanded ? "Show fewer labels" : "Show \(labels.count - 2) more labels")
                                 }
@@ -916,13 +908,14 @@ private struct LinearImage: View {
                         .frame(maxWidth: 560, alignment: .leading)
                         .clipShape(RoundedRectangle(cornerRadius: 8))
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(RowButton(lift: .none))
+                .help("Open the image")
                 .accessibilityLabel(alt.isEmpty ? "Image" : alt)
             } else if failed {
-                Link(destination: url) {
-                    HStack(spacing: 6) { Image(systemName: "photo"); Text(alt.isEmpty ? "Image" : alt); Image(systemName: "arrow.up.right") }
+                ExternalLink(destination: url, font: .system(size: 13, weight: .medium)) {
+                    HStack(spacing: 6) { Image(systemName: "photo"); Text(alt.isEmpty ? "Image" : alt) }
                 }
-                .font(.system(size: 13)).foregroundStyle(Soot.lime)
+                .padding(.leading, -8)
             } else {
                 Skeleton(width: 320, height: 160, radius: 8).accessibilityLabel("Loading image")
             }

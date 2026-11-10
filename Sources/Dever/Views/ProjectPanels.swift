@@ -190,18 +190,13 @@ struct IDPill: View {
 struct TileRow<Content: View>: View {
     var url: URL?
     @ViewBuilder var content: () -> Content
-    @State private var hovering = false
 
     var body: some View {
         let row = HStack(spacing: 12) { content() }
             .padding(.horizontal, 12)
             .frame(minHeight: 46)
-            .background(hovering ? Soot.ground.opacity(0.7) : Color.clear, in: RoundedRectangle(cornerRadius: 8))
-            .contentShape(Rectangle())
-            .motion(Motion.quick, fade: true, value: hovering)
-            .onHover { hovering = $0 }
         if let url {
-            Link(destination: url) { row }.buttonStyle(.plain).modifier(FocusOutline(radius: 8))
+            Link(destination: url) { row }.buttonStyle(RowButton(lift: .ground))
         } else {
             row
         }
@@ -228,22 +223,19 @@ struct CountTabs<Tab: Hashable>: View {
                                 .overlay(Circle().strokeBorder(on ? Soot.limeInk.opacity(0.4) : Soot.edge, lineWidth: 1))
                         }
                         Text(t.label)
-                        Text("\(t.count)").monospacedDigit().foregroundStyle(on ? Soot.limeInk.opacity(0.7) : Soot.muted)
+                        Text("\(t.count)").monospacedDigit().foregroundStyle(on ? Soot.limeInk.opacity(0.8) : Soot.muted)
                             .rollingNumber(t.count)
                     }
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(on ? Soot.limeInk : Soot.ink)
                     .padding(.horizontal, 12)
-                    .frame(height: 30)
+                    .frame(height: Buttons.chipHeight)
                     .background {
                         if on { Capsule().fill(Soot.lime).matchedGeometryEffect(id: "pill", in: marker) }
                         else { Capsule().fill(Soot.ground) }
                     }
-                    .overlay(Capsule().strokeBorder(on ? Color.clear : Soot.edge))
-                    .contentShape(Capsule())
                 }
-                .buttonStyle(PressButton())
-                .modifier(FocusOutline(radius: 15))
+                .buttonStyle(ChipButton(on: on, drawsFill: false))
                 .accessibilityAddTraits(on ? .isSelected : [])
             }
         }
@@ -257,20 +249,10 @@ struct ShowAllButton: View {
     var body: some View {
         // In one transaction with the rows it reveals, so the list grows instead of jumping.
         Button(expanded ? "Show fewer" : "Show all \(count)") { Motion.run(Motion.ui) { expanded.toggle() } }
-            .buttonStyle(PressButton())
-            .font(.system(size: 13, weight: .semibold))
-            .foregroundStyle(Soot.lime)
-            .padding(.horizontal, 8)
-            .frame(height: 28)
-            .background(hovering ? Soot.ground.opacity(0.85) : Color.clear, in: Capsule())
-            .contentShape(Capsule())
-            .modifier(FocusOutline(radius: 14))
-            .motion(Motion.quick, fade: true, value: hovering)
-            .onHover { hovering = $0 }
+            .buttonStyle(TertiaryButton())
             .padding(.leading, 4)
             .padding(.top, 2)
     }
-    @State private var hovering = false
 }
 
 /// One line of the empty state inside a panel, when there is nothing to do about it: a glyph
@@ -317,7 +299,6 @@ struct PullChip: View {
     /// Named on the chip when the project follows several repositories.
     var repository: String? = nil
     let url: URL
-    @State private var hovering = false
 
     private var glyph: (symbol: String, tint: Color, word: String) {
         switch kind {
@@ -351,15 +332,8 @@ struct PullChip: View {
             }
             .padding(.horizontal, 8)
             .frame(height: 26)
-            .background(hovering ? Soot.ground : Soot.surface, in: Capsule())
-            .overlay(Capsule().strokeBorder(Soot.edge))
-            .contentShape(Capsule())
         }
-        .buttonStyle(PressButton())
-        .handCursor()
-        .modifier(FocusOutline(radius: 13))
-        .motion(Motion.quick, fade: true, value: hovering)
-        .onHover { hovering = $0 }
+        .buttonStyle(ChipButton(fill: Soot.surface))
         .help([title.map { "#\(number) \($0)" } ?? "Pull request #\(number)", repository, glyph.word, run?.word].compactMap { $0 }.joined(separator: " · ") + " · Opens on GitHub")
         .accessibilityLabel(["Pull request #\(number)", repository.map { "in \($0)" }, glyph.word, run?.word].compactMap { $0 }.joined(separator: ", "))
         .accessibilityHint("Opens on GitHub")
@@ -374,7 +348,6 @@ struct WorkTile<Value: Hashable, Content: View, Trailing: View>: View {
     let value: Value
     @ViewBuilder var trailing: () -> Trailing
     @ViewBuilder var content: () -> Content
-    @State private var hovering = false
 
     var body: some View {
         NavigationLink(value: value) {
@@ -384,16 +357,11 @@ struct WorkTile<Value: Hashable, Content: View, Trailing: View>: View {
             }
             .padding(.horizontal, 12)
             .frame(minHeight: 46)
-            .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
-        .modifier(FocusOutline(radius: 8))
+        .buttonStyle(RowButton(lift: .ground))
         .overlay(alignment: .trailing) {
             HStack(spacing: 12) { trailing() }.padding(.trailing, 12)
         }
-        .background(hovering ? Soot.ground.opacity(0.7) : Color.clear, in: RoundedRectangle(cornerRadius: 8))
-        .motion(Motion.quick, fade: true, value: hovering)
-        .onHover { hovering = $0 }
     }
 }
 

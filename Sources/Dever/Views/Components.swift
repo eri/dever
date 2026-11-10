@@ -129,6 +129,7 @@ struct OpenSettingsButton: View {
 
     var body: some View {
         Button("Open Settings") { openSettings() }
+            .buttonStyle(SecondaryButton())
             .help("Check or reconnect \(service.label)")
     }
 }
@@ -176,21 +177,6 @@ struct ErrorLabel: View {
         }
         .font(Theme.body)
     }
-}
-
-/// Row hover: a tone step that fades in over 120 ms, no movement.
-struct HoverRow: ViewModifier {
-    @State private var hovering = false
-    func body(content: Content) -> some View {
-        content
-            .background(hovering ? Theme.raised : Color.clear)
-            .motion(Motion.quick, fade: true, value: hovering)
-            .onHover { hovering = $0 }
-    }
-}
-
-extension View {
-    func hoverRow() -> some View { modifier(HoverRow()) }
 }
 
 // MARK: - Skeletons
