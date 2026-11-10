@@ -714,6 +714,9 @@ private struct ProjectRow: View {
                             help: "Pull request #\(w.number) has waited for a review since \(w.since.formatted(.relative(presentation: .named)))")
         }
         if let state = s.errors[.linear], state.needsConnecting { return .link(.linear, "Reconnect Linear") }
+        // With the Linear column on, the issues are already in the row: the status keeps only
+        // what blocks or what is missing.
+        if columns.contains(.linear) { return .quiet("") }
         if let d = s.delivery {
             return d.total == 0 ? .quiet("No issues") : .shipped(d)
         }
@@ -762,7 +765,7 @@ private struct ProjectRow: View {
             .help("\(d.shipped) of \(d.total) issues done, or merged in GitHub")
             .transition(.opacity)
         case .quiet(let text):
-            Text(text).font(.system(size: 13)).foregroundStyle(Soot.muted)
+            if !text.isEmpty { Text(text).font(.system(size: 13)).foregroundStyle(Soot.muted) }
         }
     }
 
