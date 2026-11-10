@@ -593,6 +593,7 @@ private struct ProjectRow: View {
                 else if project.linear == nil { parts.append("no Linear project") }
             case .github:
                 if let g = snapshot?.github { parts.append("GitHub: pipeline \(PipelineGlyph.word(g.pipeline)), \(g.openPRs) open pull requests") }
+                else if snapshot?.githubNeedsLinear == true { parts.append("GitHub: needs a Linear project to find its pull requests") }
             case .preview:
                 if let phase = previews.state(for: project)?.status?.phase { parts.append("preview \(phase.word.lowercased())") }
             case .target:
@@ -704,6 +705,11 @@ private struct ProjectRow: View {
             .transition(.opacity)
         } else if app.repositories(for: project).isEmpty {
             dash("No repository linked")
+        } else if snapshot?.githubNeedsLinear == true {
+            Text(project.linear == nil ? "Needs Linear" : "—").font(.system(size: 13)).foregroundStyle(Soot.muted)
+                .help("This project shares \(app.workspaceRepository ?? "the workspace repository") with other projects: "
+                      + "its pull requests are the ones linked to its Linear issues")
+                .transition(.opacity)
         } else if let state = snapshot?.errors[.github] {
             unavailable(.github, state)
         } else {

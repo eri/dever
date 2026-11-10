@@ -245,7 +245,7 @@ struct ProjectEditorSheet: View {
                             .font(.system(size: 13)).foregroundStyle(Soot.muted)
                     }
                 }
-                if !repos.isEmpty {
+                if !repos.isEmpty, app.repositoryMode == .perProject || ownRepositories.wrappedValue {
                     SwitchRow(title: "Count every pull request", detail: "Not only those linked to this project's issues",
                               isOn: Binding(get: { project.githubWholeRepo == true }, set: { project.githubWholeRepo = $0 }))
                         .frame(maxWidth: 420)

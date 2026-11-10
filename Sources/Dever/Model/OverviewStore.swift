@@ -73,6 +73,9 @@ struct ProjectSnapshot {
     var github: GitHubStats?
     /// Issues by delivery stage (Linear joined with GitHub); nil without Linear.
     var delivery: Delivery?
+    /// The project shares the workspace repository and has no Linear issues to find its pull
+    /// requests by: GitHub stays out of its row and its health.
+    var githubNeedsLinear = false
     /// Why a service has no data: never connected, rejected token, offline or a failure.
     var errors: [ServiceKind: ServiceState] = [:]
     var updatedAt = Date()
@@ -225,8 +228,13 @@ final class OverviewStore: ObservableObject {
             s.errors[.linear] = await app.failure(e, .linear)
         }
         let projectIssues = issues
-        let repositories = await app.repositories(for: p)
-        async let github = loadGitHub(p, repositories, repos, issues: projectIssues)
+        // On the shared repository only the pull requests of the project's issues are its own;
+        // without issues to match (no Linear project, or Linear failed) GitHub is left out.
+        let shared = await app.followsSharedRepository(p)
+        let whole = await app.showsWholeRepository(p)
+        let repositories = shared && issues == nil ? [] : await app.repositories(for: p)
+        if shared && issues == nil, !(await app.repositories(for: p)).isEmpty { s.githubNeedsLinear = true }
+        async let github = loadGitHub(p, repositories, repos, issues: projectIssues, whole: whole)
         switch await slack {
         case .success(let v): s.slack = v
         case .failure(let e): s.errors[.slack] = await app.failure(e, .slack)
@@ -287,12 +295,12 @@ final class OverviewStore: ObservableObject {
 
     /// Every repository the project follows, added up; one failing call fails the whole.
     private static func loadGitHub(_ p: Project, _ repositories: [String], _ repos: Result<RepoCache, Error>,
-                                   issues: [LinearClient.ProjectSummary.Issue]?)
+                                   issues: [LinearClient.ProjectSummary.Issue]?, whole: Bool)
         async -> Result<ProjectSnapshot.GitHubStats?, Error> {
         guard !repositories.isEmpty else { return .success(nil) }
         var parts: [(repo: String, stats: ProjectSnapshot.GitHubStats)] = []
         for repo in repositories {
-            switch await loadGitHub(p, repo: repo, repos, issues: issues) {
+            switch await loadGitHub(p, repo: repo, repos, issues: issues, whole: whole) {
             case .success(let stats): parts.append((repo, stats))
             case .failure(let error): return .failure(error)
             }
@@ -303,12 +311,13 @@ final class OverviewStore: ObservableObject {
         return .success(combined)
     }
 
-    private static func loadGitHub(_ p: Project, repo: String, _ repos: Result<RepoCache, Error>, issues: [LinearClient.ProjectSummary.Issue]?)
+    private static func loadGitHub(_ p: Project, repo: String, _ repos: Result<RepoCache, Error>,
+                                   issues: [LinearClient.ProjectSummary.Issue]?, whole: Bool)
         async -> Result<ProjectSnapshot.GitHubStats, Error> {
         do {
             let repos = try repos.get()
             let prs = ProjectPullRequests(pulls: try await repos.openPulls(repo), issues: issues,
-                                          wholeRepository: p.showsWholeRepository)
+                                          wholeRepository: whole)
             if prs.scoped, let issues {
                 let pipeline = prs.pipeline(from: try await repos.runs(repo))
                 let merged = ProjectPullRequests(pulls: try await repos.mergedPulls(repo), issues: issues, wholeRepository: false)

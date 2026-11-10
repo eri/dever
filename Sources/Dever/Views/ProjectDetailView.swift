@@ -505,6 +505,9 @@ struct ProjectDetailView: View {
             }
         } else if let state = states[.github] {
             failure(.github, state, compact: project.linear != nil && states[.linear] != nil)
+        } else if app.pullsNeedLinear(project) {
+            QuietEmpty(symbol: "link",
+                       text: "\(app.workspaceRepository.map(GitHubRepository.short) ?? "The repository") is shared with other projects: link a Linear project to see the pull requests of its issues")
         } else if !unlinkedOpen.isEmpty || !unlinkedMerged.isEmpty {
             VStack(alignment: .leading, spacing: 2) {
                 if project.linear != nil {
@@ -936,6 +939,14 @@ struct ProjectDetailView: View {
         do {
             let client = try app.githubClient()
             let refs: [IssueReference]? = project.linear == nil || states[.linear] != nil ? nil : issues
+            // The shared repository's pull requests belong to every project: without issues to
+            // match, none of them is this project's.
+            if app.followsSharedRepository(project), refs == nil {
+                pulls = []; merged = []; runs = [:]; pullsScoped = true
+                lastLoaded[.github] = Date()
+                return
+            }
+            let whole = app.showsWholeRepository(project)
             var allPulls: [ProjectPullRequests.Match] = []
             var allMerged: [MergedPull] = []
             var allRuns: [String: [GitHubRun]] = [:]
@@ -945,12 +956,12 @@ struct ProjectDetailView: View {
                 async let runs = client.runs(repo)
                 async let recentlyMerged = client.mergedPulls(repo)
                 let prs = ProjectPullRequests(pulls: try await client.pulls(repo), issues: refs,
-                                              wholeRepository: project.showsWholeRepository)
+                                              wholeRepository: whole)
                 allPulls += prs.matches
                 scoped = scoped || prs.scoped
                 allRuns[repo] = prs.scoped ? prs.pipeline(from: try await runs).latest : try await runs
                 allMerged += MergedPull.list(repo: repo, recentlyMerged: try await recentlyMerged, issues: refs,
-                                             wholeRepository: project.showsWholeRepository,
+                                             wholeRepository: whole,
                                              open: Set(prs.matches.map(\.pull.number)))
             }
             pulls = allPulls

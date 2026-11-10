@@ -364,6 +364,29 @@ final class AppState: ObservableObject {
         p.repositories(mode: repositoryMode, workspace: workspaceRepository)
     }
 
+    /// Whether the project follows the workspace's shared repository: always in `single` mode,
+    /// in `mixed` mode when it has no repositories of its own (or chose the shared one).
+    func followsSharedRepository(_ p: Project) -> Bool {
+        switch repositoryMode {
+        case .single: true
+        case .perProject: false
+        case .mixed: p.usesWorkspaceRepository ?? p.githubRepos.isEmpty
+        }
+    }
+
+    /// Whether the project counts every pull request of its repositories. Never on the shared
+    /// repository, whose other pull requests belong to other projects: there only the pull
+    /// requests linked to the project's Linear issues count.
+    func showsWholeRepository(_ p: Project) -> Bool {
+        !followsSharedRepository(p) && p.showsWholeRepository
+    }
+
+    /// On the shared repository without Linear issues to match, nothing tells this project's
+    /// pull requests from the others': the GitHub part waits for a Linear project.
+    func pullsNeedLinear(_ p: Project) -> Bool {
+        followsSharedRepository(p) && p.linear == nil
+    }
+
     /// The repository of the project's preview pull request, when the project still follows it.
     func previewRepository(for p: Project) -> String? {
         let repos = repositories(for: p)
