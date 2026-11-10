@@ -1134,6 +1134,13 @@ private struct ThreadPane: View {
     @State private var failed = false
     @State private var sending = false
     @State private var parentOpen = false
+    /// Where the replies end inside the scroll view, and how tall the scroll view is.
+    @State private var endY: CGFloat = 0
+    @State private var viewport: CGFloat = 0
+    /// How many replies there were the last time the end was on screen.
+    @State private var seenReplies = 0
+    private static let end = "thread-end"
+    private var moreBelow: Bool { viewport > 0 && endY > viewport + 24 }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -1156,6 +1163,7 @@ private struct ThreadPane: View {
                     GlyphButton(symbol: "xmark", label: "Close the thread", glyphSize: 11, fill: Soot.ground, action: close)
                         .keyboardShortcut(.cancelAction)
             }
+            ScrollViewReader { proxy in
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
                     Color.clear.frame(height: 0).background(OverlayScrollers())
@@ -1185,14 +1193,41 @@ private struct ThreadPane: View {
                     }
                     Rectangle().fill(Soot.line).frame(height: 1)
                     ThreadReplies(replies: replies, failed: failed, users: users, channels: channels, customEmoji: customEmoji, actions: actions, bare: true)
+                    Color.clear.frame(height: 1).id(Self.end)
+                        .onGeometryChange(for: CGFloat.self) { $0.frame(in: .named(Self.end)).maxY } action: { endY = $0 }
                 }
             }
+            .coordinateSpace(name: Self.end)
+            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { viewport = $0 }
+            .onChange(of: moreBelow) { _, below in if !below { seenReplies = replies?.count ?? 0 } }
+            // Replies wait under the fold and were never scrolled to: a quiet pill says so and takes you there.
+            .overlay(alignment: .bottom) {
+                if moreBelow, (replies?.count ?? 0) > seenReplies {
+                    Button {
+                        Motion.run(Motion.ui) { proxy.scrollTo(Self.end, anchor: .bottom) }
+                    } label: {
+                        HStack(spacing: 5) {
+                            Image(systemName: "arrow.down").font(.system(size: 9, weight: .bold))
+                            Text("More replies").font(.system(size: 11, weight: .semibold))
+                        }
+                        .foregroundStyle(Soot.ink)
+                        .padding(.horizontal, 10).frame(height: 26)
+                    }
+                    .buttonStyle(ChipButton(fill: Soot.surface))
+                    .shadow(color: .black.opacity(0.18), radius: 6, y: 2)
+                    .padding(.bottom, 6)
+                    .transition(.opacity)
+                    .accessibilityLabel("Scroll to the replies below")
+                }
+            }
+            .motion(Motion.ui, fade: true, value: moreBelow)
             .frame(maxHeight: .infinity)
             // Another thread picked while this one is open: the pane stays, its content
             // cross-fades (200 ms) instead of a second pane sliding in over the first.
             .id(parent.ts)
             .transition(.opacity)
             .motion(Motion.ui, fade: true, value: parent.ts)
+            }
             ReplyComposer(sending: sending, autofocus: false, fill: Soot.surface, send: { await send($0) }, cancel: {})
                 .id(parent.ts)
         }
@@ -1200,7 +1235,7 @@ private struct ThreadPane: View {
         .frame(maxHeight: .infinity, alignment: .top)
         .background(Soot.ground, in: RoundedRectangle(cornerRadius: 12))
         .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Soot.line))
-        .task(id: parent.ts) { replies = nil; await load() }
+        .task(id: parent.ts) { replies = nil; seenReplies = 0; await load() }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Thread")
     }

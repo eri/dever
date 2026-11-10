@@ -522,8 +522,9 @@ struct ReplyComposer: View {
         }
         .background(fill, in: RoundedRectangle(cornerRadius: Soot.fieldRadius))
         .overlay(RoundedRectangle(cornerRadius: Soot.fieldRadius)
-            .strokeBorder(model.focused ? Soot.lime : Soot.edge.opacity(0.6), lineWidth: model.focused ? 1.5 : 1))
+            .strokeBorder(model.focused ? Soot.lime : Soot.edge, lineWidth: model.focused ? 2 : 1))
         .contentShape(RoundedRectangle(cornerRadius: Soot.fieldRadius))
+        .motion(Motion.quick, fade: true, value: model.focused)
         .onTapGesture { if let view = model.view { view.window?.makeFirstResponder(view) } }
         .opacity(sending ? 0.6 : 1)
         .padding(.top, 4)
