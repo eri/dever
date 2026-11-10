@@ -116,7 +116,7 @@ private struct ColumnChips: View {
                     .font(.system(size: 9, weight: .bold))
                     .foregroundStyle(on ? Soot.limeInk : Soot.muted)
                     .accessibilityHidden(true)
-                Text(column.label)
+                Text(column.chip)
             }
             .font(.system(size: 12, weight: .semibold))
             .foregroundStyle(on ? Soot.limeInk : Soot.ink)
@@ -129,7 +129,7 @@ private struct ColumnChips: View {
         .buttonStyle(.plain)
         .modifier(FocusOutline(radius: 13))
         .help(column.detail)
-        .accessibilityLabel("\(column.label) column")
+        .accessibilityLabel("\(column.chip) column")
         .accessibilityValue(on ? "Shown" : "Hidden")
         .accessibilityAddTraits(.isToggle)
     }

@@ -13,7 +13,7 @@ struct OverviewSettings: Codable, Equatable {
             case .name: "Name"
             case .activity: "Activity"
             case .health: "Health"
-            case .targetDate: "Target date"
+            case .targetDate: "Due date"
             }
         }
     }
@@ -50,34 +50,45 @@ struct OverviewSettings: Codable, Equatable {
         var id: String { rawValue }
         var label: String {
             switch self {
+            case .slack: "Slack, 7 days"
+            case .linear: "Issues shipped"
+            case .github: "GitHub"
+            case .preview: "Preview"
+            case .target: "Due date"
+            case .health: "Health"
+            }
+        }
+        /// The column's name on a Settings chip, where the tool's name is enough.
+        var chip: String {
+            switch self {
             case .slack: "Slack"
             case .linear: "Linear"
             case .github: "GitHub"
             case .preview: "Preview"
-            case .target: "Target"
+            case .target: "Due date"
             case .health: "Health"
             }
         }
         /// What the column shows, for the Settings row and the column header's tooltip.
         var detail: String {
             switch self {
-            case .slack: "Messages this week, last activity"
-            case .linear: "Issues shipped"
+            case .slack: "Messages in the channel over the last 7 days"
+            case .linear: "Linear issues done, or merged in GitHub, out of all"
             case .github: "Pipeline, open pull requests"
             case .preview: "The followed pull request's preview"
-            case .target: "Linear target date"
+            case .target: "The Linear project's target date"
             case .health: "Needs attention, quiet, on track"
             }
         }
         /// The column's width in points; the project column takes the rest.
         var width: CGFloat {
             switch self {
-            case .slack: 76
-            case .linear: 136
-            case .github: 124
-            case .preview: 96
+            case .slack: 104
+            case .linear: 124
+            case .github: 120
+            case .preview: 80
             case .target: 72
-            case .health: 124
+            case .health: 136
             }
         }
     }

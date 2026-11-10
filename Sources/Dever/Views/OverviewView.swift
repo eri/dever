@@ -491,7 +491,7 @@ private struct MenuRow: View {
 private enum Grid {
     static let gap: CGFloat = 14
     /// The mark, the name and the tool logos; takes what the other columns leave.
-    static let nameMin: CGFloat = 150
+    static let nameMin: CGFloat = 140
     /// The pin slot at the trailing edge.
     static let pin: CGFloat = 24
 }
@@ -597,7 +597,7 @@ private struct ProjectRow: View {
                 if let phase = previews.state(for: project)?.status?.phase { parts.append("preview \(phase.word.lowercased())") }
             case .target:
                 if let t = snapshot?.linear?.targetDate {
-                    parts.append("target \(t.formatted(.dateTime.day().month(.wide)))" + (overdue ? ", past" : ""))
+                    parts.append("due \(t.formatted(.dateTime.day().month(.wide)))" + (overdue ? ", past" : ""))
                 }
             case .health:
                 parts.append(entry.status.label)
@@ -643,25 +643,36 @@ private struct ProjectRow: View {
 
     @ViewBuilder private var slack: some View {
         if let s = snapshot?.slack {
-            HStack(spacing: 5) {
-                Text(s.messagesThisWeek, format: .number).font(.system(size: 14)).foregroundStyle(Soot.ink).monospacedDigit()
-                    .contentTransition(.numericText(value: Double(s.messagesThisWeek)))
-                    .animation(reduceMotion ? nil : .easeOut(duration: 0.25), value: s.messagesThisWeek)
-                Text(s.lastActivity.map(Brief.ago) ?? "quiet").font(.system(size: 12)).foregroundStyle(Soot.muted)
-                    .help(s.lastActivity.map { "Last message \($0.formatted(.relative(presentation: .named)))" } ?? "No messages yet")
+            HStack(spacing: 4) {
+                if s.messagesThisWeek == 0 {
+                    Text("None").font(.system(size: 13)).foregroundStyle(Soot.muted)
+                } else {
+                    Text(s.messagesThisWeek, format: .number).font(.system(size: 13, weight: .medium)).foregroundStyle(Soot.ink)
+                        .monospacedDigit()
+                        .contentTransition(.numericText(value: Double(s.messagesThisWeek)))
+                        .animation(reduceMotion ? nil : .easeOut(duration: 0.25), value: s.messagesThisWeek)
+                    Text(s.messagesThisWeek == 1 ? "message" : "messages").font(.system(size: 13)).foregroundStyle(Soot.muted)
+                }
             }
+            .lineLimit(1)
+            .help("Messages in the channel over the last 7 days"
+                  + (s.lastActivity.map { " · last one \($0.formatted(.relative(presentation: .named)))" } ?? ""))
             .transition(.opacity)
         } else if project.slack == nil {
             dash("No Slack channel linked")
         } else if let state = snapshot?.errors[.slack] {
             unavailable(.slack, state)
         } else {
-            Skeleton(width: 48, height: 12)
+            Skeleton(width: 80, height: 12)
         }
     }
 
     @ViewBuilder private var linear: some View {
-        if let d = snapshot?.delivery {
+        if let d = snapshot?.delivery, d.total == 0 {
+            Text("No issues").font(.system(size: 13)).foregroundStyle(Soot.muted)
+                .help("The Linear project has no issues yet")
+                .transition(.opacity)
+        } else if let d = snapshot?.delivery {
             HStack(spacing: 8) {
                 ShipBar(delivery: d).frame(width: 72)
                 Text("\(d.shipped)/\(d.total)").font(.system(size: 13)).foregroundStyle(Soot.ink).monospacedDigit()
@@ -804,8 +815,8 @@ struct HealthMark: View {
         HStack(spacing: 6) {
             Image(systemName: symbol).font(.system(size: 12, weight: .semibold)).foregroundStyle(tint)
                 .accessibilityHidden(true)
-            Text(status.label).font(.system(size: 13, weight: status == .needsAttention ? .semibold : .regular))
-                .foregroundStyle(Soot.ink).lineLimit(1)
+            Text(status.label).font(.system(size: 13, weight: status == .needsAttention ? .medium : .regular))
+                .foregroundStyle(Soot.ink).lineLimit(1).fixedSize()
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Health: \(status.label)")
@@ -840,8 +851,9 @@ private struct PinButton: View {
     }
 }
 
-/// Issues shipped as a bar: shipped in the chart's main colour, merged-but-not-moved in its
-/// warning colour, the rest as the track. Fills on first appearance and on each change.
+/// Issues shipped as a bar: the same count as the `shipped/total` beside it (done in Linear,
+/// or with a merged pull request whatever the ticket says). Fills on first appearance and on
+/// each change.
 private struct ShipBar: View {
     let delivery: Delivery
     @State private var shown = false
@@ -849,14 +861,11 @@ private struct ShipBar: View {
 
     var body: some View {
         GeometryReader { geo in
-            let w = geo.size.width
-            let total = max(delivery.total, 1)
-            let done = shown ? w * CGFloat(delivery.done) / CGFloat(total) : 0
-            let merged = shown ? w * CGFloat(delivery.merged) / CGFloat(total) : 0
+            let fraction = CGFloat(delivery.shipped) / CGFloat(max(delivery.total, 1))
             ZStack(alignment: .leading) {
                 Capsule().fill(Theme.empty)
-                Capsule().fill(Theme.chart3).frame(width: min(w, done + merged))
-                Capsule().fill(Theme.chart1).frame(width: done)
+                Capsule().fill(delivery.shipped == delivery.total ? Soot.lime : Theme.chart1)
+                    .frame(width: shown ? max(fraction > 0 ? 6 : 0, geo.size.width * fraction) : 0)
             }
         }
         .frame(height: 6)
