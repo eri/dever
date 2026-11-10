@@ -1570,9 +1570,9 @@ private struct ReactionPill: View {
                     .foregroundStyle(on ? Soot.lime : Soot.ink.opacity(hovering ? 1 : 0.85))
             }
             .padding(.horizontal, 8).frame(height: 24)
+            // Hover lifts the fill only; the edge stays as it is, no ring appears.
             .background(on ? Soot.lime.opacity(hovering ? 0.26 : 0.14) : (hovering ? Soot.ink.opacity(0.1) : Soot.ground), in: Capsule())
-            .overlay(Capsule().strokeBorder(on ? Soot.lime : (hovering ? Soot.ink.opacity(0.7) : Soot.edge.opacity(0.6)),
-                                            lineWidth: hovering ? 1.5 : 1))
+            .overlay(Capsule().strokeBorder(on ? Soot.lime : Soot.edge.opacity(0.6)))
             .scaleEffect(hovering ? 1.05 : 1)
         }
         .buttonStyle(ReactionPillStyle())
@@ -1634,8 +1634,7 @@ private struct WhoReacted: View {
                             .overlay(Circle().strokeBorder(Soot.surface, lineWidth: 1.5))
                     }
                 }
-                (Text(Self.names(reaction: reaction, users: users, me: me)).fontWeight(.semibold) +
-                 Text(" reacted with :\(reaction.name):"))
+                (Text(Self.names(reaction: reaction, users: users, me: me)).fontWeight(.semibold) + Text(" reacted"))
                     .font(.system(size: 12)).foregroundStyle(Soot.ink)
                     .fixedSize(horizontal: false, vertical: true)
             }
