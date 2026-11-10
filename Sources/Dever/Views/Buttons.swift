@@ -53,6 +53,8 @@ enum Buttons {
     static let toolbarHeight: CGFloat = 34
     static let chipHeight: CGFloat = 30
     static let textHeight: CGFloat = 28
+    /// The column every segment picker and chip grid in Settings fills, so their edges line up.
+    static let controlWidth: CGFloat = 360
     /// The tone a hovered tile or chip takes: ink at 6 %, pressed 12 %. Reads on dark and light.
     static let hoverTone: Double = 0.06
     static let pressTone: Double = 0.12
@@ -505,9 +507,9 @@ struct ButtonGallery: View {
                 row("Chip · on") { chip(on: true) }
                 row("Segment") {
                     HStack(spacing: 2) {
-                        segment("Overview", on: true); segment("Last project", on: false)
+                        segment("Overview", on: true); segment("Last", on: false)
                     }
-                    .padding(3).background(Soot.ground, in: Capsule()).overlay(Capsule().strokeBorder(Soot.edge))
+                    .padding(2).frame(height: 32).background(Soot.ground, in: Capsule())
                 }
                 row("Row") {
                     Button {} label: {
@@ -588,9 +590,9 @@ struct ButtonGallery: View {
 
     private func segment(_ title: String, on: Bool) -> some View {
         Button {} label: {
-            Text(title).font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(on ? Soot.limeInk : Soot.ink)
-                .padding(.horizontal, 10).frame(height: 26)
+            Text(title).font(.system(size: 13, weight: on ? .semibold : .medium))
+                .foregroundStyle(on ? Soot.limeInk : Soot.muted)
+                .padding(.horizontal, 10).frame(height: 28)
                 .background { if on { Capsule().fill(Soot.lime) } }
         }
         .buttonStyle(SegmentButton(on: on))

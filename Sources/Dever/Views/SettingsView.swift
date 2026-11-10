@@ -1242,42 +1242,39 @@ private struct LaunchSection: View {
     }
 }
 
-/// A few mutually exclusive options in one capsule; the lime pill springs to the chosen one.
+/// A few mutually exclusive options in one capsule: a 360pt track on the ground tone, segments of
+/// equal width so every picker's edges line up, the lime pill springing to the chosen one. 32 high,
+/// 13pt; the words not chosen are muted. `width: nil` fills the room it is given (the View popover).
 struct SegmentPicker<Value: Hashable>: View {
     let label: String
     let options: [(label: String, value: Value)]
     @Binding var selection: Value
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    var width: CGFloat? = Buttons.controlWidth
     @Namespace private var pill
 
     var body: some View {
         HStack(spacing: 2) {
             ForEach(options, id: \.value) { option in
                 let on = option.value == selection
-                Button {
-                    withAnimation(reduceMotion ? nil : .spring(response: 0.3, dampingFraction: 0.85)) {
-                        selection = option.value
-                    }
-                } label: {
+                Button { Motion.run(Motion.settle) { selection = option.value } } label: {
                     Text(option.label)
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(on ? Soot.limeInk : Soot.ink)
-                        .padding(.horizontal, 10)
-                        .frame(height: 26)
+                        .font(.system(size: 13, weight: on ? .semibold : .medium))
+                        .foregroundStyle(on ? Soot.limeInk : Soot.muted)
+                        .lineLimit(1)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 28)
                         .background {
                             if on { Capsule().fill(Soot.lime).matchedGeometryEffect(id: "pill", in: pill) }
                         }
-                        }
-                        .buttonStyle(SegmentButton(on: on))
+                }
+                .buttonStyle(SegmentButton(on: on))
                 .accessibilityAddTraits(on ? .isSelected : [])
             }
         }
-        .padding(3)
+        .padding(2)
+        .frame(width: width, height: 32)
+        .frame(maxWidth: width == nil ? .infinity : nil)
         .background(Soot.ground, in: Capsule())
-        .overlay(Capsule().strokeBorder(Soot.edge))
-        // The stroke is drawn once more a few points taller by the row's layout pass; the
-        // capsule clip keeps only the real one.
-        .clipShape(Capsule())
         .accessibilityElement(children: .contain)
         .accessibilityLabel(label)
     }

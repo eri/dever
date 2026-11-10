@@ -31,7 +31,7 @@ on lime the label's ink is used instead (8 % / 16 %).
 | Destructive | `DestructiveButton(size:)` | 44 / 36 | 15 / 14 semibold | surface fill, negative edge, pill-negative ink | + negative 6 % | + negative 12 % | as secondary disabled |
 | Toolbar | `ToolbarButton(busy:)` | 34 | glyph 12 + verb 13 semibold | surface tile, no edge | + ink 6 % | + ink 12 %, scale | muted label; `busy` keeps ink and runs the lime line |
 | Chip | `ChipButton(on:fill:drawsFill:edge:)` | 30 tabs, 26 small chips, 24 reaction pills | 12–13 semibold | capsule on ground/surface, edge; `on`: lime | + ink 6 % (limeInk 8 % when on) | 12 % / 16 %, scale | edge 50 %, 60 % opacity; `on` turns muted fill |
-| Segment | `SegmentButton(on:)` | 26 inside a 32 track | 12 semibold | lime pill slides to the choice | + tone | + tone | — |
+| Segment | `SegmentButton(on:)` in `SegmentPicker` | 28 inside a 32 track, the track 360 wide (`Buttons.controlWidth`), segments of equal width | 13 medium, semibold when chosen | ground track, no edge; lime pill slides to the choice; the rest muted | + tone | + tone | — |
 | Row | `RowButton(lift:radius:)` | the row's height (36–64) | the row's | none | lift one tone (`.ground` 70 %, `.surface`, `.tone` ink 6 %) | lift solid / ink 12 %, no scale | 50 % opacity |
 | Menu trigger | `MenuTriggerButton(open:fill:radius:edge:)` | 30–40 | label's | surface fill, edge | + ink 6 % | + ink 12 % | muted |
 | Primary segment | `PrimarySegment(open:)` | 34 (the split Add project) | 13 semibold | part of a lime capsule | limeInk 8 % | limeInk 16 % | inherits the capsule's lime (not disabled anywhere) |
@@ -108,7 +108,7 @@ has N H P D F ✋ through its style unless noted.
 | 26 | "Reset to defaults" | QuietButton, D | Secondary |
 | 38–50 | `SegmentPicker` ×3 | see SettingsView | Segment |
 | 56, 61 | switches | system Toggle | system; the row gets the hand |
-| 109 | `ColumnChips` (toggle a column) | `.plain` + FocusOutline: N F, on/off | Chip (`on:`) |
+| 109 | `ColumnChips` (toggle a column) | `.plain` + FocusOutline: N F, on/off, lime when on | Chip: 2 × 3 of equal width in the 360 column, 32 high; shown = surface tile + edge + lime check, hidden = ground + muted + dash |
 
 ### Views/ProjectDetailView.swift
 | Line | Element | Before | Role now |
@@ -270,6 +270,10 @@ has N H P D F ✋ through its style unless noted.
 - **Onboarding**: Continue ×3 are 44px primaries; "Skip for now", "Connect", "Cancel" and
   "Open Settings" are tertiary links with a hover pill (they had none); the progress marks
   show the hand and a tooltip where they lead back; the prefix choice rows lift on hover.
+- **Settings › Overview, Launch and the View popover**: the segment pickers share one 360pt column
+  with segments of equal width (edges line up from row to row), a ground track without edge, 32px
+  and 13pt; the column chips fill the same column as a 2 × 3 grid, lime only on the check. Three
+  lime pills on the page instead of nine lime patches.
 - **Settings**: section list rows, appearance thumbnails and status-menu rows lift on hover;
   the status trigger is a menu trigger that turns lime-edged while open; segments get a hover
   tone and the hand; Connect / Reconnect / Cancel / Start / Open System Settings / Copy /
