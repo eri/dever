@@ -70,7 +70,8 @@ Highest-leverage change made first: the single table with settings-driven order 
 | Group by | none, health, repository (first followed), team (Linear team, now fetched) | `OverviewView.sections` |
 | Density | comfortable (56px rows), compact (44px) | `ProjectRow`, `GroupRow` |
 | Columns | any of Slack, Linear, GitHub, Preview, Target, Health | `ColumnHeader`, `ProjectRow` |
-| Pinned projects first | on/off; a project is pinned from its row (pin button, context menu), stored as `Project.favorite` | `OverviewView.ordered` |
+| Quiet after | 7, 14 or 30 days without a Slack message before a project reads Quiet (`Preferences.quietAfterDays`) | `Project.status` |
+| Pinned projects | always first, no switch: a pin that does not move the project means nothing. Pinned from the row (pin button, context menu), stored as `Project.favorite` | `OverviewView.ordered` |
 | Hide finished projects | every Linear issue done | `OverviewView.visible`, with "Show finished projects" when all are hidden |
 
 ## Animation sweep (find-animation-opportunities)

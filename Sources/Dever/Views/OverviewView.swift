@@ -60,7 +60,8 @@ struct OverviewView: View {
     }
 
     private func ordered(_ a: Entry, _ b: Entry) -> Bool {
-        if settings.pinFavourites, (a.project.favorite == true) != (b.project.favorite == true) {
+        // Pinned projects come first, whatever the order: that is what a pin is for.
+        if (a.project.favorite == true) != (b.project.favorite == true) {
             return a.project.favorite == true
         }
         switch settings.sort {

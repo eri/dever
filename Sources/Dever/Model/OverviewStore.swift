@@ -105,8 +105,9 @@ enum ProjectStatus: Int, Comparable {
 }
 
 extension Project {
-    /// Number of days without Slack activity after which a project is "quiet".
-    static let quietAfterDays = 14
+    /// Number of days without Slack activity after which a project is "quiet"
+    /// (Settings › Overview › Quiet after).
+    static var quietAfterDays: Int { Preferences.quietAfterDays }
 
     /// Human-readable reasons behind the status, most important first.
     func signals(_ s: ProjectSnapshot?) -> [String] {

@@ -15,6 +15,14 @@ enum Preferences {
     }
     static let refreshChoices = [1, 5, 15, 30]
 
+    /// Days without a Slack message before a project reads "Quiet"; 14 unless set.
+    static let quietAfterDaysKey = "quietAfterDays"
+    static let quietChoices = [7, 14, 30]
+    static var quietAfterDays: Int {
+        get { UserDefaults.standard.object(forKey: quietAfterDaysKey) as? Int ?? 14 }
+        set { UserDefaults.standard.set(newValue, forKey: quietAfterDaysKey) }
+    }
+
     /// Which screen the window opens on.
     enum Landing: String, CaseIterable, Identifiable {
         case overview, lastProject

@@ -126,7 +126,7 @@ struct Project: Codable, Identifiable, Hashable {
     /// True once the user said this project needs no preview: the panel stays away until a
     /// pull request is picked in the editor.
     var previewDismissed: Bool?
-    /// Pinned to the top of the Overview when Settings › Overview says so.
+    /// Pinned to the top of the Overview.
     var favorite: Bool?
     var createdAt = Date()
 

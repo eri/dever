@@ -97,8 +97,6 @@ struct OverviewSettings: Codable, Equatable {
     var group: Group = .none
     var density: Density = .comfortable
     var columns: Set<Column> = Set(Column.allCases)
-    /// Favourite projects first, whatever the order.
-    var pinFavourites = true
     /// Projects whose every Linear issue is done leave the list.
     var hideFinished = false
 
@@ -120,7 +118,6 @@ struct OverviewSettings: Codable, Equatable {
             case "group": s.group = Group(rawValue: pair[1]) ?? s.group
             case "density": s.density = Density(rawValue: pair[1]) ?? s.density
             case "columns": s.columns = Set(pair[1].split(separator: "+").compactMap { Column(rawValue: String($0)) })
-            case "pin": s.pinFavourites = pair[1] == "1"
             case "hideFinished": s.hideFinished = pair[1] == "1"
             default: break
             }

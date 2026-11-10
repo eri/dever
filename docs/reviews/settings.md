@@ -155,3 +155,23 @@ match says so in words.
 Superfuture rubric: one focal point (the composer, the only lime field), the scan path follows it (title,
 composer, proof), and no number is invented. The field keeps a 2px lime edge when focused, and its
 accessible name is "Slack channel prefix".
+
+## Follow-up: Settings › Overview
+
+The page was six rows of controls with nothing to look at. It now opens on the list in miniature,
+in the spirit of the Appearance thumbnails.
+
+- **The miniature is the control for columns.** Its six column heads are chips: click one and the
+  column empties in place. A hidden column keeps its slot so the heads never move under the pointer.
+  The two rows of chips are gone from the settings rows.
+- **It follows every choice.** Density changes the row height, Group by adds group labels, Hide
+  finished projects fades the finished row out (200 ms ease-out, none under Reduce Motion).
+- **"Pinned projects first" is removed.** A pin that does not move the project means nothing, so
+  pinned projects always come first. The miniature shows a pinned row on top and the caption says so.
+- **New: Quiet after** (7, 14 or 30 days without a Slack message). It was a constant; it now drives
+  `Project.status` and the "No Slack activity" signal.
+- **Accessibility.** Each head is a toggle named "Slack column" with the value Shown or Hidden; the
+  miniature's rows are decorative and hidden from VoiceOver. Chips are 26 pt high with 4 pt gaps
+  inside equal slots wider than 24 pt (WCAG 2.5.8). An off chip is muted text with a 3:1 edge.
+- **Reset to defaults** also resets Quiet after.
+
