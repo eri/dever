@@ -209,3 +209,24 @@ onboarding's question again, in the Overview page's language.
 - **Accessibility.** Each tile is a button named by its label with the selected trait; the field
   keeps the name "Slack channel prefix". The row fades in and out (none under Reduce Motion).
 
+
+## Follow-up: Repositories as three pictures
+
+The page was three rows of text to read before choosing. It now shows the three shapes a codebase
+takes, and names each one the way a developer does.
+
+- **Three tiles.** Each draws three projects and what they link to: one lime repository for all
+  ("One repository"), a repository of its own under each ("Per project"), or two projects on the
+  lime one and one on its own ("Both"). A 2px lime ring marks the choice.
+- **The developer's word.** Under each label, quietly: "Monorepo", "Multi-repo", "Hybrid". The same
+  word sits beside the titles in the onboarding's "Where's the code?" step, whose first title is
+  now "One repository" so the word fits on its line.
+- **One line of consequence** under the tiles, for the chosen mode only: "Every project follows the
+  workspace repository", "Each project links its own repositories", "A project follows the workspace
+  repository unless it has its own".
+- **Workspace repository** is a card that only exists when the mode uses one. Its lime square is
+  the lime repository of the pictures; the picker sits on the right. Without GitHub it says
+  "Connect GitHub to pick it".
+- **Accessibility.** Each tile is a button named "One repository, Monorepo" and so on, with the
+  selected trait and the consequence as its hint. The card and the line fade (none under Reduce
+  Motion).

@@ -18,7 +18,10 @@ struct RepositoryModeRows: View {
                             .foregroundStyle(Soot.ink).frame(width: 22)
                             .accessibilityHidden(true)
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(option.title).font(.system(size: 16, weight: .medium)).foregroundStyle(Soot.ink)
+                            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                                Text(option.title).font(.system(size: 16, weight: .medium)).foregroundStyle(Soot.ink)
+                                Text(option.term).font(.system(size: 11, weight: .semibold)).foregroundStyle(Soot.muted)
+                            }
                             Text(option.detail).font(.system(size: 13)).foregroundStyle(Soot.muted).lineLimit(1)
                         }
                         Spacer()

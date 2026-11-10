@@ -77,7 +77,7 @@ enum RepositoryMode: String, CaseIterable, Identifiable, Codable {
 
     var title: String {
         switch self {
-        case .single: "One repository for everything"
+        case .single: "One repository"
         case .perProject: "Repositories per project"
         case .mixed: "Both"
         }
@@ -88,6 +88,15 @@ enum RepositoryMode: String, CaseIterable, Identifiable, Codable {
         case .single: "Every project follows the same repository"
         case .perProject: "Each project links one or more"
         case .mixed: "Some share one, some have their own"
+        }
+    }
+
+    /// What a developer calls it, shown quietly beside the plain title.
+    var term: String {
+        switch self {
+        case .single: "Monorepo"
+        case .perProject: "Multi-repo"
+        case .mixed: "Hybrid"
         }
     }
 

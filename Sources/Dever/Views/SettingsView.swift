@@ -810,62 +810,163 @@ private struct AccountAvatar: View {
 
 // MARK: - Repositories
 
-/// Where the code lives: the mode as three rows (shared with onboarding), the workspace
-/// repository where the mode has one, and one line on what the choice means.
+/// Where the code lives, as three pictures in the Appearance section's language: projects on
+/// top, repositories under them, the workspace repository in lime. One line says what the
+/// choice does; the workspace repository has its row where the mode has one.
 private struct RepositoriesSection: View {
     @EnvironmentObject var app: AppState
     @EnvironmentObject var store: OverviewStore
     @StateObject private var repos = RepositoryList()
-
-    private var mode: Binding<RepositoryMode> {
-        Binding(get: { app.repositoryMode }, set: { app.setRepositoryMode($0, workspace: app.workspaceRepository) })
-    }
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Namespace private var ring
 
     private var workspace: Binding<String?> {
         Binding(get: { app.workspaceRepository }, set: { app.setRepositoryMode(app.repositoryMode, workspace: $0) })
     }
 
-    /// What the change means for the projects, in one line.
+    /// What the choice means for the projects, in one line.
     private var consequence: String {
         switch app.repositoryMode {
-        case .single: "Every project follows this repository; their own repositories stay saved and come back when you switch."
-        case .perProject: "Each project follows its own repositories; the workspace repository is kept for later."
-        case .mixed: "A project follows the workspace repository unless it has repositories of its own."
+        case .single: "Every project follows the workspace repository"
+        case .perProject: "Each project links its own repositories"
+        case .mixed: "A project follows the workspace repository unless it has its own"
         }
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             SectionHead(title: "Repositories", detail: "Change it any time; nothing is lost")
-            RepositoryModeRows(mode: mode).frame(maxWidth: 480)
-            if app.repositoryMode.usesWorkspaceRepository {
-                VStack(alignment: .leading, spacing: 8) {
-                    FieldLabel(text: "Workspace repository")
-                    if app.github == nil {
-                        Text("Connect GitHub to pick it").font(.system(size: 13)).foregroundStyle(Soot.muted)
-                    } else {
-                        SearchPicker(label: "Workspace repository", placeholder: repos.loading ? "Loading…" : "Pick a repository",
-                                     items: repos.items, selection: workspace)
-                            .frame(maxWidth: 480)
+            HStack(spacing: 16) {
+                ForEach(RepositoryMode.allCases) { option in
+                    let on = app.repositoryMode == option
+                    Button {
+                        withAnimation(reduceMotion ? nil : .spring(response: 0.3, dampingFraction: 0.85)) {
+                            app.setRepositoryMode(option, workspace: app.workspaceRepository)
+                        }
+                    } label: {
+                        VStack(spacing: 8) {
+                            RepositoryModeThumb(mode: option)
+                                .overlay {
+                                    if on {
+                                        RoundedRectangle(cornerRadius: 8).strokeBorder(Soot.lime, lineWidth: 2)
+                                            .matchedGeometryEffect(id: "ring", in: ring)
+                                    }
+                                }
+                            VStack(spacing: 1) {
+                                Text(option.short).font(.system(size: 13, weight: on ? .semibold : .medium))
+                                    .foregroundStyle(on ? Soot.ink : Soot.muted)
+                                Text(option.term).font(.system(size: 11)).foregroundStyle(Soot.muted)
+                            }
+                        }
+                        .frame(width: 128, height: 128)
                     }
+                    .buttonStyle(RowButton(lift: .tone, radius: 8))
+                    .accessibilityLabel("\(option.title), \(option.term)")
+                    .accessibilityHint(option.detail)
+                    .accessibilityAddTraits(on ? .isSelected : [])
+                }
+            }
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel("Repository mode")
+            Text(consequence)
+                .font(.system(size: 13)).foregroundStyle(Soot.muted)
+                .padding(.top, 16)
+                .id(app.repositoryMode)
+                .transition(.opacity)
+            if app.repositoryMode.usesWorkspaceRepository {
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(alignment: .center, spacing: 16) {
+                        HStack(spacing: 8) {
+                            // The lime repository of the pictures above.
+                            RoundedRectangle(cornerRadius: 3).fill(Soot.lime).frame(width: 12, height: 10)
+                                .accessibilityHidden(true)
+                            Text("Workspace repository").font(.system(size: 14, weight: .medium)).foregroundStyle(Soot.ink)
+                        }
+                        Spacer(minLength: 16)
+                        if app.github == nil {
+                            Text("Connect GitHub to pick it").font(.system(size: 13)).foregroundStyle(Soot.muted)
+                        } else {
+                            SearchPicker(label: "Workspace repository", placeholder: repos.loading ? "Loading…" : "Pick a repository",
+                                         items: repos.items, selection: workspace)
+                                .frame(width: 280)
+                        }
+                    }
+                    .frame(minHeight: 64)
                     if let error = repos.error {
                         Text(error).font(.system(size: 12)).foregroundStyle(Theme.negative)
                             .fixedSize(horizontal: false, vertical: true)
+                            .padding(.bottom, 12)
                     }
                 }
+                .padding(.horizontal, 16)
+                .background(Soot.surface, in: RoundedRectangle(cornerRadius: 12))
                 .padding(.top, 20)
                 .transition(.opacity)
             }
-            Text(consequence).font(.system(size: 12)).foregroundStyle(Soot.muted)
-                .fixedSize(horizontal: false, vertical: true)
-                .frame(maxWidth: 480, alignment: .leading)
-                .padding(.top, 16)
         }
-        .animation(.easeOut(duration: 0.2), value: app.repositoryMode.usesWorkspaceRepository)
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: app.repositoryMode)
         .task(id: app.github != nil) { await repos.load(app) }
         // The overview follows the new mode at once.
         .onChange(of: app.repositoryMode) { _, _ in Task { await store.refresh(app) } }
         .onChange(of: app.workspaceRepository) { _, _ in Task { await store.refresh(app) } }
+    }
+}
+
+private extension RepositoryMode {
+    /// The title short enough to sit under a picture.
+    var short: String {
+        switch self {
+        case .single: "One repository"
+        case .perProject: "Per project"
+        case .mixed: "Both"
+        }
+    }
+}
+
+/// A mode drawn as three projects (bars) wired to their repositories (boxes): one lime box
+/// for all, a box each, or a shared lime box and one of its own.
+private struct RepositoryModeThumb: View {
+    let mode: RepositoryMode
+
+    private static let projects: [CGFloat] = [24, 58, 92]
+    /// Where each project's repository sits, and whether it is the workspace one.
+    private var links: [(project: CGFloat, repo: CGFloat, workspace: Bool)] {
+        let p = Self.projects
+        switch mode {
+        case .single: return p.map { ($0, 58, true) }
+        case .perProject: return p.map { ($0, $0, false) }
+        case .mixed: return [(p[0], 41, true), (p[1], 41, true), (p[2], 92, false)]
+        }
+    }
+
+    var body: some View {
+        ZStack(alignment: .topLeading) {
+            Path { path in
+                for link in links {
+                    path.move(to: CGPoint(x: link.project, y: 24))
+                    path.addLine(to: CGPoint(x: link.project, y: 34))
+                    path.addLine(to: CGPoint(x: link.repo, y: 42))
+                    path.addLine(to: CGPoint(x: link.repo, y: 48))
+                }
+            }
+            .stroke(Soot.muted.opacity(0.7), style: StrokeStyle(lineWidth: 1, lineCap: .round, lineJoin: .round))
+            ForEach(Self.projects, id: \.self) { x in
+                Capsule().fill(Soot.ink).frame(width: 20, height: 4).position(x: x, y: 20)
+            }
+            ForEach(Array(Set(links.map(\.repo))).sorted(), id: \.self) { x in
+                let workspace = links.first { $0.repo == x }?.workspace == true
+                RoundedRectangle(cornerRadius: 3)
+                    .fill(workspace ? Soot.lime : Soot.surface)
+                    .overlay(RoundedRectangle(cornerRadius: 3).strokeBorder(workspace ? Soot.lime : Soot.ink, lineWidth: 1.5))
+                    .frame(width: 18, height: 14)
+                    .position(x: x, y: 55)
+            }
+        }
+        .frame(width: 116, height: 76)
+        .background(Soot.ground)
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Soot.edge))
+        .accessibilityHidden(true)
     }
 }
 
