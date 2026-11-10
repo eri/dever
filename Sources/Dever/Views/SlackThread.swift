@@ -809,7 +809,8 @@ private struct ChannelAside: View {
                     if people.count > 5 {
                         Button(allPeople ? "Show fewer" : "Show all \(people.count)") { allPeople.toggle() }
                             .buttonStyle(TertiaryButton(font: .system(size: 12, weight: .semibold)))
-                            .padding(.top, 2).padding(.leading, -8)
+                            // No negative inset here: the aside clips at its leading edge, which cut the hover pill.
+                            .padding(.top, 2)
                     }
                 }
             }
