@@ -52,6 +52,7 @@ struct LinearIssue: Codable, Identifiable, Hashable {
         var color: String
     }
     struct Labels: Codable, Hashable { var nodes: [Label] }
+    struct TeamRef: Codable, Hashable { var id: String }
 
     var id: String
     var identifier: String
@@ -68,6 +69,8 @@ struct LinearIssue: Codable, Identifiable, Hashable {
     var dueDate: String?
     var labels: Labels?
     var archivedAt: String?
+    /// The issue's team, whose workflow states a change of state picks from.
+    var team: TeamRef?
 
     var labelList: [Label] { labels?.nodes ?? [] }
 }
@@ -206,6 +209,48 @@ struct LinearClient {
                              avatarUrl: v.avatarUrl)
     }
 
+    /// The viewer's user id, to tell their issues from the others'.
+    func viewerID() async throws -> String {
+        struct R: Decodable { struct V: Decodable { var id: String }; var viewer: V }
+        return try await query("{ viewer { id } }", as: R.self).viewer.id
+    }
+
+    /// For each issue of the project that something blocks: the identifiers of its blockers
+    /// that are neither done nor canceled. Issues with every blocker finished are left out.
+    func blockers(projectID: String) async throws -> [String: [String]] {
+        struct R: Decodable {
+            struct P: Decodable {
+                struct C: Decodable {
+                    struct N: Decodable {
+                        struct Rel: Decodable {
+                            struct Blocker: Decodable { struct S: Decodable { var type: String }; var identifier: String; var state: S }
+                            struct Node: Decodable { var type: String; var issue: Blocker }
+                            var nodes: [Node]
+                        }
+                        var identifier: String
+                        var inverseRelations: Rel
+                    }
+                    var nodes: [N]
+                }
+                var issues: C
+            }
+            var project: P
+        }
+        let nodes = try await query("""
+        query($id: String!) { project(id: $id) {
+          issues(first: 50, filter: { hasBlockedByRelations: { eq: true }, state: { type: { nin: ["completed", "canceled"] } } }) {
+            nodes { identifier inverseRelations(first: 10) { nodes { type issue { identifier state { type } } } } } } } }
+        """, variables: ["id": projectID], as: R.self).project.issues.nodes
+        var out: [String: [String]] = [:]
+        for node in nodes {
+            let open = node.inverseRelations.nodes
+                .filter { $0.type == "blocks" && !["completed", "canceled"].contains($0.issue.state.type) }
+                .map(\.issue.identifier)
+            if !open.isEmpty { out[node.identifier] = open }
+        }
+        return out
+    }
+
     func teams() async throws -> [LinearTeam] {
         struct R: Decodable { struct C: Decodable { var nodes: [LinearTeam] }; var teams: C }
         return try await query("{ teams(first: 100) { nodes { id key name } } }", as: R.self).teams.nodes
@@ -239,7 +284,7 @@ struct LinearClient {
     id identifier title url updatedAt archivedAt priority dueDate
     state { id name type color } assignee { id name avatarUrl }
     labels { nodes { id name color } }
-    branchName attachments { nodes { url } }
+    branchName attachments { nodes { url } } team { id }
     """
 
     /// A project's issues, 50 a page behind a cursor (the page size Linear's own client uses).

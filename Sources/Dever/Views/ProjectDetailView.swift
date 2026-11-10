@@ -41,7 +41,8 @@ struct ProjectDetailView: View {
     @State private var loading = false
     @State private var loaded = false
     @State private var expanded: Set<String> = []
-    @State private var workFilter: WorkFilter = .all
+    /// The review verdict of each open pull request matched to an issue, by pull request id.
+    @State private var reviews: [Int: DeliveryPlan.Review] = [:]
 
     private var status: ProjectStatus { project.status(store.snapshots[project.id]) }
 
@@ -66,12 +67,6 @@ struct ProjectDetailView: View {
     private var connectionKey: String { "\(app.slack != nil)-\(app.linear != nil)-\(app.github != nil)" }
 
     private var issues: [LinearIssue] { project.linear.map { issueStore.issues(project: $0.id) } ?? [] }
-
-    private var delivery: Delivery {
-        Delivery(issues: issues.map { ($0.identifier, $0.state.type, $0.state.name) },
-                 openPR: Set(pulls.compactMap(\.issue)),
-                 mergedPR: Set(merged.compactMap(\.issue)))
-    }
 
     var body: some View {
         GeometryReader { geo in
@@ -138,7 +133,8 @@ struct ProjectDetailView: View {
         .onChange(of: connectionKey) { _, _ in Task { await load() } }
         .onReceive(NotificationCenter.default.publisher(for: .toggleSlackWide)) { _ in toggleSlackWide() }
         .onReceive(NotificationCenter.default.publisher(for: .openFirstIssue)) { _ in
-            if let first = workList.first?.issue {
+            let plan = self.plan
+            if let first = plan.start?.issue ?? plan.next.first?.issue ?? plan.others.first?.issue ?? plan.shipped.first?.issue {
                 NotificationCenter.default.post(name: .openIssue, object: IssueRoute(project: project, issue: first))
             }
         }
@@ -250,49 +246,25 @@ struct ProjectDetailView: View {
         return URL(string: "https://github.com/pulls?q=\(query)")
     }
 
-    /// The list's filter: every issue, or one delivery stage.
-    private enum WorkFilter: Hashable { case all, stage(Delivery.Stage) }
-
-    /// An issue with its stage and the pull requests matched to it: one row of the list.
-    private struct WorkItem: Identifiable {
-        var issue: LinearIssue
-        var stage: Delivery.Stage
-        var merged: [MergedPull]
-        var open: [ProjectPullRequests.Match]
-        var id: String { issue.id }
-    }
-
-    private var workItems: [WorkItem] {
-        let openByIssue = Dictionary(grouping: pulls.filter { $0.issue != nil }, by: { $0.issue! })
-        let mergedByIssue = Dictionary(grouping: merged.filter { $0.issue != nil }, by: { $0.issue! })
-        return issues.compactMap { issue in
-            let open = openByIssue[issue.identifier] ?? []
-            let merged = mergedByIssue[issue.identifier] ?? []
-            guard let stage = Delivery.stage(stateType: issue.state.type, stateName: issue.state.name,
-                                             openPR: !open.isEmpty, mergedPR: !merged.isEmpty) else { return nil }
-            return WorkItem(issue: issue, stage: stage, merged: merged, open: open)
+    /// The project's issues from the viewer's seat: what to pick up, what waits, what shipped.
+    private var plan: DeliveryPlan {
+        if let demo = DeliveryPlan.snapshotDemo { return demo }
+        let open = Dictionary(grouping: pulls.filter { $0.issue != nil }, by: { $0.issue! }).mapValues { matches in
+            matches.map { m in
+                let run = runByBranch[m.pull.repository + "\n" + m.pull.head.ref]
+                return DeliveryPlan.Pull(number: m.pull.number, title: m.pull.title, url: m.pull.html_url,
+                                         repository: m.pull.repository, draft: m.pull.draft == true, author: m.pull.user.login,
+                                         updatedAt: DeliveryPlan.date(m.pull.updated_at),
+                                         pipeline: run.map(ProjectSnapshot.PipelineState.init(run:)), runURL: run?.html_url,
+                                         review: reviews[m.pull.id] ?? .pending,
+                                         requested: m.pull.requested_reviewers?.map(\.login) ?? [])
+            }
         }
-    }
-
-    /// The chosen filter, or everything when its stage has emptied.
-    private var currentFilter: WorkFilter {
-        if case .stage(let s) = workFilter, delivery.count(s) == 0 { return .all }
-        return workFilter
-    }
-
-    /// Under "All", what needs a hand comes first (merged but not moved, then in review…)
-    /// and what is done last; within a stage, Linear's own order.
-    private var workList: [WorkItem] {
-        let items = workItems
-        switch currentFilter {
-        case .all: return Delivery.Stage.attentionOrder.flatMap { stage in items.filter { $0.stage == stage } }
-        case .stage(let stage): return items.filter { $0.stage == stage }
-        }
-    }
-
-    private var workTabs: [(label: String, count: Int, tab: WorkFilter)] {
-        [("All", delivery.total, WorkFilter.all)]
-            + Delivery.Stage.allCases.map { ($0.label, delivery.count($0), WorkFilter.stage($0)) }.filter { $0.1 > 0 }
+        return DeliveryPlan(issues: issues, open: open,
+                            merged: Dictionary(grouping: merged.filter { $0.issue != nil }, by: { $0.issue! }),
+                            blockers: project.linear.flatMap { issueStore.blockers[$0.id] } ?? [:],
+                            viewer: .init(linearID: issueStore.viewerID, linearName: app.linear?.account.userName,
+                                          githubLogin: app.github?.login))
     }
 
     /// Pull requests of the repository that no issue of the project cites (whole-repository
@@ -313,25 +285,10 @@ struct ProjectDetailView: View {
         runByBranch[pull.repository + "\n" + pull.head.ref].map(ProjectSnapshot.PipelineState.init(run:))
     }
 
-    /// One line for the open pull requests' pipelines: failing wins, then running, then passing.
-    private var pipelineSummary: (state: ProjectSnapshot.PipelineState, text: String)? {
-        let states = pulls.compactMap { pipeline(of: $0.pull) }
-        let failing = states.filter { $0 == .failing }.count
-        if failing > 0 { return (.failing, failing == 1 ? "1 failing" : "\(failing) failing") }
-        if states.contains(.running) { return (.running, "running") }
-        if states.contains(.passing) { return (.passing, "passing") }
-        return nil
-    }
-
-    /// "3 open · 15 merged": the repository's part of the project, in the headline.
-    private var githubLine: String { "\(pulls.count) open · \(merged.count) merged" }
-
-    private var githubReady: Bool { !repos.isEmpty && states[.github] == nil && loaded }
-
     private var workPanel: some View {
         VStack(alignment: .leading, spacing: 16) {
             if project.linear != nil {
-                PanelHeader(service: .linear, title: "Delivery", subtitle: "Issues joined with their pull requests",
+                PanelHeader(service: .linear, title: "Delivery", subtitle: "What is left, and where to start",
                             link: linearURL, linkHelp: "Open the project in Linear")
             } else {
                 PanelHeader(service: .github, title: "Pull requests",
@@ -365,7 +322,7 @@ struct ProjectDetailView: View {
         .sootPanel()
     }
 
-    /// Headline, bar, the stages as the filter, then the issues.
+    /// What is left, where to start, then the rest: see `DeliveryBoard`.
     @ViewBuilder
     private var linearPart: some View {
         if states[.linear] == .notConnected {
@@ -376,139 +333,14 @@ struct ProjectDetailView: View {
             }
         } else if let state = states[.linear] {
             failure(.linear, state)
-        } else if delivery.total == 0 {
-            QuietEmpty(symbol: "tray", text: "No issues in this project yet")
         } else {
-            HStack(alignment: .lastTextBaseline, spacing: 10) {
-                // The figures roll to their new values when a refresh lands.
-                Text(Double(delivery.shipped) / Double(delivery.total), format: .percent.precision(.fractionLength(0)))
-                    .font(.system(size: 34, weight: .semibold)).tracking(-1).foregroundStyle(Soot.ink).monospacedDigit()
-                    .rollingNumber(delivery.shipped * 10_000 + delivery.total)
-                Text("\(delivery.shipped) of \(delivery.total) shipped").font(.system(size: 14)).foregroundStyle(Soot.muted)
-                    .monospacedDigit()
-                    .rollingNumber(delivery.shipped * 10_000 + delivery.total)
-                Spacer(minLength: 16)
-                if githubReady, let url = pullsURL {
-                    HoverLink(destination: url) {
-                        HStack(spacing: 6) {
-                            BrandLogo(service: .github, size: 16).foregroundStyle(Soot.ink).accessibilityHidden(true)
-                            Text(githubLine).font(.system(size: 13, weight: .semibold)).foregroundStyle(Soot.ink).monospacedDigit()
-                                .rollingNumber(pulls.count * 10_000 + merged.count)
-                            if let summary = pipelineSummary {
-                                PipelineGlyph(state: summary.state)
-                                Text(summary.text).font(.system(size: 13, weight: .semibold)).foregroundStyle(Soot.ink)
-                            }
-                        }
-                    }
-                    .help("Open the pull requests of \(repos.joined(separator: ", ")) on GitHub")
-                    .accessibilityLabel("GitHub: \(githubLine)\(pipelineSummary.map { ", \($0.text)" } ?? ""). Opens the pull requests on GitHub")
-                }
-            }
-            deliveryBar
-            ViewThatFits(in: .horizontal) {
-                HStack(alignment: .center, spacing: 12) { stageTabs; Spacer(minLength: 0); updateInLinear }
-                VStack(alignment: .leading, spacing: 10) { stageTabs; updateInLinear }
-            }
-            VStack(alignment: .leading, spacing: 2) {
-                ForEach(capped(workList, key: "work")) { item in workRow(item).transition(.opacity) }
-                showAll(workList.count, key: "work")
-                if githubReady, pulls.isEmpty, merged.isEmpty {
-                    QuietEmpty(symbol: "arrow.triangle.pull", text: "No pull request cites one of these issues yet")
-                }
-            }
-            // A stage picked above: the rows it drops fade out, the ones it keeps slide up.
-            .motion(Motion.ui, value: currentFilter)
-        }
-    }
-
-    private var stageTabs: some View {
-        CountTabs(tabs: workTabs, selection: Binding(get: { currentFilter }, set: { workFilter = $0 })) { filter in
-            if case .stage(let s) = filter { DeliveryStrip.color(s) } else { nil }
-        }
-    }
-
-    /// The action on the merged-but-not-moved issues, shown while they are in the list.
-    @ViewBuilder
-    private var updateInLinear: some View {
-        let behind = delivery.count(.merged)
-        if behind > 0, let url = linearURL, currentFilter == .all || currentFilter == .stage(.merged) {
-            HoverLink(destination: url) {
-                HStack(spacing: 4) { Text("Update \(behind) in Linear"); Image(systemName: "arrow.up.right") }
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(Soot.lime)
-            }
-            .help("Open the project in Linear to move the merged issues forward")
-            .accessibilityLabel("Update \(behind) merged issues in Linear")
-        }
-    }
-
-    /// Rounded segments with gaps, one per stage, proportional to its issues. The stages
-    /// not selected step back.
-    private var deliveryBar: some View {
-        GeometryReader { geo in
-            let stages = Delivery.Stage.allCases.filter { delivery.count($0) > 0 }
-            let gap: CGFloat = 4
-            let usable = geo.size.width - gap * CGFloat(max(stages.count - 1, 0))
-            HStack(spacing: gap) {
-                ForEach(stages, id: \.self) { stage in
-                    Capsule().fill(DeliveryStrip.color(stage))
-                        .frame(width: max(10, usable * CGFloat(delivery.count(stage)) / CGFloat(max(delivery.total, 1))))
-                        .opacity(currentFilter == .all || currentFilter == .stage(stage) ? 1 : 0.3)
-                }
-            }
-            // The other stages step back (200 ms); the segments themselves never move for style.
-            .motion(Motion.ui, fade: true, value: currentFilter)
-        }
-        .frame(height: 10)
-        .accessibilityHidden(true)
-    }
-
-    /// One issue: priority, key, title, then its pull requests, due date and assignee. The row
-    /// opens the issue; each pull request chip opens the PR on GitHub.
-    private func workRow(_ item: WorkItem) -> some View {
-        let issue = item.issue
-        let chips = HStack(spacing: 6) {
-            ForEach(item.open.prefix(2)) { m in
-                PullChip(number: m.pull.number, kind: m.pull.draft == true ? .draft : .open,
-                         pipeline: pipeline(of: m.pull), title: m.pull.title,
-                         repository: labelsRepository ? m.pull.repository : nil, url: URL(string: m.pull.html_url)!)
-            }
-            ForEach(item.merged.prefix(max(0, 2 - min(item.open.count, 2)))) { m in
-                PullChip(number: m.number, kind: .merged, title: m.title,
-                         repository: labelsRepository ? m.repository : nil, url: URL(string: m.url)!)
-            }
-            if item.open.count + item.merged.count > 2 {
-                Text("+\(item.open.count + item.merged.count - 2)").font(.system(size: 12, weight: .medium)).foregroundStyle(Soot.muted)
-                    .monospacedDigit()
-                    .accessibilityLabel("\(item.open.count + item.merged.count - 2) more pull requests")
-            }
-            if githubReady, item.stage == .building {
-                Text("No PR yet").font(.system(size: 12)).foregroundStyle(Soot.muted)
-            }
-        }
-        let meta = HStack(spacing: 12) {
-            DueDateText(dueDate: issue.dueDate)
-            if let person = issue.assignee {
-                LinearAvatar(name: person.name, avatarURL: person.avatarUrl).help(person.name)
-                    .accessibilityLabel("Assigned to \(person.name)")
+            let plan = self.plan
+            if plan.total == 0 {
+                QuietEmpty(symbol: "tray", text: "No issues in this project yet")
             } else {
-                Image(systemName: "person.crop.circle.badge.questionmark").foregroundStyle(Soot.muted)
-                    .help("Unassigned").accessibilityLabel("Unassigned")
+                DeliveryBoard(plan: plan, project: project, labelsRepository: labelsRepository)
             }
         }
-        let summary = [item.open.isEmpty ? nil : "\(item.open.count) open pull request\(item.open.count == 1 ? "" : "s")",
-                       item.merged.isEmpty ? nil : "\(item.merged.count) merged"].compactMap { $0 }.joined(separator: ", ")
-        return WorkTile(value: IssueRoute(project: project, issue: issue), trailing: { chips; meta }) {
-            PriorityGlyph(priority: issue.priority, dimmed: issue.priority == nil || issue.priority == 0)
-                .help(LinearPriority.label(issue.priority))
-            IDPill(text: issue.identifier)
-            Text(MarkdownTheme.inline(issue.title, size: 14)).font(.system(size: 14)).foregroundStyle(Soot.ink).lineLimit(1)
-                .help(issue.title)
-                .layoutPriority(1)
-            Spacer(minLength: 12)
-        }
-        .accessibilityLabel("\(issue.identifier), \(issue.title). \(item.stage.label)\(summary.isEmpty ? "" : ", " + summary)")
-        .accessibilityHint("Opens the issue")
     }
 
     /// Pull requests, with their states inside the panel: an invitation to connect, a failure,
@@ -606,17 +438,19 @@ struct ProjectDetailView: View {
     private var workSkeleton: some View {
         VStack(alignment: .leading, spacing: 16) {
             if project.linear != nil {
-                HStack(alignment: .lastTextBaseline, spacing: 10) { Skeleton(width: 90, height: 34); Skeleton(width: 120) }
-                Skeleton(height: 10, radius: 5)
-                HStack(spacing: 6) { ForEach(0..<4, id: \.self) { _ in Skeleton(width: 96, height: 30, radius: 15) } }
+                HStack(alignment: .lastTextBaseline, spacing: 10) {
+                    Skeleton(width: 70, height: 34); Skeleton(width: 80); Spacer(); Skeleton(width: 110)
+                }
+                Skeleton(height: 6, radius: 3)
+                Skeleton(height: 92, radius: 10)
             }
             VStack(spacing: 2) {
-                ForEach(0..<5, id: \.self) { i in
+                ForEach(0..<3, id: \.self) { i in
                     HStack(spacing: 12) {
-                        Skeleton(width: 12, height: 12, radius: 2)
+                        Skeleton(width: 16, height: 16, radius: 8)
                         Skeleton(width: 64, height: 20, radius: 5)
                         // Flexible, so a narrow column never pushes the row past the panel's edge.
-                        Skeleton(height: 12).frame(maxWidth: [280, 220, 320, 250, 200][i])
+                        Skeleton(height: 12).frame(maxWidth: [280, 220, 320][i])
                         Spacer(minLength: 12)
                         Skeleton(width: 66, height: 26, radius: 13)
                         Skeleton(width: 22, height: 22, radius: 11)
@@ -780,6 +614,7 @@ struct ProjectDetailView: View {
         do {
             _ = try await issueStore.load(project: id, force: force, app: app)
             lastLoaded[.linear] = Date()
+            await issueStore.loadPlanContext(project: id, app: app)
         } catch { states[.linear] = app.failure(error, .linear) }
     }
 
@@ -936,6 +771,24 @@ struct ProjectDetailView: View {
             })
     }
 
+    /// The verdict of each open, non-draft pull request matched to an issue (the first 30):
+    /// one request each, together. A failed one counts as not reviewed yet.
+    private func loadReviews(of matches: [ProjectPullRequests.Match], with client: GitHubClient) async -> [Int: DeliveryPlan.Review] {
+        let wanted = matches.filter { $0.issue != nil && $0.pull.draft != true }.prefix(30)
+        return await withTaskGroup(of: (Int, DeliveryPlan.Review)?.self) { group in
+            for match in wanted {
+                let pull = match.pull
+                group.addTask {
+                    guard let list = try? await client.reviews(pull.repository, number: pull.number) else { return nil }
+                    return (pull.id, DeliveryPlan.review(from: list, author: pull.user.login))
+                }
+            }
+            var out: [Int: DeliveryPlan.Review] = [:]
+            for await result in group { if let (id, review) = result { out[id] = review } }
+            return out
+        }
+    }
+
     private func loadGitHub() async {
         let repos = self.repos
         guard !repos.isEmpty, states[.github] == nil else { return }
@@ -968,6 +821,7 @@ struct ProjectDetailView: View {
                                              open: Set(prs.matches.map(\.pull.number)))
             }
             pulls = allPulls
+            reviews = await loadReviews(of: allPulls, with: client)
             pullsScoped = scoped
             runs = allRuns
             merged = allMerged.sorted { ($0.mergedAt ?? .distantPast) > ($1.mergedAt ?? .distantPast) }

@@ -25,6 +25,14 @@ struct GitHubPull: Codable, Identifiable {
     var updated_at: String
     var head: Head
     var merged_at: String?
+    /// People whose review is asked for and not given yet.
+    var requested_reviewers: [User]?
+}
+
+/// One review of a pull request: APPROVED, CHANGES_REQUESTED, COMMENTED, DISMISSED or PENDING.
+struct GitHubReview: Codable {
+    var user: GitHubPull.User?
+    var state: String
 }
 
 struct GitHubRun: Codable, Identifiable {
@@ -214,6 +222,11 @@ struct GitHubClient {
             if batch.count < 100 { break }
         }
         return all.sorted { ($0.merged_at ?? "") > ($1.merged_at ?? "") }
+    }
+
+    /// The reviews of a pull request, oldest first (the first hundred).
+    func reviews(_ repo: String, number: Int) async throws -> [GitHubReview] {
+        try await get("/repos/\(repo)/pulls/\(number)/reviews?per_page=100")
     }
 
     func runs(_ repo: String, branch: String? = nil) async throws -> [GitHubRun] {

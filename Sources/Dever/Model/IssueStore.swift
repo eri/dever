@@ -31,6 +31,10 @@ final class IssueStore: ObservableObject {
     /// Pull requests by their GitHub URL, filled by the project page.
     @Published var pullsByURL: [String: PullRef] = [:]
     @Published private(set) var details: [String: LinearIssueDetail] = [:]
+    /// The viewer's Linear user id, asked once.
+    @Published private(set) var viewerID: String?
+    /// For each project, its blocked issues and the unfinished issues blocking them.
+    @Published private(set) var blockers: [String: [String: [String]]] = [:]
     /// Rendered descriptions and comment bodies, keyed by text hash: rendering is the slow part.
     @Published private(set) var rendered: [Int: [MarkdownBlock]] = [:]
     private var teams: [String: (context: LinearTeamContext, at: Date)] = [:]
@@ -65,6 +69,13 @@ final class IssueStore: ObservableObject {
         // A changed issue invalidates its cached detail; the next visit fetches it again.
         for issue in fetched where details[issue.id]?.updatedAt != issue.updatedAt { details[issue.id] = nil }
         return list
+    }
+
+    /// What the delivery plan needs beyond the rows: who is looking, and what blocks what.
+    /// Neither is worth failing the list for, so errors leave the previous values.
+    func loadPlanContext(project id: String, app: AppState) async {
+        if viewerID == nil { viewerID = try? await app.withLinear { try await $0.viewerID() } }
+        if let found = try? await app.withLinear({ try await $0.blockers(projectID: id) }) { blockers[id] = found }
     }
 
     // MARK: Details
