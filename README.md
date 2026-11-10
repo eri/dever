@@ -48,6 +48,12 @@ Tokens are stored in the macOS Keychain (`io.github.eri.dever`), projects in `~/
   read back from the workflows' result comments and runs, refreshed with the overview every 5 minutes and every 30 s
   after a command until the workflow answers.
 
+## Data freshness
+
+How Dever loads, caches and refreshes what it shows, the freshness budget of each kind of data, and the
+checklist every feature answers (what it reads, writes and invalidates, its budget, its loading state):
+[docs/data-freshness.md](docs/data-freshness.md). The short rules are in [CLAUDE.md](CLAUDE.md).
+
 ## Screenshots for development
 
 Dever can photograph its own window, without screen-recording permission:

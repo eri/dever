@@ -63,8 +63,12 @@ struct ProjectDetailView: View {
     private var repos: [String] { app.repositories(for: project) }
     /// Rows name their repository once the project follows more than one.
     private var labelsRepository: Bool { repos.count > 1 }
-    /// Reloads when a token arrives, so a panel fills in without leaving the page.
-    private var connectionKey: String { "\(app.slack != nil)-\(app.linear != nil)-\(app.github != nil)" }
+    /// Reloads when a token arrives or the project's links change (the editor's Save), so a
+    /// panel fills in without leaving the page.
+    private var connectionKey: String {
+        "\(app.slack != nil)-\(app.linear != nil)-\(app.github != nil)"
+            + "-\(project.slack?.id ?? "")-\(project.linear?.id ?? "")-\(repos.joined(separator: ","))"
+    }
 
     private var issues: [LinearIssue] { project.linear.map { issueStore.issues(project: $0.id) } ?? [] }
 
@@ -133,6 +137,10 @@ struct ProjectDetailView: View {
             await land()
         }
         .sheet(isPresented: $flow.githubSheet) { GitHubLoginSheet() }
+        // Another channel: the messages and the read cursor of the previous one do not carry over.
+        .onChange(of: project.slack?.id) { _, _ in
+            messages = []; lastRead = nil; seenUpTo = nil; hasEarlier = false; shownMessages = 8
+        }
         .onChange(of: connectionKey) { _, _ in Task { await load() } }
         .onReceive(NotificationCenter.default.publisher(for: .toggleSlackWide)) { _ in toggleSlackWide() }
         .onReceive(NotificationCenter.default.publisher(for: .openFirstIssue)) { _ in
