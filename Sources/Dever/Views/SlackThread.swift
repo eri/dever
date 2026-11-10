@@ -1128,6 +1128,7 @@ private struct ThreadPane: View {
     @State private var failed = false
     @State private var draft = ""
     @State private var sending = false
+    @State private var parentOpen = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -1160,8 +1161,22 @@ private struct ThreadPane: View {
                                 Text(user?.name ?? "App").font(.system(size: 14, weight: .bold)).foregroundStyle(Soot.ink)
                                 Text(parent.date.formatted(.relative(presentation: .named))).font(.system(size: 12)).foregroundStyle(Soot.muted)
                             }
-                            MessageBody(message: parent, users: users, channels: channels, expanded: .constant(true))
-                            MessageExtras(message: parent, channels: channels, users: users)
+                            // The parent is already on the left: folded to three lines here, unless opened.
+                            MessageBody(message: parent, users: users, channels: channels, expanded: $parentOpen, foldedLines: 3)
+                            if !parentOpen, (parent.text?.count ?? 0) > 160 || (parent.files?.isEmpty == false) || (parent.attachments?.isEmpty == false) {
+                                Button("Show more") { Motion.run(Motion.ui) { parentOpen = true } }
+                                    .buttonStyle(PressButton()).handCursor()
+                                    .font(.system(size: 12, weight: .semibold)).foregroundStyle(Soot.muted)
+                                    .modifier(FocusOutline(radius: 4))
+                            } else if parentOpen {
+                                MessageExtras(message: parent, channels: channels, users: users)
+                                if (parent.text?.count ?? 0) > 160 || (parent.files?.isEmpty == false) || (parent.attachments?.isEmpty == false) {
+                                    Button("Show less") { Motion.run(Motion.ui) { parentOpen = false } }
+                                        .buttonStyle(PressButton()).handCursor()
+                                        .font(.system(size: 12, weight: .semibold)).foregroundStyle(Soot.muted)
+                                        .modifier(FocusOutline(radius: 4))
+                                }
+                            }
                     ReactionsBar(message: parent, customEmoji: customEmoji, users: users, actions: actions)
                         }
                     }
@@ -1727,12 +1742,13 @@ private struct MessageBody: View {
     let users: [String: SlackUser]
     var channels: [String: String] = [:]
     @Binding var expanded: Bool
+    var foldedLines = 4
 
     var body: some View {
         let text = SlackRichText.render(message.blocks, users: users, channels: channels)
             ?? SlackMarkup.render(message.text ?? "", users: users.mapValues(\.name), channels: channels)
         if !text.characters.isEmpty {
-            RichTextLabel(text: text, size: 14, color: Soot.ink.opacity(0.92), lineLimit: expanded ? 0 : 4)
+            RichTextLabel(text: text, size: 14, color: Soot.ink.opacity(0.92), lineLimit: expanded ? 0 : foldedLines)
                 .fixedSize(horizontal: false, vertical: true)
         }
     }
