@@ -1178,7 +1178,7 @@ private struct ThreadPane: View {
                             }
                             MessageBody(message: parent, users: users, channels: channels, expanded: .constant(true))
                             MessageExtras(message: parent, channels: channels, users: users)
-                    ReactionsBar(message: parent, customEmoji: customEmoji, actions: actions)
+                    ReactionsBar(message: parent, customEmoji: customEmoji, users: users, actions: actions)
                         }
                     }
                     Rectangle().fill(Soot.line).frame(height: 1)
@@ -1353,7 +1353,7 @@ private struct MessageRow: View {
                 MessageBody(message: message, users: users, channels: channels, expanded: wide ? .constant(true) : $expanded)
                 MessageExtras(message: message, channels: channels, users: users)
                 if !reactions.isEmpty {
-                    ReactionPills(reactions: reactions, me: me, customEmoji: customEmoji) { toggle($0) }
+                    ReactionPills(reactions: reactions, me: me, customEmoji: customEmoji, users: users) { toggle($0) }
                 }
                 HStack(spacing: 12) {
                     if !wide, (message.text?.count ?? 0) > 240 {
@@ -1535,13 +1535,15 @@ private struct ReactionPills: View {
     let reactions: [SlackReaction]
     let me: String?
     var customEmoji: [String: URL] = [:]
+    var users: [String: SlackUser] = [:]
     let toggle: (String) -> Void
 
     var body: some View {
         HStack(spacing: 6) {
             ForEach(reactions) { r in
                 ReactionPill(reaction: r, on: me.map { r.users?.contains($0) ?? false } ?? false,
-                             custom: customEmoji[r.name.split(separator: ":").first.map(String.init) ?? r.name]) { toggle(r.name) }
+                             custom: customEmoji[r.name.split(separator: ":").first.map(String.init) ?? r.name],
+                             users: users, me: me) { toggle(r.name) }
             }
         }
         .padding(.top, 4)
@@ -1552,27 +1554,95 @@ private struct ReactionPill: View {
     let reaction: SlackReaction
     let on: Bool
     let custom: URL?
+    var users: [String: SlackUser] = [:]
+    var me: String?
     let toggle: () -> Void
     @State private var hovering = false
+    @State private var showingWho = false
+    @State private var hoverTask: Task<Void, Never>?
 
     var body: some View {
         Button(action: toggle) {
             HStack(spacing: 5) {
                 EmojiGlyph(name: reaction.name, custom: custom, size: 14)
+                    .scaleEffect(hovering ? 1.15 : 1)
                 Text("\(reaction.count)").font(.system(size: 12, weight: .semibold)).monospacedDigit()
-                    .foregroundStyle(on ? Soot.lime : Soot.ink.opacity(0.85))
+                    .foregroundStyle(on ? Soot.lime : Soot.ink.opacity(hovering ? 1 : 0.85))
             }
             .padding(.horizontal, 8).frame(height: 24)
-            .background(on ? Soot.lime.opacity(hovering ? 0.24 : 0.14) : (hovering ? Soot.surface : Soot.ground), in: Capsule())
-            .overlay(Capsule().strokeBorder(on ? Soot.lime : (hovering ? Soot.ink.opacity(0.6) : Soot.edge.opacity(0.6))))
+            .background(on ? Soot.lime.opacity(hovering ? 0.26 : 0.14) : (hovering ? Soot.ink.opacity(0.1) : Soot.ground), in: Capsule())
+            .overlay(Capsule().strokeBorder(on ? Soot.lime : (hovering ? Soot.ink.opacity(0.7) : Soot.edge.opacity(0.6)),
+                                            lineWidth: hovering ? 1.5 : 1))
+            .scaleEffect(hovering ? 1.05 : 1)
         }
         .buttonStyle(ReactionPillStyle())
         .handCursor()
-        .onHover { hovering = $0 }
+        .motion(Motion.quick, value: hovering)
+        .onHover { inside in
+            hovering = inside
+            hoverTask?.cancel()
+            if inside {
+                // Slack waits a beat before telling who reacted; so do we.
+                hoverTask = Task { @MainActor in
+                    try? await Task.sleep(nanoseconds: 450_000_000)
+                    if !Task.isCancelled, hovering { showingWho = true }
+                }
+            } else {
+                showingWho = false
+            }
+        }
+        .popover(isPresented: $showingWho, arrowEdge: .top) {
+            WhoReacted(reaction: reaction, custom: custom, users: users, me: me)
+        }
         .modifier(FocusOutline(radius: 12))
-        .help(on ? "Remove your \(SlackMarkup.reactionName(reaction.name)) reaction" : "React with \(SlackMarkup.reactionName(reaction.name))")
         .accessibilityLabel("\(SlackMarkup.reactionName(reaction.name)), \(reaction.count)\(on ? ", including you" : "")")
+        .accessibilityValue(WhoReacted.names(reaction: reaction, users: users, me: me))
+        .accessibilityHint(on ? "Removes your reaction" : "Adds your reaction")
         .accessibilityAddTraits(on ? .isSelected : [])
+    }
+}
+
+/// "Marco, Antoine and you reacted with 🚀", with their pictures, shown over a pill on hover.
+private struct WhoReacted: View {
+    let reaction: SlackReaction
+    let custom: URL?
+    let users: [String: SlackUser]
+    let me: String?
+
+    static func names(reaction: SlackReaction, users: [String: SlackUser], me: String?) -> String {
+        let ids = reaction.users ?? []
+        var names = ids.filter { $0 != me }.map { users[$0]?.name ?? "Someone" }
+        let hidden = max(0, reaction.count - ids.count)
+        if hidden > 0 { names.append(hidden == 1 ? "1 other" : "\(hidden) others") }
+        if let me, ids.contains(me) { names.append("you") }
+        switch names.count {
+        case 0: return "Nobody"
+        case 1: return names[0]
+        default: return names.dropLast().joined(separator: ", ") + " and " + names.last!
+        }
+    }
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            EmojiGlyph(name: reaction.name, custom: custom, size: 22)
+                .frame(width: 30, height: 30)
+                .background(Soot.ground, in: RoundedRectangle(cornerRadius: 8))
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: -6) {
+                    ForEach((reaction.users ?? []).prefix(6), id: \.self) { id in
+                        SlackAvatar(user: users[id], name: users[id]?.name ?? "?", size: 20, radius: 10)
+                            .overlay(Circle().strokeBorder(Soot.surface, lineWidth: 1.5))
+                    }
+                }
+                (Text(Self.names(reaction: reaction, users: users, me: me)).fontWeight(.semibold) +
+                 Text(" reacted with :\(reaction.name):"))
+                    .font(.system(size: 12)).foregroundStyle(Soot.ink)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: 260, alignment: .leading)
+        .background(Soot.surface)
     }
 }
 
@@ -1894,6 +1964,7 @@ private struct ReactionsBar: View {
     @EnvironmentObject var app: AppState
     let message: SlackMessage
     let customEmoji: [String: URL]
+    var users: [String: SlackUser] = [:]
     let actions: SlackMessageActions
     @State private var reactions: [SlackReaction] = []
 
@@ -1902,7 +1973,7 @@ private struct ReactionsBar: View {
     var body: some View {
         Group {
             if !reactions.isEmpty {
-                ReactionPills(reactions: reactions, me: me, customEmoji: customEmoji) { toggle($0) }
+                ReactionPills(reactions: reactions, me: me, customEmoji: customEmoji, users: users) { toggle($0) }
             }
         }
         .onAppear { reactions = message.reactions ?? [] }
@@ -1955,7 +2026,7 @@ private struct ThreadReplies: View {
                             }
                             MessageBody(message: reply, users: users, channels: channels, expanded: .constant(true))
                             MessageExtras(message: reply, channels: channels, users: users)
-                            ReactionsBar(message: reply, customEmoji: customEmoji, actions: actions)
+                            ReactionsBar(message: reply, customEmoji: customEmoji, users: users, actions: actions)
                         }
                     }
                 }
