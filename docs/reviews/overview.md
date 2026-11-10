@@ -159,3 +159,8 @@ Linear" button it lacks. Status only says what blocks (CI failing, preview faile
 a pull request waiting for review) and stays empty otherwise; a missing Slack channel, and
 Linear's link when the Issues shipped column is hidden, are the only buttons it shows. The lines
 of what waits stop before the columns, so a long message never runs under them.
+
+**Round 3, third pass.** An empty status read as "nothing to see", not "all good". Status is
+never empty now: the link the project lacks ("Link Linear", "Link Slack", "Reconnect Linear"),
+else what blocks it, else "On track" with a lime check. Issues shipped says "Not set up yet"
+without a Linear project and "Disconnected" when Linear needs reconnecting; it holds no button.

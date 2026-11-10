@@ -618,8 +618,7 @@ private struct ProjectRow: View {
             HStack(spacing: Grid.gap) {
                 ForEach(columns) { column in
                     cell(column).frame(width: column.width, alignment: .leading)
-                        .allowsHitTesting(column == .linear && (project.linear == nil
-                            || snapshot?.errors[.linear]?.needsConnecting == true))
+                        .allowsHitTesting(false)
                 }
                 status.frame(width: Grid.status, alignment: .leading)
                     .allowsHitTesting({ if case .link = current { true } else { false } }())
@@ -694,6 +693,7 @@ private struct ProjectRow: View {
         case link(ProjectEditorSheet.Step, String)
         case blocked(symbol: String, tint: Color, text: String, help: String)
         case quiet(String)
+        case clear
     }
 
     private var overdue: Bool {
@@ -701,13 +701,13 @@ private struct ProjectRow: View {
         return t < Calendar.current.startOfDay(for: Date()) && l.done < l.total
     }
 
-    /// What blocks the project, and nothing else. A missing link shows here only when no
-    /// column holds it: Linear's goes in the Issues shipped column when that column shows.
+    /// Where the project stands, in one place: the link it lacks, else what blocks it, else
+    /// "On track". Never empty, so a blank never has to be read.
     private var current: Status {
-        let linearColumn = columns.contains(.linear)
-        if project.linear == nil, !linearColumn { return .link(.linear, "Link Linear") }
+        if project.linear == nil { return .link(.linear, "Link Linear") }
         if project.slack == nil { return .link(.slack, "Link Slack") }
-        guard let s = snapshot else { return project.linear == nil ? .quiet("") : .loading }
+        guard let s = snapshot else { return .loading }
+        if let state = s.errors[.linear], state.needsConnecting { return .link(.linear, "Reconnect Linear") }
         if s.github?.pipeline == .failing {
             let repos = s.github?.failingRepositories ?? []
             return .blocked(symbol: "xmark.circle.fill", tint: Theme.negative, text: "CI failing",
@@ -725,8 +725,7 @@ private struct ProjectRow: View {
             return .blocked(symbol: "clock.fill", tint: Theme.chart3, text: "#\(w.number) waiting \(Brief.ago(w.since))",
                             help: "Pull request #\(w.number) has waited for a review since \(w.since.formatted(.relative(presentation: .named)))")
         }
-        if let state = s.errors[.linear], state.needsConnecting, !linearColumn { return .link(.linear, "Reconnect Linear") }
-        return .quiet("")
+        return .clear
     }
 
     private var statusWords: String {
@@ -735,6 +734,7 @@ private struct ProjectRow: View {
         case .link(_, let title): "missing a link: \(title)"
         case .blocked(_, _, let text, _): text
         case .quiet(let text): text == "—" ? "" : text
+        case .clear: "On track"
         }
     }
 
@@ -753,9 +753,15 @@ private struct ProjectRow: View {
             .help(help)
             .transition(.opacity)
         case .quiet(let text):
-            // Empty still holds the column's width, so the columns before it stay aligned.
-            if text.isEmpty { Color.clear.frame(height: 1) }
-            else { Text(text).font(.system(size: 13)).foregroundStyle(Soot.muted) }
+            Text(text).font(.system(size: 13)).foregroundStyle(Soot.muted)
+        case .clear:
+            HStack(spacing: 6) {
+                Image(systemName: "checkmark.circle.fill").font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(Soot.lime).accessibilityHidden(true)
+                Text("On track").font(.system(size: 13)).foregroundStyle(Soot.ink).lineLimit(1)
+            }
+            .help("Nothing blocks it: the pipeline passes, the due date holds, no pull request has waited for days")
+            .transition(.opacity)
         }
     }
 
@@ -780,9 +786,11 @@ private struct ProjectRow: View {
             }
             .help("\(d.shipped) of \(d.total) issues shipped")
         } else if project.linear == nil {
-            linkButton(.linear, "Link Linear")
+            Text("Not set up yet").font(.system(size: 13)).foregroundStyle(Soot.muted)
+                .help("No Linear project linked: Link Linear, in the status, links one")
         } else if let state = snapshot?.errors[.linear], state.needsConnecting {
-            linkButton(.linear, "Reconnect Linear")
+            Text("Disconnected").font(.system(size: 13)).foregroundStyle(Soot.muted)
+                .help("Linear needs reconnecting: Reconnect Linear, in the status, does it")
         } else if let state = snapshot?.errors[.linear] {
             unavailable(.linear, state)
         } else {
