@@ -178,8 +178,10 @@ struct LinearClient {
         req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.httpBody = try JSONSerialization.data(withJSONObject: ["query": query, "variables": variables])
+        let started = Date()
         let (data, resp) = try await URLSession.shared.data(for: req)
         let status = (resp as? HTTPURLResponse)?.statusCode ?? 0
+        RequestLog.record("linear", "graphql", status: status, bytes: data.count, since: started)
         let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
         if let errors = json["errors"] as? [[String: Any]], !errors.isEmpty {
             let isAuth = errors.contains {

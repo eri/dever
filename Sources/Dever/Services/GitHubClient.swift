@@ -27,12 +27,20 @@ struct GitHubPull: Codable, Identifiable {
     var merged_at: String?
     /// People whose review is asked for and not given yet.
     var requested_reviewers: [User]?
+    /// The rollup of the head commit's checks, as GitHub shows it on the pull request:
+    /// SUCCESS, FAILURE, ERROR, PENDING or EXPECTED; nil when the commit has no checks.
+    var checks: String?
+    /// Each reviewer's latest verdict: APPROVED or CHANGES_REQUESTED.
+    var verdicts: [String]?
 }
 
-/// One review of a pull request: APPROVED, CHANGES_REQUESTED, COMMENTED, DISMISSED or PENDING.
-struct GitHubReview: Codable {
-    var user: GitHubPull.User?
-    var state: String
+/// What one request tells about a repository: its open pull requests with their checks and
+/// reviews, and the health of its default branch.
+struct GitHubRepositoryState {
+    var pulls: [GitHubPull]
+    var defaultBranch: String?
+    /// The rollup of the default branch's head commit (see `GitHubPull.checks`).
+    var defaultBranchChecks: String?
 }
 
 struct GitHubRun: Codable, Identifiable {
@@ -156,6 +164,24 @@ enum GitHubAuth {
     }
 }
 
+/// The last body of each GET with the ETag GitHub gave for it. A GET sent with that ETag comes
+/// back 304 when nothing changed: no download, and it does not count against the rate limit.
+private final class GitHubETags: @unchecked Sendable {
+    static let shared = GitHubETags()
+    private let lock = NSLock()
+    private var entries: [String: (etag: String, data: Data)] = [:]
+
+    subscript(key: String) -> (etag: String, data: Data)? {
+        get { lock.lock(); defer { lock.unlock() }; return entries[key] }
+        set {
+            lock.lock(); defer { lock.unlock() }
+            // A few hundred small bodies at most; start over rather than track what is oldest.
+            if entries.count > 300 { entries.removeAll() }
+            entries[key] = newValue
+        }
+    }
+}
+
 struct GitHubClient {
     var token: String
 
@@ -164,9 +190,11 @@ struct GitHubClient {
     }
 
     /// Any verb with a JSON body; returns the raw response (some endpoints answer 204).
+    /// A GET is conditional on the ETag of its last answer.
     @discardableResult
     func send(_ method: String, _ path: String, json: [String: Any]? = nil) async throws -> Data {
-        var req = URLRequest(url: URL(string: "https://api.github.com" + path)!)
+        // URLSession's own cache would serve a GET for a minute without asking GitHub.
+        var req = URLRequest(url: URL(string: "https://api.github.com" + path)!, cachePolicy: .reloadIgnoringLocalCacheData)
         req.httpMethod = method
         req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         req.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
@@ -175,14 +203,36 @@ struct GitHubClient {
             req.setValue("application/json", forHTTPHeaderField: "Content-Type")
             req.httpBody = try JSONSerialization.data(withJSONObject: json)
         }
+        let cacheKey = "\(token.hashValue) \(path)"
+        let known = method == "GET" ? GitHubETags.shared[cacheKey] : nil
+        if let known { req.setValue(known.etag, forHTTPHeaderField: "If-None-Match") }
+        let started = Date()
         let (data, resp) = try await URLSession.shared.data(for: req)
-        let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
+        let http = resp as? HTTPURLResponse
+        let code = http?.statusCode ?? 0
+        RequestLog.record("github", "\(method) \(path)", status: code, bytes: data.count, since: started)
+        if code == 304, let known { return known.data }
         if code == 401 { throw AppError.unauthorized(.github) }
         guard (200..<300).contains(code) else {
             throw AppError.message("GitHub \(code): \(String(decoding: data.prefix(200), as: UTF8.self))")
         }
+        if method == "GET", let etag = http?.value(forHTTPHeaderField: "ETag"), data.count < 2_000_000 {
+            GitHubETags.shared[cacheKey] = (etag, data)
+        }
         return data
     }
+
+    /// One GraphQL query: a few kilobytes for what the REST lists answer in megabytes.
+    func graphql<T: Decodable>(_ query: String, variables: [String: Any], as: T.Type = T.self) async throws -> T {
+        let data = try await send("POST", "/graphql", json: ["query": query, "variables": variables])
+        if let errors = try? JSONDecoder().decode(GraphQLFailure.self, from: data).errors, let first = errors.first {
+            throw AppError.message("GitHub: \(first.message)")
+        }
+        return try JSONDecoder().decode(GraphQLEnvelope<T>.self, from: data).data
+    }
+
+    private struct GraphQLFailure: Decodable { struct E: Decodable { var message: String }; var errors: [E]? }
+    private struct GraphQLEnvelope<T: Decodable>: Decodable { var data: T }
 
     func viewerLogin() async throws -> String {
         struct U: Decodable { var login: String }
@@ -200,47 +250,126 @@ struct GitHubClient {
         return all
     }
 
+    private struct PullNode: Decodable {
+        struct Author: Decodable { var login: String }
+        struct Requests: Decodable {
+            /// A team asked to review has no login: only people are kept.
+            struct Reviewer: Decodable { var login: String? }
+            struct Node: Decodable { var requestedReviewer: Reviewer? }
+            var nodes: [Node]
+        }
+        struct Reviews: Decodable {
+            struct Node: Decodable { var state: String }
+            var nodes: [Node]
+        }
+        struct Commits: Decodable {
+            struct Rollup: Decodable { var state: String }
+            struct Commit: Decodable { var statusCheckRollup: Rollup? }
+            struct Node: Decodable { var commit: Commit }
+            var nodes: [Node]
+        }
+        var databaseId: Int?
+        var number: Int
+        var title: String
+        var url: String
+        var isDraft: Bool?
+        var updatedAt: String
+        var mergedAt: String?
+        var headRefName: String
+        var author: Author?
+        var reviewRequests: Requests?
+        var latestOpinionatedReviews: Reviews?
+        var commits: Commits?
+
+        var pull: GitHubPull {
+            GitHubPull(id: databaseId ?? number, number: number, title: title, html_url: url, draft: isDraft,
+                       // A deleted account has no author: GitHub shows it as "ghost".
+                       user: .init(login: author?.login ?? "ghost"), updated_at: updatedAt,
+                       head: .init(ref: headRefName), merged_at: mergedAt,
+                       requested_reviewers: reviewRequests?.nodes.compactMap { $0.requestedReviewer?.login.map { .init(login: $0) } },
+                       checks: commits?.nodes.first?.commit.statusCheckRollup?.state,
+                       verdicts: latestOpinionatedReviews?.nodes.map(\.state))
+        }
+    }
+
+    private struct PullPage: Decodable {
+        struct Info: Decodable { var hasNextPage: Bool; var endCursor: String? }
+        var pageInfo: Info
+        var nodes: [PullNode]
+    }
+
+    private static func split(_ repo: String) -> [String: Any] {
+        let parts = repo.split(separator: "/", maxSplits: 1).map(String.init)
+        return ["owner": parts.first ?? "", "name": parts.count > 1 ? parts[1] : ""]
+    }
+
+    /// The repository's open pull requests, most recently updated first (up to 300), each with
+    /// the checks of its head commit, its reviewers' verdicts and who is asked to review; and
+    /// the default branch with its checks.
+    func repository(_ repo: String) async throws -> GitHubRepositoryState {
+        struct R: Decodable {
+            struct Repo: Decodable {
+                struct Branch: Decodable {
+                    struct Target: Decodable { var statusCheckRollup: PullNode.Commits.Rollup? }
+                    var name: String
+                    var target: Target?
+                }
+                var defaultBranchRef: Branch?
+                var pullRequests: PullPage
+            }
+            var repository: Repo?
+        }
+        var state = GitHubRepositoryState(pulls: [])
+        var variables = Self.split(repo)
+        for page in 0..<3 {
+            guard let r = try await graphql("""
+            query($owner: String!, $name: String!, $after: String) { repository(owner: $owner, name: $name) {
+              defaultBranchRef { name target { ... on Commit { statusCheckRollup { state } } } }
+              pullRequests(states: OPEN, first: 100, after: $after, orderBy: { field: UPDATED_AT, direction: DESC }) {
+                pageInfo { hasNextPage endCursor }
+                nodes { databaseId number title url isDraft updatedAt headRefName author { login }
+                  reviewRequests(first: 20) { nodes { requestedReviewer { ... on User { login } } } }
+                  latestOpinionatedReviews(first: 20) { nodes { state } }
+                  commits(last: 1) { nodes { commit { statusCheckRollup { state } } } } } } } }
+            """, variables: variables, as: R.self).repository else {
+                throw AppError.message("GitHub: \(repo) not found, or this account cannot see it")
+            }
+            if page == 0 {
+                state.defaultBranch = r.defaultBranchRef?.name
+                state.defaultBranchChecks = r.defaultBranchRef?.target?.statusCheckRollup?.state
+            }
+            state.pulls += r.pullRequests.nodes.map(\.pull)
+            guard r.pullRequests.pageInfo.hasNextPage, let cursor = r.pullRequests.pageInfo.endCursor else { break }
+            variables["after"] = cursor
+        }
+        return state
+    }
+
     /// Open pull requests, most recently updated first (up to 300).
     func pulls(_ repo: String) async throws -> [GitHubPull] {
-        var all: [GitHubPull] = []
-        for page in 1...3 {
-            let batch: [GitHubPull] = try await get(
-                "/repos/\(repo)/pulls?state=open&sort=updated&direction=desc&per_page=100&page=\(page)")
-            all += batch
-            if batch.count < 100 { break }
-        }
-        return all
+        try await repository(repo).pulls
     }
 
-    /// Pull requests merged recently, newest first (scans the last 300 closed ones).
+    /// Pull requests merged recently, newest first (the 200 last touched).
     func mergedPulls(_ repo: String) async throws -> [GitHubPull] {
+        struct R: Decodable {
+            struct Repo: Decodable { var pullRequests: PullPage }
+            var repository: Repo?
+        }
         var all: [GitHubPull] = []
-        for page in 1...3 {
-            let batch: [GitHubPull] = try await get(
-                "/repos/\(repo)/pulls?state=closed&sort=updated&direction=desc&per_page=100&page=\(page)")
-            all += batch.filter { $0.merged_at != nil }
-            if batch.count < 100 { break }
+        var variables = Self.split(repo)
+        for _ in 0..<2 {
+            guard let page = try await graphql("""
+            query($owner: String!, $name: String!, $after: String) { repository(owner: $owner, name: $name) {
+              pullRequests(states: MERGED, first: 100, after: $after, orderBy: { field: UPDATED_AT, direction: DESC }) {
+                pageInfo { hasNextPage endCursor }
+                nodes { databaseId number title url updatedAt mergedAt headRefName author { login } } } } }
+            """, variables: variables, as: R.self).repository?.pullRequests else { break }
+            all += page.nodes.map(\.pull)
+            guard page.pageInfo.hasNextPage, let cursor = page.pageInfo.endCursor else { break }
+            variables["after"] = cursor
         }
         return all.sorted { ($0.merged_at ?? "") > ($1.merged_at ?? "") }
-    }
-
-    /// The reviews of a pull request, oldest first (the first hundred).
-    func reviews(_ repo: String, number: Int) async throws -> [GitHubReview] {
-        try await get("/repos/\(repo)/pulls/\(number)/reviews?per_page=100")
-    }
-
-    func runs(_ repo: String, branch: String? = nil) async throws -> [GitHubRun] {
-        struct R: Decodable { var workflow_runs: [GitHubRun] }
-        var path = "/repos/\(repo)/actions/runs?per_page=100"
-        if let branch, let encoded = branch.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) {
-            path += "&branch=\(encoded)"
-        }
-        return try await get(path, as: R.self).workflow_runs
-    }
-
-    func defaultBranch(_ repo: String) async throws -> String {
-        struct R: Decodable { var default_branch: String }
-        return try await get("/repos/\(repo)", as: R.self).default_branch
     }
 
     // MARK: Preview environments (one pull request)

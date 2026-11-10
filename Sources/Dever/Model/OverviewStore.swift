@@ -206,12 +206,26 @@ extension Project {
 final class OverviewStore: ObservableObject {
     @Published private(set) var snapshots: [UUID: ProjectSnapshot] = [:]
     @Published private(set) var isRefreshing = false
+    /// When the last refresh that reached the tools ended. A cycle in which every call failed
+    /// does not count: the rows are as old as this says.
     @Published private(set) var lastRefresh: Date?
+    /// The latest cycle reached nothing (offline, or every service failing).
+    @Published private(set) var refreshFailed = false
+    private var lastAttempt: Date?
+    private var failures = 0
 
     /// Snapshots older than this are refreshed when the overview appears (Settings › Refresh every).
     static var staleAfter: TimeInterval { TimeInterval(Preferences.refreshMinutes) * 60 }
 
-    var isStale: Bool { lastRefresh.map { Date().timeIntervalSince($0) > Self.staleAfter } ?? true }
+    /// Due for a refresh. After a failed cycle the next try comes sooner than the setting:
+    /// 30 s, then twice as long each time, up to the setting.
+    var isStale: Bool {
+        if refreshFailed, let lastAttempt {
+            let wait = min(Self.staleAfter, 30 * pow(2, Double(max(0, failures - 1))))
+            return Date().timeIntervalSince(lastAttempt) > wait
+        }
+        return lastRefresh.map { Date().timeIntervalSince($0) > Self.staleAfter } ?? true
+    }
 
     private var autoRefresh: Task<Void, Never>?
 
@@ -250,21 +264,42 @@ final class OverviewStore: ObservableObject {
         }
         guard !isRefreshing else { return }
         isRefreshing = true
-        defer { isRefreshing = false; lastRefresh = Date() }
+        defer { isRefreshing = false }
 
         let projects = app.projects
         let repos = Result { RepoCache(client: try app.githubClient()) }
+        let known = snapshots
+        var reached = !projects.contains { $0.slack != nil || $0.linear != nil || !app.repositories(for: $0).isEmpty }
+        // A project's Slack part is shown as soon as it arrives: a mention does not wait for GitHub.
+        let early: @Sendable (UUID, ProjectSnapshot.SlackStats) async -> Void = { [weak self] id, slack in
+            await self?.publish(slack, for: id)
+        }
         // A few projects at a time keeps us well under the Slack/GitHub rate limits.
         await withTaskGroup(of: (UUID, ProjectSnapshot).self) { group in
             var pending = projects.makeIterator()
+            func add(_ p: Project) {
+                let previous = known[p.id]
+                group.addTask { await (p.id, Self.load(p, app, repos, previous: previous, early: early)) }
+            }
             for _ in 0..<4 {
                 guard let p = pending.next() else { break }
-                group.addTask { await (p.id, Self.load(p, app, repos)) }
+                add(p)
             }
             for await (id, snapshot) in group {
                 snapshots[id] = snapshot
-                if let p = pending.next() { group.addTask { await (p.id, Self.load(p, app, repos)) } }
+                // Reached: some tool the project links answered.
+                let linked = (projects.first { $0.id == id }).map { p in
+                    (p.slack != nil ? 1 : 0) + (p.linear != nil ? 1 : 0) + (app.repositories(for: p).isEmpty ? 0 : 1)
+                } ?? 0
+                if snapshot.errors.values.filter(\.isTransient).count < linked { reached = true }
+                if let p = pending.next() { add(p) }
             }
+        }
+        lastAttempt = Date()
+        if reached {
+            lastRefresh = Date(); refreshFailed = false; failures = 0
+        } else {
+            refreshFailed = true; failures += 1
         }
         let ids = Set(projects.map(\.id))
         snapshots = snapshots.filter { ids.contains($0.key) }
@@ -273,9 +308,22 @@ final class OverviewStore: ObservableObject {
         await PreviewStore.shared.refreshAll(projects, app: app)
     }
 
-    private static func load(_ p: Project, _ app: AppState, _ repos: Result<RepoCache, Error>) async -> ProjectSnapshot {
+    /// A refresh in flight got the project's Slack part: the row takes it without waiting for the rest.
+    private func publish(_ slack: ProjectSnapshot.SlackStats, for project: UUID) {
+        guard snapshots[project] != nil else { return }
+        snapshots[project]?.slack = slack
+    }
+
+    /// - Parameter previous: the project's last snapshot. What a service that cannot be reached
+    ///   right now (offline, a 5xx) showed stays, beside the error that says it is old.
+    private static func load(_ p: Project, _ app: AppState, _ repos: Result<RepoCache, Error>, previous: ProjectSnapshot?,
+                             early: @escaping @Sendable (UUID, ProjectSnapshot.SlackStats) async -> Void) async -> ProjectSnapshot {
         var s = ProjectSnapshot()
-        async let slack = loadSlack(p, app)
+        async let slack: Result<ProjectSnapshot.SlackStats?, Error> = {
+            let result = await loadSlack(p, app)
+            if case .success(let stats?) = result { await early(p.id, stats) }
+            return result
+        }()
         // GitHub waits for Linear: the project's issues decide which PRs belong to it.
         var issues: [LinearClient.ProjectSummary.Issue]?
         switch await loadLinear(p, app) {
@@ -304,10 +352,20 @@ final class OverviewStore: ObservableObject {
             if v != nil { await app.succeeded(.github) }
         case .failure(let e): s.errors[.github] = await app.failure(e, .github)
         }
+        if let previous {
+            if s.errors[.slack]?.isTransient == true { s.slack = previous.slack }
+            if s.errors[.linear]?.isTransient == true { s.linear = previous.linear }
+            if s.errors[.github]?.isTransient == true || (s.errors[.linear]?.isTransient == true && s.github == nil) {
+                s.github = previous.github
+            }
+            if s.errors.values.contains(where: \.isTransient) { s.updatedAt = previous.updatedAt }
+        }
         if let issues {
             s.delivery = Delivery(issues: issues.map { ($0.identifier, $0.state.type, $0.state.name) },
                                   openPR: s.github?.openPRIssues ?? [],
                                   mergedPR: s.github?.mergedPRIssues ?? [])
+        } else if s.errors[.linear]?.isTransient == true {
+            s.delivery = previous?.delivery
         }
         return s
     }
@@ -403,19 +461,21 @@ final class OverviewStore: ObservableObject {
         async -> Result<ProjectSnapshot.GitHubStats, Error> {
         do {
             let repos = try repos.get()
-            let prs = ProjectPullRequests(pulls: try await repos.openPulls(repo), issues: issues,
-                                          wholeRepository: whole)
+            // Both lists at once; the merged one is memoized for the lines below.
+            async let merged = try? repos.mergedPulls(repo)
+            let state = try await repos.state(repo)
+            _ = await merged
+            let prs = ProjectPullRequests(pulls: state.pulls, issues: issues, wholeRepository: whole)
             let attention = await Self.attention(prs, repo: repo, repos: repos, issues: issues, whole: whole,
                                                  login: login)
             if prs.scoped, let issues {
-                let pipeline = prs.pipeline(from: try await repos.runs(repo))
                 let merged = ProjectPullRequests(pulls: try await repos.mergedPulls(repo), issues: issues, wholeRepository: false)
                 let mergedIDs = Set(merged.matches.compactMap(\.issue))
                 // Merged in code while the ticket still says "in progress" (review states are fine).
                 let stale = issues.filter {
                     Delivery.isBehind(stateType: $0.state.type, stateName: $0.state.name, merged: mergedIDs.contains($0.identifier))
                 }.map(\.identifier).sorted()
-                var stats = ProjectSnapshot.GitHubStats(openPRs: prs.matches.count, pipeline: pipeline.state, scoped: true,
+                var stats = ProjectSnapshot.GitHubStats(openPRs: prs.matches.count, pipeline: prs.pipeline, scoped: true,
                                                         mergedButOpen: stale,
                                                         openPRIssues: Set(prs.matches.compactMap(\.issue)),
                                                         mergedPRIssues: mergedIDs)
@@ -423,11 +483,9 @@ final class OverviewStore: ObservableObject {
                 return .success(stats)
             }
             // Unscoped: the health of the default branch, not of whichever branch ran last.
-            let branch = try await repos.defaultBranch(repo)
-            let run = try await repos.runs(repo, branch: branch).first
             var stats = ProjectSnapshot.GitHubStats(openPRs: prs.matches.count,
-                                                    pipeline: run.map(ProjectSnapshot.PipelineState.init(run:)) ?? .unknown,
-                                                    branch: branch)
+                                                    pipeline: .init(checks: state.defaultBranchChecks),
+                                                    branch: state.defaultBranch)
             attention.apply(to: &stats)
             return .success(stats)
         } catch {
@@ -486,7 +544,7 @@ final class OverviewStore: ObservableObject {
 }
 
 /// Memoizes GitHub requests during one refresh, so projects sharing a repository
-/// (a monorepo) fetch its pull requests and runs only once.
+/// (a monorepo) fetch its pull requests only once.
 actor RepoCache {
     private let client: GitHubClient
     private var tasks: [String: Task<Any, Error>] = [:]
@@ -500,20 +558,12 @@ actor RepoCache {
         return try await task.value as! T
     }
 
-    func openPulls(_ repo: String) async throws -> [GitHubPull] {
-        try await value("open:\(repo)") { [client] in try await client.pulls(repo) }
+    func state(_ repo: String) async throws -> GitHubRepositoryState {
+        try await value("open:\(repo)") { [client] in try await client.repository(repo) }
     }
 
     func mergedPulls(_ repo: String) async throws -> [GitHubPull] {
         try await value("merged:\(repo)") { [client] in try await client.mergedPulls(repo) }
-    }
-
-    func runs(_ repo: String, branch: String? = nil) async throws -> [GitHubRun] {
-        try await value("runs:\(repo):\(branch ?? "*")") { [client] in try await client.runs(repo, branch: branch) }
-    }
-
-    func defaultBranch(_ repo: String) async throws -> String {
-        try await value("branch:\(repo)") { [client] in try await client.defaultBranch(repo) }
     }
 }
 

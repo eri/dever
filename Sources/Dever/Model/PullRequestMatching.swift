@@ -49,17 +49,9 @@ struct ProjectPullRequests {
         }
     }
 
-    /// Pipeline state of the project's PR branches: the latest run of each branch counts.
-    func pipeline(from runs: [GitHubRun]) -> (state: ProjectSnapshot.PipelineState, latest: [GitHubRun]) {
-        let wanted = branches
-        var seen = Set<String>()
-        // Runs come newest first, so the first run per branch is its latest.
-        let latest = runs.filter { run in
-            guard let branch = run.head_branch, wanted.contains(branch), !seen.contains(branch) else { return false }
-            seen.insert(branch)
-            return true
-        }
-        return (ProjectSnapshot.PipelineState.worst(latest.map(ProjectSnapshot.PipelineState.init(run:))), latest)
+    /// Pipeline state of the project's pull requests: the worst of their checks.
+    var pipeline: ProjectSnapshot.PipelineState {
+        ProjectSnapshot.PipelineState.worst(matches.map { ProjectSnapshot.PipelineState(checks: $0.pull.checks) })
     }
 
     /// Pull requests of `repo` that Linear attached to the issues, by number. Covers PRs
@@ -115,13 +107,20 @@ enum GitHubRepository {
 }
 
 extension ProjectSnapshot.PipelineState {
-    init(run: GitHubRun) {
-        if run.status != "completed" {
-            self = .running
-        } else {
-            self = run.conclusion == "success" ? .passing : .failing
+    /// From GitHub's rollup of a commit's checks; nil (no checks at all) is unknown.
+    init(checks: String?) {
+        switch checks {
+        case "SUCCESS": self = .passing
+        case "FAILURE", "ERROR": self = .failing
+        case "PENDING", "EXPECTED": self = .running
+        default: self = .unknown
         }
     }
+}
+
+extension GitHubPull {
+    /// Where the pull request's checks are listed on GitHub.
+    var checksURL: String { html_url + "/checks" }
 }
 
 /// A merged pull request of the project, from GitHub's recent history or, for older

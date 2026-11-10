@@ -19,7 +19,8 @@ Contents: [audit](#1-audit) · [options](#2-options-weighed) · [strategy](#3-st
 
 ## 1. Audit
 
-State of `main` in November 2026. File references are under `Sources/Dever/`.
+State of `main` in November 2026, **before phases 1 and 2** (section 6 says what they changed; findings
+they closed are marked there). File references are under `Sources/Dever/`.
 
 ### 1.1 Where data lives
 
@@ -371,6 +372,30 @@ Safest and most felt first. Each phase ships on its own and leaves the app bette
 - Project page: saving the editor (a Linear project, a channel, a repository linked or changed) now
   reloads the page instead of leaving empty panels until Refresh.
 
+### Status
+
+| Phase | State | Where |
+| --- | --- | --- |
+| 1 | **Done** | `Model/LookAgain.swift`, `Views/AgeNotice.swift`, `ProjectDetailView.load / keepCurrent`, `OverviewStore.refresh`, `Support/RequestLog.swift` |
+| 2 | **Done** | `GitHubClient.repository / mergedPulls / graphql`, ETags in `GitHubClient.send` |
+| 3 to 6 | Not started | |
+
+Measured after phase 2 on the same repository, with the app's own client code
+(`DEVER_TRACE_REQUESTS=1`): one repository costs **3 requests, 112 KB, 5.4 s** (open pull requests with
+checks and reviews 44 KB, merged 2 × 34 KB, sent together) instead of 7 requests, 11.3 MB and about 16 s,
+plus up to 30 `reviews` calls on the project page. A repeated REST read answers 304 with no body.
+
+What phases 1 and 2 changed in the findings: F1 (the project page reads everything again every minute
+while it is in front, the preview every 20 s while it deploys), F2 (each pull request carries the rollup
+of its own checks; the project's pipeline is the worst of its pull requests'), most of F3 (bytes and
+time; the Overview and the project page still fetch separately until phase 3), F5 (activation, wake,
+network return, links opened in another app), F7 (the Overview's "updated" is the last refresh that
+reached the tools and ticks; a failed cycle retries after 30 s, doubling; a failed refresh keeps the
+rows and the panels and says how old they are). Still open: F4 and F6 (phase 3), F8.
+
+One visible consequence of F2: a project whose pull requests fail checks that ran more than a few hours
+ago now reads "Pipeline failing", where it read "passing" or "no runs" before.
+
 ### Phase 1: refresh when someone looks, and stop lying about age (about 1 to 2 days)
 
 No new architecture; small, separate changes.
@@ -380,7 +405,9 @@ No new architecture; small, separate changes.
 - Project page: a quiet refresh every 60 s while it is visible and the app is active, merging in place.
 - `lastRefresh` only on success; a failed cycle retries with backoff; the "updated" label ticks.
 - A failed refresh keeps the panel's data and adds a one-line notice instead of replacing it.
-- Age on CI, review and preview states, and the stale drawing of section 3.6.
+- Age on CI, review and preview states, and the stale drawing of section 3.6. (Done as one line under
+  the project's title, `AgeNotice`, once GitHub data is older than 150 s or a refresh failed; muting each
+  glyph is left to phase 3, when every state knows its own `fetchedAt`.)
 - Mark what was opened externally as dirty so activation refreshes it first.
 - Publish a project's Overview row per service as it arrives (Slack does not wait for GitHub).
 - A request log behind an environment variable (count, bytes, duration per endpoint), so the next phases

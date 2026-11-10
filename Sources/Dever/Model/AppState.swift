@@ -59,6 +59,9 @@ enum ServiceState: Equatable {
 
     /// True for the states that are the connection's fault, not the network's or the service's.
     var needsConnecting: Bool { self == .notConnected || self == .unauthorized }
+
+    /// True for the states a retry may clear: what was loaded before is old, not gone.
+    var isTransient: Bool { !needsConnecting }
 }
 
 /// How a team keeps its code: one repository for every project, one or several per project,

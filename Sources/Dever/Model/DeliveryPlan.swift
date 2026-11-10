@@ -240,19 +240,11 @@ struct DeliveryPlan {
         return fractional.date(from: iso) ?? ISO8601DateFormatter().date(from: iso)
     }
 
-    /// The verdict of a pull request from GitHub's review list (oldest first): each reviewer's
-    /// latest approval or request for changes counts, comments do not, a dismissal clears.
-    static func review(from reviews: [GitHubReview], author: String) -> Review {
-        var latest: [String: String] = [:]
-        for review in reviews {
-            guard let login = review.user?.login.lowercased(), login != author.lowercased() else { continue }
-            switch review.state {
-            case "APPROVED", "CHANGES_REQUESTED": latest[login] = review.state
-            case "DISMISSED": latest[login] = nil
-            default: break
-            }
-        }
-        if latest.values.contains("CHANGES_REQUESTED") { return .changesRequested }
-        return latest.values.contains("APPROVED") ? .approved : .pending
+    /// The verdict of a pull request from each reviewer's latest opinion: one request for
+    /// changes outweighs any approval.
+    static func review(verdicts: [String]?) -> Review {
+        let verdicts = verdicts ?? []
+        if verdicts.contains("CHANGES_REQUESTED") { return .changesRequested }
+        return verdicts.contains("APPROVED") ? .approved : .pending
     }
 }

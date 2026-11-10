@@ -42,7 +42,7 @@ Tokens are stored in the macOS Keychain (`io.github.eri.dever`), projects in `~/
   chosen in the editor ("Preview" step); "No preview needed" on the project page hides the panel until one is picked.
   The panel sits above Delivery and shows the PR, the state (not deployed, deploying, updating,
   live, failed, deleted), the deployed products (App, Back office, Client Hub: each chip opens the front, its mark folds in the
-  API's health, probed with a HEAD request on `pr-<N>-<target>.preview.mendo.cloud`). Deploy (one click, or with
+  API's health, probed with a HEAD request on `pr-<N>-<target>.<domain>`, the domain being `preview.domain` in `config/dever.json`). Deploy (one click, or with
   options from the More menu), redeploy, protect and delete post the team's own commands as PR comments
   (`/preview [--nb-api-pods=N] [--nb-app-pods=N] [--prod] [--autoscale] [--keep]`, `/delete-preview`); the state is
   read back from the workflows' result comments and runs, refreshed with the overview every 5 minutes and every 30 s
@@ -53,6 +53,9 @@ Tokens are stored in the macOS Keychain (`io.github.eri.dever`), projects in `~/
 How Dever loads, caches and refreshes what it shows, the freshness budget of each kind of data, and the
 checklist every feature answers (what it reads, writes and invalidates, its budget, its loading state):
 [docs/data-freshness.md](docs/data-freshness.md). The short rules are in [CLAUDE.md](CLAUDE.md).
+
+To see what a refresh costs, run with `DEVER_TRACE_REQUESTS=1`: every request to Slack, Linear and GitHub
+is printed to stderr with its status, size and duration, and the running total.
 
 ## Screenshots for development
 

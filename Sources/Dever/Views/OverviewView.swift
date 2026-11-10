@@ -209,7 +209,14 @@ struct OverviewView: View {
         if store.isRefreshing {
             Text("refreshing")
         } else if let last = store.lastRefresh {
-            Text("updated \(last.formatted(.relative(presentation: .named)))")
+            // Read off the clock, so the age stays true while the page is open; and it is the
+            // age of the last refresh that reached the tools, not of the last attempt.
+            TimelineView(.periodic(from: .now, by: 30)) { _ in
+                Text("updated \(last.formatted(.relative(presentation: .named)))"
+                     + (store.refreshFailed ? ", couldn't refresh since" : ""))
+            }
+        } else if store.refreshFailed {
+            Text("couldn't load")
         } else {
             Text("loading")
         }

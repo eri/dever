@@ -30,19 +30,23 @@ struct ProjectDetailView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var pulls: [ProjectPullRequests.Match] = []
     @State private var pullsScoped = false
-    /// The runs of each repository (the branches of two repositories may share a name).
-    @State private var runs: [String: [GitHubRun]] = [:]
     @State private var merged: [MergedPull] = []
     /// Why a panel has nothing: not connected, token rejected, offline, or a failure.
     @State private var states: [ServiceKind: ServiceState] = [:]
     /// When each service last loaded on this page, for the failure rows.
     @State private var lastLoaded: [ServiceKind: Date] = [:]
     @StateObject private var flow = ConnectFlow()
+    /// A refresh that failed while its panel had something to show: the panel keeps it and
+    /// the line under the title says how old it is.
+    @State private var refreshFailed: [ServiceKind: ServiceState] = [:]
     @State private var loading = false
     @State private var loaded = false
+    /// A load is running (asked for, or the quiet one that keeps the page current).
+    @State private var inFlight = false
+    @State private var lastLoad: Date?
+    /// The clock the age line is read against, moved by the page's own tick.
+    @State private var now = Date()
     @State private var expanded: Set<String> = []
-    /// The review verdict of each open pull request matched to an issue, by pull request id.
-    @State private var reviews: [Int: DeliveryPlan.Review] = [:]
 
     private var status: ProjectStatus { project.status(store.snapshots[project.id]) }
 
@@ -86,6 +90,11 @@ struct ProjectDetailView: View {
             ScrollView(.vertical) {
                 VStack(alignment: .leading, spacing: 24) {
                     titleRow
+                    if !agedData.isEmpty {
+                        AgeNotice(items: agedData, refreshing: inFlight, retry: { Task { await load(quiet: true) } })
+                            .padding(.top, -12)
+                            .transition(.opacity)
+                    }
                     if missing.count > 1 {
                         ConnectSection(project: project, services: linkedServices, flow: flow)
                     }
@@ -133,13 +142,20 @@ struct ProjectDetailView: View {
         .navigationTitle(project.name)
         .windowTitleHidden()
         .task {
-            await load()
+            // Back from an issue page with data read a moment ago: nothing to fetch.
+            if LookAgain.shared.isDue(lastLoad) { await load(quiet: loaded) }
             await land()
+            await keepCurrent()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .lookAgain)) { _ in
+            now = Date()
+            if LookAgain.shared.isDue(lastLoad) { Task { await load(quiet: true) } }
         }
         .sheet(isPresented: $flow.githubSheet) { GitHubLoginSheet() }
         // Another channel: the messages and the read cursor of the previous one do not carry over.
         .onChange(of: project.slack?.id) { _, _ in
             messages = []; lastRead = nil; seenUpTo = nil; hasEarlier = false; shownMessages = 8
+            lastLoaded[.slack] = nil
         }
         .onChange(of: connectionKey) { _, _ in Task { await load() } }
         .onReceive(NotificationCenter.default.publisher(for: .toggleSlackWide)) { _ in toggleSlackWide() }
@@ -262,12 +278,11 @@ struct ProjectDetailView: View {
         if let demo = DeliveryPlan.snapshotDemo { return demo }
         let open = Dictionary(grouping: pulls.filter { $0.issue != nil }, by: { $0.issue! }).mapValues { matches in
             matches.map { m in
-                let run = runByBranch[m.pull.repository + "\n" + m.pull.head.ref]
-                return DeliveryPlan.Pull(number: m.pull.number, title: m.pull.title, url: m.pull.html_url,
+                DeliveryPlan.Pull(number: m.pull.number, title: m.pull.title, url: m.pull.html_url,
                                          repository: m.pull.repository, draft: m.pull.draft == true, author: m.pull.user.login,
                                          updatedAt: DeliveryPlan.date(m.pull.updated_at),
-                                         pipeline: run.map(ProjectSnapshot.PipelineState.init(run:)), runURL: run?.html_url,
-                                         review: reviews[m.pull.id] ?? .pending,
+                                         pipeline: pipeline(of: m.pull), runURL: m.pull.checksURL,
+                                         review: DeliveryPlan.review(verdicts: m.pull.verdicts),
                                          requested: m.pull.requested_reviewers?.map(\.login) ?? [])
             }
         }
@@ -283,17 +298,9 @@ struct ProjectDetailView: View {
     private var unlinkedOpen: [ProjectPullRequests.Match] { pulls.filter { $0.issue == nil } }
     private var unlinkedMerged: [MergedPull] { merged.filter { $0.issue == nil } }
 
-    /// The latest run of each branch of each repository, newest first in `runs`.
-    private var runByBranch: [String: GitHubRun] {
-        var out: [String: GitHubRun] = [:]
-        for (repo, list) in runs {
-            for run in list { if let b = run.head_branch, out[repo + "\n" + b] == nil { out[repo + "\n" + b] = run } }
-        }
-        return out
-    }
-
+    /// The state of the pull request's own checks; nil when its head commit has none.
     private func pipeline(of pull: GitHubPull) -> ProjectSnapshot.PipelineState? {
-        runByBranch[pull.repository + "\n" + pull.head.ref].map(ProjectSnapshot.PipelineState.init(run:))
+        pull.checks == nil ? nil : ProjectSnapshot.PipelineState(checks: pull.checks)
     }
 
     private var workPanel: some View {
@@ -632,34 +639,97 @@ struct ProjectDetailView: View {
         }
     }
 
-    private func load(force: Bool = false) async {
-        loading = true
-        defer { loading = false; loaded = true }
-        states = [:]
-        // A tool without a token is an invitation, not a call that fails.
-        for service in missing { states[service] = .notConnected }
+    /// How old pull requests and their checks may get on screen before the page says so:
+    /// twice their budget of a minute, and a little for the refresh itself.
+    private static let agedAfter: TimeInterval = 150
+
+    /// What the page shows that is not current: a tool whose refresh failed, and GitHub once
+    /// its checks are old enough to mislead (the page was left open in the background).
+    private var agedData: [AgeNotice.Item] {
+        var out: [AgeNotice.Item] = []
+        for service in ServiceKind.allCases {
+            guard let since = lastLoaded[service], states[service] == nil else { continue }
+            if let failure = refreshFailed[service] {
+                out.append(.init(service: service, since: since, failure: failure))
+            } else if service == .github, !repos.isEmpty, now.timeIntervalSince(since) > Self.agedAfter {
+                out.append(.init(service: service, since: since))
+            }
+        }
+        return out
+    }
+
+    /// While the page is open and Dever in front, what it shows is read again every minute,
+    /// in place; the preview every 20 s while it deploys. The tick also moves the age line.
+    private func keepCurrent() async {
+        guard Snapshotter.directory == nil else { return }
+        while !Task.isCancelled {
+            try? await Task.sleep(nanoseconds: 20_000_000_000)
+            guard !Task.isCancelled else { return }
+            now = Date()
+            guard NSApp.isActive else { continue }
+            if lastLoad.map({ Date().timeIntervalSince($0) > 55 }) ?? true {
+                await load(quiet: true)
+            } else if PreviewStore.shared.state(for: project)?.status?.phase.busy == true,
+                      PreviewStore.shared.awaiting[project.id] == nil {
+                await PreviewStore.shared.load(project, app: app, force: true)
+            }
+        }
+    }
+
+    /// - Parameter quiet: a refresh nobody asked for: the Refresh button stays still and a
+    ///   panel that failed before keeps its row until the tool answers.
+    private func load(force: Bool = false, quiet: Bool = false) async {
+        if !quiet { loading = true }
+        guard !inFlight else { return }
+        inFlight = true
+        defer { inFlight = false; loading = false; loaded = true; lastLoad = Date(); now = Date() }
+        for service in ServiceKind.allCases {
+            // A tool without a token is an invitation, not a call that fails.
+            if missing.contains(service) { states[service] = .notConnected }
+            else if !quiet || states[service] == .notConnected { states[service] = nil }
+        }
         async let s: Void = loadSlack()
+        async let preview: Void = PreviewStore.shared.load(project, app: app, force: force)
         // GitHub needs the Linear issues to tell which pull requests belong to the project.
         await loadLinear(force: force)
         await loadGitHub()
         await s
+        await preview
+    }
+
+    private func succeeded(_ service: ServiceKind) {
+        lastLoaded[service] = Date()
+        states[service] = nil
+        refreshFailed[service] = nil
+    }
+
+    /// A failed refresh keeps what the panel shows and says so under the title; only a panel
+    /// with nothing to show, or a rejected token, becomes the failure row.
+    private func failed(_ service: ServiceKind, _ error: Error) {
+        guard let state = app.failure(error, service) else { return }
+        if lastLoaded[service] != nil, state.isTransient {
+            refreshFailed[service] = state
+            states[service] = nil
+        } else {
+            states[service] = state
+        }
     }
 
     private func loadLinear(force: Bool) async {
-        guard let id = project.linear?.id, states[.linear] == nil else { return }
+        guard let id = project.linear?.id, states[.linear] != .notConnected else { return }
         do {
             _ = try await issueStore.load(project: id, force: force, app: app)
-            lastLoaded[.linear] = Date()
+            succeeded(.linear)
             await issueStore.loadPlanContext(project: id, app: app)
-        } catch { states[.linear] = app.failure(error, .linear) }
+        } catch { failed(.linear, error) }
     }
 
     private func loadSlack() async {
-        guard let id = project.slack?.id, states[.slack] == nil else { return }
+        guard let id = project.slack?.id, states[.slack] != .notConnected else { return }
         do {
             let page = try await app.withSlack { try await $0.historyPage(id, limit: 20) }
             merge(page.messages)
-            lastLoaded[.slack] = Date()
+            succeeded(.slack)
             if messages.count <= 20 { hasEarlier = page.hasMore }
             let linked = Set(messages.flatMap { $0.linkedChannelIDs }).subtracting([id])
             if !linked.isSubset(of: Set(linkedChannels.keys)) {
@@ -678,7 +748,7 @@ struct ProjectDetailView: View {
             if customEmoji.isEmpty, let team = app.slack?.teamID {
                 customEmoji = (try? await app.withSlack { await SlackDirectory.shared.customEmoji(team: team, via: $0) }) ?? [:]
             }
-        } catch { states[.slack] = app.failure(error, .slack) }
+        } catch { failed(.slack, error) }
     }
 
     /// New messages replace the ones with the same `ts`; the rest stays as loaded, so a
@@ -811,67 +881,44 @@ struct ProjectDetailView: View {
             })
     }
 
-    /// The verdict of each open, non-draft pull request matched to an issue (the first 30):
-    /// one request each, together. A failed one counts as not reviewed yet.
-    private func loadReviews(of matches: [ProjectPullRequests.Match], with client: GitHubClient) async -> [Int: DeliveryPlan.Review] {
-        let wanted = matches.filter { $0.issue != nil && $0.pull.draft != true }.prefix(30)
-        return await withTaskGroup(of: (Int, DeliveryPlan.Review)?.self) { group in
-            for match in wanted {
-                let pull = match.pull
-                group.addTask {
-                    guard let list = try? await client.reviews(pull.repository, number: pull.number) else { return nil }
-                    return (pull.id, DeliveryPlan.review(from: list, author: pull.user.login))
-                }
-            }
-            var out: [Int: DeliveryPlan.Review] = [:]
-            for await result in group { if let (id, review) = result { out[id] = review } }
-            return out
-        }
-    }
-
     private func loadGitHub() async {
         let repos = self.repos
-        guard !repos.isEmpty, states[.github] == nil else { return }
+        guard !repos.isEmpty, states[.github] != .notConnected else { return }
         do {
             let client = try app.githubClient()
             let refs: [IssueReference]? = project.linear == nil || states[.linear] != nil ? nil : issues
             // The shared repository's pull requests belong to every project: without issues to
             // match, none of them is this project's.
             if app.followsSharedRepository(project), refs == nil {
-                pulls = []; merged = []; runs = [:]; pullsScoped = true
-                lastLoaded[.github] = Date()
+                pulls = []; merged = []; pullsScoped = true
+                succeeded(.github)
                 return
             }
             let whole = app.showsWholeRepository(project)
             var allPulls: [ProjectPullRequests.Match] = []
             var allMerged: [MergedPull] = []
-            var allRuns: [String: [GitHubRun]] = [:]
             var scoped = false
             // One repository after the other: a project rarely follows more than a few.
             for repo in repos {
-                async let runs = client.runs(repo)
                 async let recentlyMerged = client.mergedPulls(repo)
                 let prs = ProjectPullRequests(pulls: try await client.pulls(repo), issues: refs,
                                               wholeRepository: whole)
                 allPulls += prs.matches
                 scoped = scoped || prs.scoped
-                allRuns[repo] = prs.scoped ? prs.pipeline(from: try await runs).latest : try await runs
                 allMerged += MergedPull.list(repo: repo, recentlyMerged: try await recentlyMerged, issues: refs,
                                              wholeRepository: whole,
                                              open: Set(prs.matches.map(\.pull.number)))
             }
             pulls = allPulls
-            reviews = await loadReviews(of: allPulls, with: client)
             pullsScoped = scoped
-            runs = allRuns
             merged = allMerged.sorted { ($0.mergedAt ?? .distantPast) > ($1.mergedAt ?? .distantPast) }
             for m in merged { issueStore.pullsByURL[m.url] = .init(number: m.number, title: m.title ?? "", state: .merged) }
             for p in pulls {
                 issueStore.pullsByURL[p.pull.html_url] = .init(number: p.pull.number, title: p.pull.title,
                                                                state: p.pull.draft == true ? .draft : .open)
             }
-            lastLoaded[.github] = Date()
+            succeeded(.github)
             app.succeeded(.github)
-        } catch { states[.github] = app.failure(error, .github) }
+        } catch { failed(.github, error) }
     }
 }

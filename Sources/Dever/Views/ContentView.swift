@@ -103,7 +103,20 @@ struct ContentView: View {
         .onReceive(NotificationCenter.default.publisher(for: .openIssue)) { note in
             if let route = note.object as? IssueRoute { path.append(route) }
         }
+        // Links to the tools leave through here: what they show may change while you are away.
+        .environment(\.openURL, OpenURLAction { url in
+            LookAgain.shared.openedExternally(url)
+            return .systemAction
+        })
+        // Back in front, awake or online again: the Overview refreshes at once when it is the
+        // screen in front, otherwise when its cycle is due (a project page looks after itself).
+        .onReceive(NotificationCenter.default.publisher(for: .lookAgain)) { _ in
+            guard Snapshotter.directory == nil else { return }
+            let due = selection == .overview && path.isEmpty ? LookAgain.shared.isDue(store.lastRefresh) : store.isStale
+            if due { Task { await store.refresh(app) } }
+        }
         .task {
+            LookAgain.shared.start()
             store.startAutoRefresh(app)
             // Ask once, when there is something to be notified about.
             if !app.projects.isEmpty, await Notifier.shared.authorizationStatus() == .notDetermined {

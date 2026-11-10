@@ -263,7 +263,9 @@ struct SlackClient {
         req.setValue("Bearer \(creds.token)", forHTTPHeaderField: "Authorization")
         req.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
         req.httpBody = OAuth.form(params)
-        let (data, _) = try await URLSession.shared.data(for: req)
+        let started = Date()
+        let (data, resp) = try await URLSession.shared.data(for: req)
+        RequestLog.record("slack", method, status: (resp as? HTTPURLResponse)?.statusCode ?? 0, bytes: data.count, since: started)
         let obj = (try JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
         if obj["ok"] as? Bool == true { return obj }
         let err = obj["error"] as? String ?? "unknown_error"
