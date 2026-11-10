@@ -31,22 +31,42 @@ struct PersonAvatar: View {
     }
 }
 
-/// Panel title: the tool's logo, a name, one quiet line, and an "Open ↗" to the tool.
-struct PanelHeader: View {
+/// Every block of the project page opens the same way: a tool's logo or a glyph in an 18 px
+/// slot, the title, one quiet line, and the action on the right ("Open ↗" to the tool, or
+/// whatever the block needs there). `leading` is for a control that must come before the
+/// logo (the Slack room's Back), `accessory` for a pill beside the title (the preview's #number).
+struct PanelHeader<Leading: View, Accessory: View, Trailing: View>: View {
     var service: ServiceKind?
+    var symbol: String?
     let title: String
     var subtitle: String?
     var link: URL?
+    /// What the "Open ↗" link opens, for its tooltip and its accessibility label.
+    var linkHelp: String?
+    @ViewBuilder var leading: () -> Leading
+    @ViewBuilder var accessory: () -> Accessory
+    @ViewBuilder var trailing: () -> Trailing
 
     var body: some View {
         HStack(alignment: .center, spacing: 12) {
-            if let service { BrandLogo(service: service, size: 18).foregroundStyle(Soot.ink) }
+            leading()
+            PanelGlyph(service: service, symbol: symbol)
             VStack(alignment: .leading, spacing: 1) {
-                Text(title).font(.system(size: 17, weight: .semibold)).foregroundStyle(Soot.ink)
-                    .accessibilityAddTraits(.isHeader)
-                if let subtitle { Text(subtitle).font(.system(size: 12)).foregroundStyle(Soot.muted) }
+                HStack(spacing: 8) {
+                    Text(title).font(.system(size: 17, weight: .semibold)).foregroundStyle(Soot.ink)
+                        .lineLimit(1)
+                        .accessibilityAddTraits(.isHeader)
+                    accessory()
+                }
+                // One height with or without a pill, so every panel's title sits on the same line.
+                .frame(height: 22)
+                if let subtitle {
+                    Text(subtitle).font(.system(size: 12)).foregroundStyle(Soot.muted).lineLimit(1)
+                        .contentTransition(.opacity)
+                }
             }
-            Spacer()
+            Spacer(minLength: 12)
+            trailing()
             if let link {
                 HoverLink(destination: link) {
                     HStack(spacing: 4) { Text("Open"); Image(systemName: "arrow.up.right") }
@@ -54,8 +74,102 @@ struct PanelHeader: View {
                         .foregroundStyle(Soot.lime)
                 }
                 .padding(.trailing, -8)
+                .help(linkHelp ?? "Open in \(service?.label ?? "the browser")")
+                .accessibilityLabel(linkHelp ?? "Open in \(service?.label ?? "the browser")")
             }
         }
+        .frame(minHeight: 36)
+    }
+}
+
+extension PanelHeader where Leading == EmptyView, Accessory == EmptyView, Trailing == EmptyView {
+    init(service: ServiceKind? = nil, symbol: String? = nil, title: String, subtitle: String? = nil,
+         link: URL? = nil, linkHelp: String? = nil) {
+        self.init(service: service, symbol: symbol, title: title, subtitle: subtitle, link: link, linkHelp: linkHelp,
+                  leading: { EmptyView() }, accessory: { EmptyView() }, trailing: { EmptyView() })
+    }
+}
+
+extension PanelHeader where Leading == EmptyView, Accessory == EmptyView {
+    init(service: ServiceKind? = nil, symbol: String? = nil, title: String, subtitle: String? = nil,
+         link: URL? = nil, linkHelp: String? = nil, @ViewBuilder trailing: @escaping () -> Trailing) {
+        self.init(service: service, symbol: symbol, title: title, subtitle: subtitle, link: link, linkHelp: linkHelp,
+                  leading: { EmptyView() }, accessory: { EmptyView() }, trailing: trailing)
+    }
+}
+
+extension PanelHeader where Leading == EmptyView {
+    init(service: ServiceKind? = nil, symbol: String? = nil, title: String, subtitle: String? = nil,
+         link: URL? = nil, linkHelp: String? = nil,
+         @ViewBuilder accessory: @escaping () -> Accessory, @ViewBuilder trailing: @escaping () -> Trailing) {
+        self.init(service: service, symbol: symbol, title: title, subtitle: subtitle, link: link, linkHelp: linkHelp,
+                  leading: { EmptyView() }, accessory: accessory, trailing: trailing)
+    }
+}
+
+/// The 18 px slot at the head of a panel: the tool's logo, or a glyph for what is not a tool
+/// (the preview's globe). Decorative: the title names the block.
+struct PanelGlyph: View {
+    var service: ServiceKind?
+    var symbol: String?
+    var size: CGFloat = 18
+
+    var body: some View {
+        Group {
+            if let service {
+                BrandLogo(service: service, size: size).foregroundStyle(Soot.ink)
+            } else if let symbol {
+                Image(systemName: symbol).font(.system(size: size * 0.8, weight: .semibold)).foregroundStyle(Soot.ink)
+            }
+        }
+        .frame(width: size, height: size)
+        .accessibilityHidden(true)
+    }
+}
+
+/// A block with nothing to show yet, in one shape for the whole page: the tool's logo, one
+/// short line, the lime action that fills the block, and at most one quiet alternative.
+/// Same tile as the connect invitation (`ConnectPanelBody`), so the two read as one family.
+struct PanelEmpty: View {
+    var service: ServiceKind?
+    var symbol: String?
+    let line: String
+    let primary: (title: String, action: () -> Void)
+    var quiet: (title: String, action: () -> Void)? = nil
+    /// Tooltips, one per button, in the same order.
+    var primaryHelp: String?
+    var quietHelp: String?
+
+    var body: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 14) { glyphAndLine; Spacer(minLength: 16); buttons }
+            VStack(alignment: .leading, spacing: 14) { glyphAndLine; buttons }
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Soot.ground.opacity(0.6), in: RoundedRectangle(cornerRadius: 10))
+        .accessibilityElement(children: .contain)
+        .transition(.opacity)
+    }
+
+    private var glyphAndLine: some View {
+        HStack(spacing: 14) {
+            PanelGlyph(service: service, symbol: symbol, size: 28)
+            Text(line).font(.system(size: 14, weight: .medium)).foregroundStyle(Soot.ink)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private var buttons: some View {
+        HStack(spacing: 8) {
+            Button(primary.title, action: primary.action).buttonStyle(LimeButton())
+                .help(primaryHelp ?? "")
+            if let quiet {
+                Button(quiet.title, action: quiet.action).buttonStyle(QuietButton())
+                    .help(quietHelp ?? "")
+            }
+        }
+        .fixedSize()
     }
 }
 
@@ -159,16 +273,19 @@ struct ShowAllButton: View {
     @State private var hovering = false
 }
 
-/// One line of the empty state inside a panel.
+/// One line of the empty state inside a panel, when there is nothing to do about it: a glyph
+/// in the same 18 px slot as the panel's head, the line, a row's height.
 struct QuietEmpty: View {
     let symbol: String
     let text: String
     var body: some View {
-        Label { Text(text) } icon: { Image(systemName: symbol) }
-            .font(.system(size: 14))
-            .foregroundStyle(Soot.muted)
-            .padding(.vertical, 12)
-            .padding(.horizontal, 12)
+        HStack(spacing: 12) {
+            Image(systemName: symbol).font(.system(size: 14, weight: .semibold)).foregroundStyle(Soot.muted)
+                .frame(width: 18).accessibilityHidden(true)
+            Text(text).font(.system(size: 14)).foregroundStyle(Soot.muted)
+        }
+        .padding(.horizontal, 12)
+        .frame(minHeight: 46)
     }
 }
 

@@ -198,7 +198,8 @@ struct ConnectPlaceholder: View {
     }
 }
 
-/// The in-panel invitation when just one tool is missing: logo, one line, one button.
+/// The in-panel invitation when just one tool is missing: logo, one line, one button, in the
+/// same tile as the page's other empty states (`PanelEmpty`).
 struct ConnectPanelBody: View {
     let service: ServiceKind
     let project: Project
@@ -206,24 +207,28 @@ struct ConnectPanelBody: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            HStack(spacing: 14) {
-                BrandLogo(service: service, size: 28).foregroundStyle(Soot.ink)
-                    .modifier(Breathing(active: flow.running == service))
-                    .accessibilityHidden(true)
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("Connect \(service.label)").font(.system(size: 15, weight: .semibold)).foregroundStyle(Soot.ink)
-                    Text(ConnectPitch.line(service, for: project)).font(.system(size: 13)).foregroundStyle(Soot.muted)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                Spacer(minLength: 16)
-                ConnectControl(service: service, flow: flow)
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 14) { logoAndLine; Spacer(minLength: 16); ConnectControl(service: service, flow: flow) }
+                VStack(alignment: .leading, spacing: 14) { logoAndLine; ConnectControl(service: service, flow: flow) }
             }
             .padding(16)
+            .frame(maxWidth: .infinity, alignment: .leading)
             .background(Soot.ground.opacity(0.6), in: RoundedRectangle(cornerRadius: 10))
             .overlay(alignment: .bottom) { if flow.running == service { WaitingLine().transition(.opacity) } }
             .clipShape(RoundedRectangle(cornerRadius: 10))
             .motion(Motion.ui, fade: true, value: flow.running == service)
             if let error = flow.error, error.service == service { ErrorLabel(error.message) }
+        }
+    }
+
+    private var logoAndLine: some View {
+        HStack(spacing: 14) {
+            BrandLogo(service: service, size: 28).foregroundStyle(Soot.ink)
+                .modifier(Breathing(active: flow.running == service))
+                .frame(width: 28, height: 28)
+                .accessibilityHidden(true)
+            Text(ConnectPitch.line(service, for: project)).font(.system(size: 14, weight: .medium)).foregroundStyle(Soot.ink)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 }

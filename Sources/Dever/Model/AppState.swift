@@ -305,9 +305,21 @@ final class AppState: ObservableObject {
             projects = list
         }
         if !simulatedRepos.isEmpty, !projects.isEmpty {
+            simulatedMode = simulatedMode ?? repositoryMode
             projects[0].githubRepos = simulatedRepos
             projects[0].usesWorkspaceRepository = false
+        }
+        // DEVER_SNAPSHOT_UNLINK=slack,linear,github,preview runs as if the captured project
+        // (DEVER_SNAPSHOT_PROJECT) had not linked those tools. Nothing is written back.
+        let unlink = Set(Self.simulated("DEVER_SNAPSHOT_UNLINK").keys)
+        let captured = ProcessInfo.processInfo.environment["DEVER_SNAPSHOT_PROJECT"].flatMap(Int.init) ?? 0
+        if !unlink.isEmpty, projects.indices.contains(captured) {
+            // First, so the edits below are never saved: changing an element runs `projects.didSet`.
             simulatedMode = simulatedMode ?? repositoryMode
+            if unlink.contains("slack") { projects[captured].slack = nil }
+            if unlink.contains("linear") { projects[captured].linear = nil }
+            if unlink.contains("github") { projects[captured].githubRepos = []; projects[captured].usesWorkspaceRepository = true }
+            if unlink.contains("preview") { projects[captured].previewPullNumber = nil; projects[captured].previewDismissed = nil }
         }
         if simulatedMissing.contains(.slack) { slack = nil }
         if simulatedMissing.contains(.linear) { linear = nil }
@@ -530,7 +542,8 @@ final class AppState: ObservableObject {
     }
 
     private func saveProjects() {
-        guard PreviewStore.simulation == nil, simulatedMode == nil else { return }
+        // A snapshot run never writes the projects back, whatever it simulates.
+        guard PreviewStore.simulation == nil, simulatedMode == nil, Snapshotter.directory == nil else { return }
         if let data = try? JSONEncoder().encode(projects) {
             try? data.write(to: projectsURL, options: .atomic)
         }

@@ -45,6 +45,12 @@ struct ProjectDetailView: View {
 
     private var status: ProjectStatus { project.status(store.snapshots[project.id]) }
 
+    /// Opens the project editor on one of its steps: "Link Linear" lands on the Linear picker.
+    private func link(_ step: ProjectEditorSheet.Step) {
+        ProjectEditorSheet.openAt = step
+        edit()
+    }
+
     /// The linked tools with no token: one missing gets its invitation inside its panel,
     /// several get one section at the top and quiet placeholders in the panels.
     private var missing: [ServiceKind] { app.missingServices(for: project) }
@@ -145,10 +151,7 @@ struct ProjectDetailView: View {
             // The preview first: it is the thing to open or to deploy, and it stays one or two lines.
             if app.showsPreview(project) {
                 PreviewPanel(project: project, missing: missing, flow: flow,
-                             addPreview: {
-                                 ProjectEditorSheet.openAt = .preview
-                                 edit()
-                             },
+                             addPreview: { link(.preview) },
                              dismiss: {
                                  var p = project
                                  p.previewDismissed = true
@@ -222,7 +225,7 @@ struct ProjectDetailView: View {
                 ToolChip(service: .github, text: repo, url: URL(string: "https://github.com/\(repo)"))
             }
             if !project.isComplete {
-                Button(action: edit) {
+                Button { link(project.slack == nil ? .slack : .linear) } label: {
                     HStack(spacing: 5) {
                         Image(systemName: "plus").font(.system(size: 11, weight: .semibold))
                         Text("Link a tool")
@@ -333,17 +336,38 @@ struct ProjectDetailView: View {
 
     private var workPanel: some View {
         VStack(alignment: .leading, spacing: 16) {
-            PanelHeader(title: project.linear == nil ? "Pull requests" : "Delivery",
-                        subtitle: project.linear == nil ? repos.joined(separator: " · ") : "Issues joined with their pull requests")
+            if project.linear != nil {
+                PanelHeader(service: .linear, title: "Delivery", subtitle: "Issues joined with their pull requests",
+                            link: linearURL, linkHelp: "Open the project in Linear")
+            } else {
+                PanelHeader(service: .github, title: "Pull requests",
+                            subtitle: repos.isEmpty ? "No repository yet" : repos.joined(separator: " · "),
+                            link: repos.isEmpty ? nil : pullsURL, linkHelp: "Open the pull requests on GitHub")
+            }
             if project.linear == nil && repos.isEmpty {
-                QuietEmpty(symbol: "link", text: "Link a Linear project or a GitHub repository to see the work here")
+                PanelEmpty(service: .linear, line: "Link a tool to see the work here",
+                           primary: ("Link Linear", { link(.linear) }),
+                           quiet: app.repositoryMode == .single ? nil : ("Link a repository", { link(.github) }),
+                           primaryHelp: "Pick the Linear project whose issues this project tracks",
+                           quietHelp: "Pick the GitHub repositories this project follows")
             } else if !loaded, states[.linear] == nil, states[.github] == nil {
                 workSkeleton
             } else {
                 if project.linear != nil { linearPart }
-                if !repos.isEmpty { githubPart }
+                if !repos.isEmpty {
+                    githubPart
+                } else if app.repositoryMode != .single, states[.linear] == nil {
+                    PanelEmpty(service: .github, line: "Link a repository to see its pull requests",
+                               primary: ("Link a repository", { link(.github) }),
+                               primaryHelp: "Pick the GitHub repositories this project follows")
+                }
             }
         }
+        // Skeleton, invitation and content hand over with a dissolve, on load and when the
+        // editor links the missing tool.
+        .motion(Motion.ui, fade: true, value: loaded)
+        .motion(Motion.ui, fade: true, value: project.linear == nil)
+        .motion(Motion.ui, fade: true, value: repos.isEmpty)
         .sootPanel()
     }
 
@@ -506,8 +530,11 @@ struct ProjectDetailView: View {
         } else if let state = states[.github] {
             failure(.github, state, compact: project.linear != nil && states[.linear] != nil)
         } else if app.pullsNeedLinear(project) {
-            QuietEmpty(symbol: "link",
-                       text: "\(app.workspaceRepository.map(GitHubRepository.short) ?? "The repository") is shared with other projects: link a Linear project to see the pull requests of its issues")
+            // The shared repository's pull requests belong to every project: only the project's
+            // own issues tell which are its own.
+            PanelEmpty(service: .linear, line: "Link a Linear project to see its pull requests",
+                       primary: ("Link Linear", { link(.linear) }),
+                       primaryHelp: "\(app.workspaceRepository.map(GitHubRepository.short) ?? "The repository") is shared with other projects: its pull requests are matched to the project's issues")
         } else if !unlinkedOpen.isEmpty || !unlinkedMerged.isEmpty {
             VStack(alignment: .leading, spacing: 2) {
                 if project.linear != nil {
@@ -614,7 +641,9 @@ struct ProjectDetailView: View {
     /// so the messages keep their final layout while the panel's frame animates between the two.
     private func slackPanel(railWidth: CGFloat, wideWidth: CGFloat) -> some View {
         VStack(alignment: .leading, spacing: 16) {
-            HStack(spacing: 10) {
+            PanelHeader(service: .slack, title: project.slack.map { "#\($0.name)" } ?? "Slack", subtitle: slackSubtitle,
+                        link: slackExpanded ? slackURL : nil, linkHelp: "Open the channel in Slack",
+                        leading: {
                 if slackExpanded {
                     // The way back sits where a back control is looked for: leading, before the title.
                     Button { toggleSlackWide() } label: {
@@ -637,21 +666,7 @@ struct ProjectDetailView: View {
                     .transition(.opacity)
                     Rectangle().fill(Soot.line).frame(width: 1, height: 22).transition(.opacity)
                 }
-                BrandLogo(service: .slack, size: 18)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(project.slack.map { "#\($0.name)" } ?? "Slack").font(.system(size: 16, weight: .semibold))
-                        .foregroundStyle(Soot.ink).accessibilityAddTraits(.isHeader)
-                    Text(slackSubtitle).font(.system(size: 12)).foregroundStyle(Soot.muted)
-                        .contentTransition(.opacity)
-                }
-                Spacer()
-                if slackExpanded, let url = slackURL {
-                    Link(destination: url) { HStack(spacing: 4) { Text("Open in Slack"); Image(systemName: "arrow.up.right") } }
-                        .font(.system(size: 13, weight: .semibold)).foregroundStyle(Soot.lime)
-                        .handCursor()
-                        .help("Open the channel in Slack")
-                        .transition(.opacity)
-                }
+            }, accessory: { EmptyView() }, trailing: {
                 if project.slack != nil, !slackExpanded, loaded, lastRead != nil, !railPlan.caughtUp, railPlan.unread > 0 {
                     Button("Mark as read") { markAllRead() }
                         .buttonStyle(PressButton())
@@ -674,9 +689,11 @@ struct ProjectDetailView: View {
                     .keyboardShortcut("e", modifiers: [.command, .shift])
                     .transition(.opacity)
                 }
-            }
+            })
             if project.slack == nil {
-                EmptySection(title: "No Slack channel", message: "Link a channel to follow its conversation here.")
+                PanelEmpty(service: .slack, line: "Link a channel to read it here",
+                           primary: ("Link Slack", { link(.slack) }),
+                           primaryHelp: "Pick the Slack channel this project follows")
             } else if states[.slack] == .notConnected {
                 if missing.count > 1 {
                     ConnectPlaceholder(service: .slack, widths: [120, 260, 96, 220])
@@ -699,7 +716,7 @@ struct ProjectDetailView: View {
                 .accessibilityElement()
                 .accessibilityLabel("Loading messages")
             } else if messages.isEmpty {
-                EmptySection(title: "No messages yet", message: "Messages posted in #\(project.slack?.name ?? "") appear here.")
+                QuietEmpty(symbol: "bubble.left", text: "No messages yet")
             } else {
                 SlackThreadView(messages: messages, users: users, domain: app.slack?.domain,
                                 channelID: project.slack?.id, channelName: project.slack?.name, otherChannels: linkedChannels,
@@ -724,6 +741,7 @@ struct ProjectDetailView: View {
             }
         }
         .motion(Motion.ui, fade: true, value: loaded)
+        .motion(Motion.ui, fade: true, value: project.slack == nil)
         .sootPanel()
         // The panel's own frame is the mask of the move: nothing of the room shows outside it.
         .clipShape(RoundedRectangle(cornerRadius: 12))
@@ -850,6 +868,7 @@ struct ProjectDetailView: View {
     }
 
     private var slackSubtitle: String {
+        if project.slack == nil { return "No channel yet" }
         if slackExpanded { return "Conversation" }
         if !loaded { return "Latest messages" }
         let plan = railPlan

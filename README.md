@@ -66,7 +66,8 @@ Preview panel states from sample data (PR #4714, no network): `DEVER_SNAPSHOT_PR
 `DEVER_SNAPSHOT_SHEETS=1 DEVER_SNAPSHOT_SCREENS=0 DEVER_SNAPSHOT_STEP=preview DEVER_SNAPSHOT_PICKER="Pull request"` for the editor's step.
 Repository modes: `DEVER_SNAPSHOT_REPO_MODE=single|perProject|mixed[:owner/name]` runs under that mode (and workspace
 repository), `DEVER_SNAPSHOT_REPOS=owner/a,owner/b` gives the first project those repositories, and
-`DEVER_SNAPSHOT_SCROLL_END=1` adds each main screen scrolled to its end (`settings-dark-end.png` shows the Repositories section).
+`DEVER_SNAPSHOT_UNLINK=slack,linear,github,preview` runs as if the captured project had not linked those tools
+(nothing is written back). `DEVER_SNAPSHOT_SCROLL_END=1` adds each main screen scrolled to its end (`settings-dark-end.png` shows the Repositories section).
 Nothing is written back in these runs.
 
 ## Onboarding

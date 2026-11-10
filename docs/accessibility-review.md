@@ -226,6 +226,47 @@ code; contrast computed from the palette values.
   and "Clear search".
 - Not verified at runtime: VoiceOver's reading of the row summary and of the popover; the numeric
   counters and the reorder spring replayed at low speed.
+## Project page (one panel grammar)
+
+Scope: the project page's blocks after the redesign (`ProjectDetailView.swift`, `PreviewPanel.swift`,
+`ProjectPanels.swift`: `PanelHeader`, `PanelGlyph`, `PanelEmpty`, `QuietEmpty`; `ConnectPanelBody`),
+states complete, without Linear, without a preview, without Slack, no tool, Linear not connected,
+loading; dark and light. Findings and captures: `docs/reviews/project-page.md`. Names, focus and
+keyboard verified in code; contrast computed from the palette values. The empty tile is
+`Soot.ground` at 60 % over the surface: `#131313` dark, `#F8F8F7` light.
+
+| Pair | Dark | Light | Need |
+|---|---|---|---|
+| Empty-state line `Soot.ink` on the tile | 18.58:1 | 17.77:1 | 4.5 |
+| Panel title `Soot.ink` on surface | 17.40:1 | 18.88:1 | 4.5 |
+| Panel line, quiet empty line `Soot.muted` on surface / on the tile | 5.38 / 5.75:1 | 6.05 / 5.69:1 | 4.5 |
+| Primary label `Soot.limeInk` on lime (Link Linear, Link Slack, Link a repository, Add a preview, Connect X) | 16.55:1 | 7.08:1 | 4.5 |
+| Quiet button label `Soot.ink` on surface; its edge `Soot.edge` on the tile | 17.40 / 3.75:1 | 18.88 / 3.25:1 | 4.5 / 3 |
+| "Open ↗" and "+ Link a tool" `Soot.lime` on surface / on ground | 15.03 / 16.55:1 | 7.08 / 6.43:1 | 4.5 |
+| Tool logo in the tile `Soot.ink` on the tile (Slack keeps its colours) | 18.58:1 | 17.77:1 | 3 |
+| The tile against the surface | 1.07:1 | 1.06:1 | not relied on: the logo, the line and the button carry the state |
+
+- **Targets**: Link / Connect / Add a preview / No preview needed 36px high; "Open ↗" 28px with its
+  hover tile; "+ Link a tool" 28px; the tile itself is not a control.
+- **Names**: each button is its own words ("Link Linear", "Link Slack", "Link a repository", "Add a
+  preview", "No preview needed"), with the reason as a tooltip; the line beside it is read first, then
+  the buttons; panel titles are headers; the head's logo or glyph is decorative (`PanelGlyph` is
+  hidden, the title names the block); "Open ↗" reads "Open the project in Linear", "Open the pull
+  requests on GitHub", "Open the channel in Slack".
+- **Focus**: every new button is a `LimeButton` or a `QuietButton`, which carry the 2px lime
+  `FocusOutline`; the header links keep `HoverLink`'s outline. Order: title row (tool chips, Link a
+  tool, Refresh, Edit project), Preview (pill, then its action, then the alternative), Delivery or Pull
+  requests (Open, then the tile's button or the rows), Slack (Mark as read, full width, then the tile's
+  button or the messages). Link opens the editor sheet, which takes focus and gives it back on close.
+- **State without hue** (1.4.1): a missing tool is its logo, a sentence and a named button; the
+  preview's phase stays glyph and word; pull request state stays glyph and word.
+- **Reduce Motion**: the hand-overs (skeleton → tile or content, tile → content after linking) are
+  200 ms dissolves, which stay; the press scale of the buttons is off; nothing moves.
+- **Loading**: skeletons only, at the size of the rows they stand for; a tile for a tool that is not
+  linked shows from the first frame, since it does not depend on a load.
+- Not verified at runtime: VoiceOver's reading of the tile; the editor opening on the asked step from
+  each button; the stacked tile (line above the button) at widths other than the 420px rail.
+
 ## Motion (the animation sweep)
 
 Findings and rejections are in `docs/reviews/animations.md`; the vocabulary lives in

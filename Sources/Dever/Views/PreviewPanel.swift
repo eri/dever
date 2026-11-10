@@ -26,7 +26,7 @@ struct PreviewPanel: View {
     private var status: PreviewStatus? { state?.status }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 16) {
             headline
             if project.previewPullNumber == nil {
                 nonePart
@@ -65,9 +65,9 @@ struct PreviewPanel: View {
         .motion(Motion.ui, value: optionsOpen)
         .motion(Motion.ui, fade: true, value: status == nil)
         .motion(Motion.ui, value: actionError)
-        .padding(16)
-        .frame(maxWidth: .infinity, alignment: .topLeading)
-        .background(Soot.surface, in: RoundedRectangle(cornerRadius: 12))
+        // The invitation hands over to the preview when a pull request is picked.
+        .motion(Motion.ui, fade: true, value: project.previewPullNumber == nil)
+        .sootPanel()
         .task(id: "\(project.id)-\(project.previewPullNumber ?? 0)-\(app.github != nil)") {
             await store.load(project, app: app)
             if let o = status?.options { options = o }
@@ -91,17 +91,13 @@ struct PreviewPanel: View {
         }
     }
 
-    /// One line: the word "Preview", the pull request's number (a link), then on the right the
-    /// phase as glyph and word and when it changed. The run, the protection and the rest live
-    /// under More.
+    /// The panel's head: the globe, "Preview", the pull request's number as a pill (a link),
+    /// one quiet line (the pull request's title), and on the right the phase as glyph and word
+    /// and when it changed. The run, the protection and the rest live under More.
     private var headline: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "globe").font(.system(size: 14, weight: .semibold)).foregroundStyle(Soot.ink)
-                .accessibilityHidden(true)
-            Text("Preview").font(.system(size: 15, weight: .semibold)).foregroundStyle(Soot.ink)
-                .accessibilityAddTraits(.isHeader)
+        let s = status
+        return PanelHeader(symbol: "globe", title: "Preview", subtitle: subtitle, accessory: {
             if let number = project.previewPullNumber {
-                let s = status
                 HoverLink(destination: s?.pull.url ?? URL(string: "https://github.com/\(app.previewRepository(for: project) ?? "")/pull/\(number)")!) {
                     HStack(spacing: 6) {
                         IDPill(text: "#\(number)")
@@ -114,46 +110,37 @@ struct PreviewPanel: View {
                 .accessibilityLabel(s.map { "Pull request #\($0.pull.number), \($0.pull.title), \($0.pull.state.word)" } ?? "Pull request #\(number)")
                 .accessibilityHint("Opens on GitHub")
             }
-            Spacer(minLength: 12)
-            if let s = status {
-                PreviewPhaseGlyph(phase: s.phase, size: 13)
-                Text(s.phase.word).font(.system(size: 13, weight: .semibold)).foregroundStyle(Soot.ink)
-                    .contentTransition(.opacity).motion(Motion.ui, fade: true, value: s.phase)
-                if let at = s.updatedAt {
-                    Text(verbatim: "·").foregroundStyle(Soot.muted).accessibilityHidden(true)
-                    Text(timeLine(s.phase, at)).font(.system(size: 12)).foregroundStyle(Soot.muted).lineLimit(1)
+        }, trailing: {
+            if let s {
+                HStack(spacing: 6) {
+                    PreviewPhaseGlyph(phase: s.phase, size: 13)
+                    Text(s.phase.word).font(.system(size: 13, weight: .semibold)).foregroundStyle(Soot.ink)
+                        .contentTransition(.opacity).motion(Motion.ui, fade: true, value: s.phase)
+                    if let at = s.updatedAt {
+                        Text(verbatim: "·").foregroundStyle(Soot.muted).accessibilityHidden(true)
+                        Text(timeLine(s.phase, at)).font(.system(size: 12)).foregroundStyle(Soot.muted).lineLimit(1)
+                    }
                 }
             }
-        }
-        .frame(minHeight: 28)
+        })
+    }
+
+    /// The quiet line under the title: the pull request followed, or what the block is for.
+    private var subtitle: String {
+        if project.previewPullNumber == nil { return "A pull request's environment, from here" }
+        if let s = status { return PullTitle.split(s.pull.title).title }
+        return app.previewRepository(for: project).map(GitHubRepository.short) ?? "Pull request"
     }
 
     // MARK: No preview
 
-    /// No pull request yet: one line, the way to add one, and the way to say none is wanted.
+    /// No pull request yet: one line, the lime way to add one, the quiet way to say none is wanted.
     private var nonePart: some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(spacing: 12) { noneText; Spacer(minLength: 12); noneButtons }
-            VStack(alignment: .leading, spacing: 12) { noneText; noneButtons }
-        }
-    }
-
-    private var noneText: some View {
-        Text("Follow the preview of one of the repository's pull requests here: deploy, update and delete it without leaving Dever.")
-            .font(.system(size: 13)).foregroundStyle(Soot.muted).fixedSize(horizontal: false, vertical: true)
-    }
-
-    private var noneButtons: some View {
-        HStack(spacing: 8) {
-            Button("Add a preview", action: addPreview).buttonStyle(QuietButton())
-                .help("Choose the pull request whose preview this project follows")
-            Button("No preview needed", action: dismiss).buttonStyle(.plain)
-                .font(.system(size: 13, weight: .semibold)).foregroundStyle(Soot.lime)
-                .padding(.horizontal, 8).frame(height: 36).contentShape(Rectangle())
-                .modifier(FocusOutline(radius: Soot.radius))
-                .help("Hides this panel; pick a pull request later in Edit project to bring it back")
-        }
-        .fixedSize()
+        PanelEmpty(service: .github, line: "Follow a pull request's preview here",
+                   primary: ("Add a preview", addPreview),
+                   quiet: ("No preview needed", dismiss),
+                   primaryHelp: "Choose the pull request whose preview this project follows",
+                   quietHelp: "Hides this panel; pick a pull request later in Edit project to bring it back")
     }
 
     @ViewBuilder
