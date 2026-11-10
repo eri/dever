@@ -1170,16 +1170,14 @@ private struct ThreadPane: View {
                             MessageBody(message: parent, users: users, channels: channels, expanded: $parentOpen, foldedLines: 3)
                             if !parentOpen, (parent.text?.count ?? 0) > 160 || (parent.files?.isEmpty == false) || (parent.attachments?.isEmpty == false) {
                                 Button("Show more") { Motion.run(Motion.ui) { parentOpen = true } }
-                                    .buttonStyle(PressButton()).handCursor()
-                                    .font(.system(size: 12, weight: .semibold)).foregroundStyle(Soot.muted)
-                                    .modifier(FocusOutline(radius: 4))
+                                    .buttonStyle(TertiaryButton(tint: .muted, lift: Soot.ground, font: .system(size: 12, weight: .semibold)))
+                                    .padding(.leading, -8)
                             } else if parentOpen {
                                 MessageExtras(message: parent, channels: channels, users: users)
                                 if (parent.text?.count ?? 0) > 160 || (parent.files?.isEmpty == false) || (parent.attachments?.isEmpty == false) {
                                     Button("Show less") { Motion.run(Motion.ui) { parentOpen = false } }
-                                        .buttonStyle(PressButton()).handCursor()
-                                        .font(.system(size: 12, weight: .semibold)).foregroundStyle(Soot.muted)
-                                        .modifier(FocusOutline(radius: 4))
+                                        .buttonStyle(TertiaryButton(tint: .muted, lift: Soot.ground, font: .system(size: 12, weight: .semibold)))
+                                        .padding(.leading, -8)
                                 }
                             }
                     ReactionsBar(message: parent, customEmoji: customEmoji, users: users, actions: actions)
