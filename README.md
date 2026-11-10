@@ -54,6 +54,8 @@ How Dever loads, caches and refreshes what it shows, the freshness budget of eac
 checklist every feature answers (what it reads, writes and invalidates, its budget, its loading state):
 [docs/data-freshness.md](docs/data-freshness.md). The short rules are in [CLAUDE.md](CLAUDE.md).
 
+Unit tests for the data layer (the resource cache, pull request matching, checks): `swift test`.
+
 To see what a refresh costs, run with `DEVER_TRACE_REQUESTS=1`: every request to Slack, Linear and GitHub
 is printed to stderr with its status, size and duration, and the running total.
 

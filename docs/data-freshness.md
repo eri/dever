@@ -378,7 +378,15 @@ Safest and most felt first. Each phase ships on its own and leaves the app bette
 | --- | --- | --- |
 | 1 | **Done** | `Model/LookAgain.swift`, `Views/AgeNotice.swift`, `ProjectDetailView.load / keepCurrent`, `OverviewStore.refresh`, `Support/RequestLog.swift` |
 | 2 | **Done** | `GitHubClient.repository / mergedPulls / graphql`, ETags in `GitHubClient.send` |
-| 3 to 6 | Not started | |
+| 3, step 1: GitHub | **Done** | `Model/ResourceCache.swift` (the shared helper), `Model/GitHubStore.swift`; the Overview (`RepoCache`) and the project page (`derivePulls`, `loadGitHub`) read it |
+| 3, step 2: the Overview row derived from the stores | Not started | |
+| 3, step 3: Slack | Not started | |
+| 4 to 6 | Not started | |
+
+After step 1 of phase 3 a repository is read once for the Overview and every project page that follows
+it (a read within 20 s serves all of them), a project whose issues and repositories are already held
+opens without a skeleton for its work panel, an open project page follows the Overview's cycle, and a
+link to github.com marks its repository dirty. Unit tests: `swift test` (`Tests/DeverTests`).
 
 Measured after phase 2 on the same repository, with the app's own client code
 (`DEVER_TRACE_REQUESTS=1`): one repository costs **3 requests, 112 KB, 5.4 s** (open pull requests with

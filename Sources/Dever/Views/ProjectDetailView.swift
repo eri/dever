@@ -8,6 +8,7 @@ struct ProjectDetailView: View {
     let edit: () -> Void
 
     @ObservedObject private var issueStore = IssueStore.shared
+    @ObservedObject private var github = GitHubStore.shared
     @State private var messages: [SlackMessage] = []
     @State private var users: [String: SlackUser] = [:]
     @State private var shownMessages = 8
@@ -28,6 +29,8 @@ struct ProjectDetailView: View {
     @State private var customEmoji: [String: URL] = [:]
     @State private var previewFile: SlackFile?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// The project's pull requests, worked out from `GitHubStore` each time it or the issues
+    /// change (`derivePulls`): the matching is too much to redo on every render.
     @State private var pulls: [ProjectPullRequests.Match] = []
     @State private var pullsScoped = false
     @State private var merged: [MergedPull] = []
@@ -141,6 +144,14 @@ struct ProjectDetailView: View {
         .modifier(FilePreviewHost(preview: $previewFile))
         .navigationTitle(project.name)
         .windowTitleHidden()
+        // What the stores already hold shows at once: no skeleton for a project seen before.
+        .onAppear { if derivePulls() { lastLoaded[.github] = githubReadAt } }
+        // The repository was read again, here or by the Overview's cycle: the page follows.
+        .onChange(of: github.revision) { _, _ in
+            guard derivePulls(), let at = githubReadAt else { return }
+            lastLoaded[.github] = at
+            if !repos.contains(where: { github.failure($0) != nil }) { refreshFailed[.github] = nil }
+        }
         .task {
             // Back from an issue page with data read a moment ago: nothing to fetch.
             if LookAgain.shared.isDue(lastLoad) { await load(quiet: loaded) }
@@ -319,7 +330,7 @@ struct ProjectDetailView: View {
                            quiet: app.repositoryMode == .single ? nil : ("Link a repository", { link(.github) }),
                            primaryHelp: "Pick the Linear project whose issues this project tracks",
                            quietHelp: "Pick the GitHub repositories this project follows")
-            } else if !loaded, states[.linear] == nil, states[.github] == nil {
+            } else if !workLoaded, states[.linear] == nil, states[.github] == nil {
                 workSkeleton
             } else {
                 if project.linear != nil { linearPart }
@@ -334,7 +345,7 @@ struct ProjectDetailView: View {
         }
         // Skeleton, invitation and content hand over with a dissolve, on load and when the
         // editor links the missing tool.
-        .motion(Motion.ui, fade: true, value: loaded)
+        .motion(Motion.ui, fade: true, value: workLoaded)
         .motion(Motion.ui, fade: true, value: project.linear == nil)
         .motion(Motion.ui, fade: true, value: repos.isEmpty)
         .sootPanel()
@@ -692,7 +703,7 @@ struct ProjectDetailView: View {
         async let preview: Void = PreviewStore.shared.load(project, app: app, force: force)
         // GitHub needs the Linear issues to tell which pull requests belong to the project.
         await loadLinear(force: force)
-        await loadGitHub()
+        await loadGitHub(force: force)
         await s
         await preview
     }
@@ -881,42 +892,67 @@ struct ProjectDetailView: View {
             })
     }
 
-    private func loadGitHub() async {
+    /// The work panel has what it needs: the page loaded, or the stores already hold the
+    /// project's issues and repositories from an earlier visit or the Overview's cycle.
+    private var workLoaded: Bool {
+        if loaded { return true }
+        let issuesHeld = project.linear.map { issueStore.projects[$0.id] != nil } ?? true
+        let reposHeld = repos.allSatisfy { github.repository($0) != nil }
+        return issuesHeld && reposHeld && !(project.linear == nil && repos.isEmpty)
+    }
+
+    /// The issues the project's pull requests are matched against; nil without a Linear
+    /// project, or while Linear cannot be read.
+    private var issueRefs: [IssueReference]? {
+        project.linear == nil || states[.linear] != nil ? nil : issues
+    }
+
+    /// When the least recently read of the project's repositories was read.
+    private var githubReadAt: Date? { repos.compactMap { github.fetchedAt($0) }.min() }
+
+    /// Works the project's pull requests out of what `GitHubStore` holds. False while one of
+    /// its repositories has not been read yet (nothing is changed then).
+    @discardableResult
+    private func derivePulls() -> Bool {
+        let repos = self.repos
+        guard !repos.isEmpty, app.github != nil else { return false }
+        let refs = issueRefs
+        var derived = ProjectPulls()
+        // The shared repository's pull requests belong to every project: without issues to
+        // match, none of them is this project's.
+        if app.followsSharedRepository(project), refs == nil {
+            derived.scoped = true
+        } else {
+            var held: [(name: String, data: GitHubStore.Repository)] = []
+            for repo in repos {
+                guard let data = github.repository(repo) else { return false }
+                held.append((repo, data))
+            }
+            derived = ProjectPulls(repositories: held, issues: refs, wholeRepository: app.showsWholeRepository(project))
+        }
+        pulls = derived.open
+        pullsScoped = derived.scoped
+        merged = derived.merged
+        for m in merged { issueStore.pullsByURL[m.url] = .init(number: m.number, title: m.title ?? "", state: .merged) }
+        for p in pulls {
+            issueStore.pullsByURL[p.pull.html_url] = .init(number: p.pull.number, title: p.pull.title,
+                                                           state: p.pull.draft == true ? .draft : .open)
+        }
+        return true
+    }
+
+    /// Reads the project's repositories through `GitHubStore` (shared with the Overview: one
+    /// read within 20 s serves both), then works its pull requests out.
+    private func loadGitHub(force: Bool = false) async {
         let repos = self.repos
         guard !repos.isEmpty, states[.github] != .notConnected else { return }
         do {
             let client = try app.githubClient()
-            let refs: [IssueReference]? = project.linear == nil || states[.linear] != nil ? nil : issues
-            // The shared repository's pull requests belong to every project: without issues to
-            // match, none of them is this project's.
-            if app.followsSharedRepository(project), refs == nil {
-                pulls = []; merged = []; pullsScoped = true
-                succeeded(.github)
-                return
+            if !(app.followsSharedRepository(project) && issueRefs == nil) {
+                // One repository after the other: a project rarely follows more than a few.
+                for repo in repos { _ = try await github.load(repo, client: client, maxAge: force ? 0 : RepoCache.maxAge) }
             }
-            let whole = app.showsWholeRepository(project)
-            var allPulls: [ProjectPullRequests.Match] = []
-            var allMerged: [MergedPull] = []
-            var scoped = false
-            // One repository after the other: a project rarely follows more than a few.
-            for repo in repos {
-                async let recentlyMerged = client.mergedPulls(repo)
-                let prs = ProjectPullRequests(pulls: try await client.pulls(repo), issues: refs,
-                                              wholeRepository: whole)
-                allPulls += prs.matches
-                scoped = scoped || prs.scoped
-                allMerged += MergedPull.list(repo: repo, recentlyMerged: try await recentlyMerged, issues: refs,
-                                             wholeRepository: whole,
-                                             open: Set(prs.matches.map(\.pull.number)))
-            }
-            pulls = allPulls
-            pullsScoped = scoped
-            merged = allMerged.sorted { ($0.mergedAt ?? .distantPast) > ($1.mergedAt ?? .distantPast) }
-            for m in merged { issueStore.pullsByURL[m.url] = .init(number: m.number, title: m.title ?? "", state: .merged) }
-            for p in pulls {
-                issueStore.pullsByURL[p.pull.html_url] = .init(number: p.pull.number, title: p.pull.title,
-                                                               state: p.pull.draft == true ? .draft : .open)
-            }
+            derivePulls()
             succeeded(.github)
             app.succeeded(.github)
         } catch { failed(.github, error) }

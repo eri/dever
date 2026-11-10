@@ -9,6 +9,12 @@ let package = Package(
             name: "Dever",
             path: "Sources/Dever",
             swiftSettings: [.swiftLanguageMode(.v5)]
-        )
+        ),
+        .testTarget(
+            name: "DeverTests",
+            dependencies: ["Dever"],
+            path: "Tests/DeverTests",
+            swiftSettings: [.swiftLanguageMode(.v5)]
+        ),
     ]
 )

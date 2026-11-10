@@ -239,7 +239,7 @@ enum Naming {
 
 @MainActor
 final class AppState: ObservableObject {
-    @Published var github: GitHubCredentials? { didSet { saveCredentials(); expired.remove(.github) } }
+    @Published var github: GitHubCredentials? { didSet { saveCredentials(); expired.remove(.github); GitHubStore.shared.reset() } }
     @Published var slack: SlackCredentials? { didSet { saveCredentials(); expired.remove(.slack) } }
     @Published var linear: LinearCredentials? { didSet { saveCredentials(); expired.remove(.linear) } }
     @Published var projects: [Project] = [] { didSet { saveProjects() } }

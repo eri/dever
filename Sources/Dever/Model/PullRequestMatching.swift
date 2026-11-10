@@ -151,3 +151,25 @@ struct MergedPull: Identifiable {
         return items
     }
 }
+
+/// A project's pull requests across its repositories, worked out from what `GitHubStore`
+/// holds for each: the open ones matched to its issues, the merged ones, newest first.
+struct ProjectPulls {
+    var open: [ProjectPullRequests.Match] = []
+    var merged: [MergedPull] = []
+    /// True when the lists are limited to the project's Linear issues.
+    var scoped = false
+
+    init() {}
+
+    init(repositories: [(name: String, data: GitHubStore.Repository)], issues: [IssueReference]?, wholeRepository: Bool) {
+        for (name, data) in repositories {
+            let prs = ProjectPullRequests(pulls: data.state.pulls, issues: issues, wholeRepository: wholeRepository)
+            open += prs.matches
+            scoped = scoped || prs.scoped
+            merged += MergedPull.list(repo: name, recentlyMerged: data.merged, issues: issues,
+                                      wholeRepository: wholeRepository, open: Set(prs.matches.map(\.pull.number)))
+        }
+        merged.sort { ($0.mergedAt ?? .distantPast) > ($1.mergedAt ?? .distantPast) }
+    }
+}

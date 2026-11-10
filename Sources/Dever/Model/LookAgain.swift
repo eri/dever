@@ -47,6 +47,9 @@ final class LookAgain {
         guard let host = url.host()?.lowercased() else { return }
         let tools = ["github.com", "linear.app", "slack.com", PreviewTarget.domain]
         if tools.contains(where: { host == $0 || host.hasSuffix("." + $0) }) { dirty = true }
+        // A pull request, a run or a branch of a repository: what the store holds of it may
+        // be acted on there, so the next reader asks GitHub whatever its age.
+        if host == "github.com" { GitHubStore.shared.invalidate(GitHubRepository.name(fromURL: url.absoluteString)) }
     }
 
     /// Whether data fetched at `fetched` should be refreshed now that someone looks again.

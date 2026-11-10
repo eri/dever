@@ -466,10 +466,7 @@ final class OverviewStore: ObservableObject {
         async -> Result<ProjectSnapshot.GitHubStats, Error> {
         do {
             let repos = try repos.get()
-            // Both lists at once; the merged one is memoized for the lines below.
-            async let merged = try? repos.mergedPulls(repo)
             let state = try await repos.state(repo)
-            _ = await merged
             let prs = ProjectPullRequests(pulls: state.pulls, issues: issues, wholeRepository: whole)
             let attention = await Self.attention(prs, repo: repo, repos: repos, issues: issues, whole: whole,
                                                  login: login)
@@ -548,27 +545,19 @@ final class OverviewStore: ObservableObject {
     }()
 }
 
-/// Memoizes GitHub requests during one refresh, so projects sharing a repository
-/// (a monorepo) fetch its pull requests only once.
-actor RepoCache {
-    private let client: GitHubClient
-    private var tasks: [String: Task<Any, Error>] = [:]
-
-    init(client: GitHubClient) { self.client = client }
-
-    private func value<T>(_ key: String, _ fetch: @escaping @Sendable () async throws -> T) async throws -> T {
-        if let task = tasks[key] { return try await task.value as! T }
-        let task = Task<Any, Error> { try await fetch() }
-        tasks[key] = task
-        return try await task.value as! T
-    }
+/// Reads repositories through `GitHubStore` during one refresh: projects sharing a repository
+/// (a monorepo) read it once, and a repository a project page read a moment ago is not asked again.
+struct RepoCache {
+    let client: GitHubClient
+    /// A cycle takes what was read within this long, by itself or by a project page.
+    static let maxAge: TimeInterval = 20
 
     func state(_ repo: String) async throws -> GitHubRepositoryState {
-        try await value("open:\(repo)") { [client] in try await client.repository(repo) }
+        try await GitHubStore.shared.load(repo, client: client, maxAge: Self.maxAge).state
     }
 
     func mergedPulls(_ repo: String) async throws -> [GitHubPull] {
-        try await value("merged:\(repo)") { [client] in try await client.mergedPulls(repo) }
+        try await GitHubStore.shared.load(repo, client: client, maxAge: Self.maxAge).merged
     }
 }
 
