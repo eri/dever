@@ -1,10 +1,11 @@
 import SwiftUI
 
-// The home screen in the onboarding's spirit: one table of projects, every row the same
-// shape (mark and name, then one cell per tool, the preview, the target date, the health),
-// a quiet line of counts above it, and the two actions on the right. Order, grouping,
-// density and columns come from Settings › Overview (`AppState.overview`), never from
-// controls scattered on the page; the small View button opens those same settings.
+// The home screen answers "what is waiting for me": one list of projects, pinned first, then
+// the ones where something waits for you, then the most recently active. A row is the project
+// (mark, name, "N for you"), the optional columns from Settings › Overview, and one status at
+// the trailing edge: what blocks it, or how much has shipped, or the one link it lacks. Under
+// a project with things waiting, those things are listed, one line each, and open inside the
+// project's page. A project with nothing waiting stays one line and says what happened last.
 
 struct OverviewView: View {
     @EnvironmentObject var app: AppState
@@ -12,6 +13,8 @@ struct OverviewView: View {
     let open: (Project) -> Void
     let newProject: () -> Void
     let importFrom: (ImportSheet.Source) -> Void
+    /// Opens the project's editor on a step: the one link an incomplete project lacks.
+    let link: (Project, ProjectEditorSheet.Step) -> Void
 
     @State private var search = ""
     @State private var showView = false
@@ -26,6 +29,8 @@ struct OverviewView: View {
         let project: Project
         let status: ProjectStatus
         let snapshot: ProjectSnapshot?
+        let waiting: [WaitingItem]
+        let last: (text: String, date: Date)?
         var id: UUID { project.id }
 
         /// Every Linear issue is done: nothing left to ship.
@@ -45,13 +50,18 @@ struct OverviewView: View {
     private var settings: OverviewSettings { app.overview }
 
     private var entries: [Entry] {
-        app.projects.map { Entry(project: $0, status: $0.status(store.snapshots[$0.id]), snapshot: store.snapshots[$0.id]) }
+        app.projects.map { p in
+            let s = store.snapshots[p.id]
+            return Entry(project: p, status: p.status(s), snapshot: s,
+                         waiting: s?.waiting(channel: p.slack?.name) ?? [],
+                         last: s?.lastActivity(channel: p.slack?.name))
+        }
     }
 
     private var finishedCount: Int { entries.filter(\.isFinished).count }
+    private var waitingCount: Int { entries.reduce(0) { $0 + $1.waiting.count } }
 
-    /// The rows after the settings and the search: hidden finished projects out, favourites
-    /// first, then the chosen order.
+    /// The rows after the settings and the search: hidden finished projects out, then the order.
     private var visible: [Entry] {
         entries
             .filter { !settings.hideFinished || !$0.isFinished }
@@ -59,22 +69,18 @@ struct OverviewView: View {
             .sorted(by: ordered)
     }
 
+    /// Pinned first, always. Then, for "For you", the projects where something waits; then the
+    /// most recently active; the name settles ties.
     private func ordered(_ a: Entry, _ b: Entry) -> Bool {
-        // Pinned projects come first, whatever the order: that is what a pin is for.
         if (a.project.favorite == true) != (b.project.favorite == true) {
             return a.project.favorite == true
         }
-        switch settings.sort {
-        case .name:
-            break
-        case .activity:
-            let x = a.snapshot?.slack?.lastActivity, y = b.snapshot?.slack?.lastActivity
+        if settings.sort == .forYou, a.waiting.isEmpty != b.waiting.isEmpty {
+            return !a.waiting.isEmpty
+        }
+        if settings.sort != .name {
+            let x = a.last?.date, y = b.last?.date
             if x != y { return (x ?? .distantPast) > (y ?? .distantPast) }
-        case .health:
-            if a.status != b.status { return a.status < b.status }
-        case .targetDate:
-            let x = a.snapshot?.linear?.targetDate, y = b.snapshot?.linear?.targetDate
-            if x != y { return (x ?? .distantFuture) < (y ?? .distantFuture) }
         }
         return a.project.name.localizedCaseInsensitiveCompare(b.project.name) == .orderedAscending
     }
@@ -103,9 +109,10 @@ struct OverviewView: View {
         return out
     }
 
-    /// Changes whenever a row moves, so the move can animate.
+    /// Changes whenever a row moves or its items change, so the move can animate.
     private var order: String {
-        sections.map { "\($0.id)=" + $0.entries.map(\.id.uuidString).joined(separator: ",") }.joined(separator: ";")
+        sections.map { "\($0.id)=" + $0.entries.map { "\($0.id.uuidString):\($0.waiting.count)" }.joined(separator: ",") }
+            .joined(separator: ";")
     }
 
     var body: some View {
@@ -117,7 +124,7 @@ struct OverviewView: View {
                     VStack(alignment: .leading, spacing: 20) {
                         head.zIndex(1)
                         table
-                        }
+                    }
                     .padding(.horizontal, 28)
                     .padding(.vertical, 24)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -125,8 +132,8 @@ struct OverviewView: View {
                 .searchable(text: $search, placement: .toolbar, prompt: "Search projects")
                 // A click anywhere else in the window closes the Add-many menu.
                 .closesOnOutsideClick(showMany) { Motion.run(Motion.ui, fade: true) { showMany = false } }
-                }
-                }
+            }
+        }
         .background(Soot.ground)
         .navigationTitle("Overview")
         .windowTitleHidden()
@@ -140,7 +147,7 @@ struct OverviewView: View {
         }
     }
 
-    // MARK: Head: the title, the counts, the actions
+    // MARK: Head: the title, one quiet line, the actions
 
     private var head: some View {
         HStack(alignment: .top, spacing: 16) {
@@ -176,17 +183,13 @@ struct OverviewView: View {
         }
     }
 
-    /// The counts in one quiet line: how many projects, how many in each state that has any,
-    /// and how fresh the numbers are. Each number counts up or down as it changes.
+    /// How many projects, how many things wait for you (when any), how fresh it is.
     private var summary: some View {
         HStack(spacing: 0) {
             Count(n: app.projects.count, word: app.projects.count == 1 ? "project" : "projects")
-            ForEach([ProjectStatus.needsAttention, .quiet, .incomplete, .notConnected, .onTrack], id: \.self) { status in
-                let n = entries.filter { $0.status == status }.count
-                if n > 0 {
-                    Text(" · ").accessibilityHidden(true)
-                    Count(n: n, word: status.label.lowercased())
-                }
+            if waitingCount > 0 {
+                Text(" · ").accessibilityHidden(true)
+                Count(n: waitingCount, word: "for you")
             }
             if settings.hideFinished, finishedCount > 0 {
                 Text(" · ").accessibilityHidden(true)
@@ -212,11 +215,11 @@ struct OverviewView: View {
         }
     }
 
-    // MARK: The table
+    // MARK: The list
 
     private var table: some View {
         VStack(spacing: 0) {
-            ColumnHeader(columns: settings.shownColumns)
+            if !settings.shownColumns.isEmpty { ColumnHeader(columns: settings.shownColumns) }
             if visible.isEmpty {
                 filteredEmpty
             }
@@ -226,10 +229,15 @@ struct OverviewView: View {
                         .transition(.opacity)
                 }
                 ForEach(Array(section.entries.enumerated()), id: \.element.id) { index, entry in
-                    ProjectRow(entry: entry, columns: settings.shownColumns, density: settings.density,
-                               favorite: Binding(get: { entry.project.favorite == true },
-                                                 set: { app.setFavorite(entry.project, $0) }),
-                               open: { open(entry.project) })
+                    ProjectBlock(entry: entry, columns: settings.shownColumns, density: settings.density,
+                                 favorite: Binding(get: { entry.project.favorite == true },
+                                                   set: { app.setFavorite(entry.project, $0) }),
+                                 open: { open(entry.project) },
+                                 openItem: { item in
+                                     ProjectFocus.set(item.target, for: entry.project.id)
+                                     open(entry.project)
+                                 },
+                                 link: { link(entry.project, $0) })
                         .opacity(appeared ? 1 : 0)
                         .offset(y: appeared || reduceMotion ? 0 : 8)
                         .animation(.easeOut(duration: 0.3).delay(appeared ? 0 : Double(min(index, 12)) * 0.04), value: appeared)
@@ -240,7 +248,7 @@ struct OverviewView: View {
         .padding(.horizontal, 8)
         .padding(.vertical, 8)
         .background(Soot.surface, in: RoundedRectangle(cornerRadius: 12))
-        .animation(reduceMotion ? nil : .spring(response: 0.4, dampingFraction: 0.85), value: order)
+        .animation(reduceMotion ? nil : Motion.move, value: order)
         .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: settings.density)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Projects")
@@ -451,10 +459,14 @@ private struct MenuRow: View {
 /// Column widths and gaps shared by the header and the rows, so every cell lines up.
 private enum Grid {
     static let gap: CGFloat = 14
-    /// The mark, the name and the tool logos; takes what the other columns leave.
-    static let nameMin: CGFloat = 140
-    /// The pin slot at the trailing edge.
+    /// The mark, the name, the "for you" chip; takes what the other columns leave.
+    static let nameMin: CGFloat = 180
+    /// The status at the trailing edge.
+    static let status: CGFloat = 168
+    /// The pin slot after it.
     static let pin: CGFloat = 24
+    /// Where an item's icon starts: under the project's name.
+    static let itemIndent: CGFloat = 12 + 28 + 10
 }
 
 private struct ColumnHeader: View {
@@ -465,6 +477,7 @@ private struct ColumnHeader: View {
             ForEach(columns) { column in
                 Text(column.label).frame(width: column.width, alignment: .leading).help(column.detail)
             }
+            Text("Status").frame(width: Grid.status, alignment: .leading)
             Color.clear.frame(width: Grid.pin)
         }
         .font(.system(size: 12, weight: .semibold))
@@ -475,7 +488,7 @@ private struct ColumnHeader: View {
     }
 }
 
-/// A group's label and its count, as a quiet row inside the table.
+/// A group's label and its count, as a quiet row inside the list.
 private struct GroupRow: View {
     let label: String
     let count: Int
@@ -494,6 +507,77 @@ private struct GroupRow: View {
     }
 }
 
+/// A project's row and, under it, what waits for you there: three lines at most, then
+/// "Show all".
+private struct ProjectBlock: View {
+    let entry: OverviewView.Entry
+    let columns: [OverviewSettings.Column]
+    let density: OverviewSettings.Density
+    @Binding var favorite: Bool
+    let open: () -> Void
+    let openItem: (WaitingItem) -> Void
+    let link: (ProjectEditorSheet.Step) -> Void
+    @State private var expanded = false
+
+    private var items: [WaitingItem] { expanded ? entry.waiting : Array(entry.waiting.prefix(3)) }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            ProjectRow(entry: entry, columns: columns, density: density, favorite: $favorite, open: open, link: link)
+            if !entry.waiting.isEmpty {
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(items) { item in
+                        ItemRow(item: item, density: density) { openItem(item) }
+                            .transition(Motion.rise)
+                    }
+                    if entry.waiting.count > 3 {
+                        Button(expanded ? "Show fewer" : "Show all \(entry.waiting.count)") {
+                            Motion.run(Motion.ui) { expanded.toggle() }
+                        }
+                        .buttonStyle(TertiaryButton(tint: .muted, lift: Soot.ground, font: .system(size: 12, weight: .semibold), height: 26))
+                        .padding(.leading, Grid.itemIndent - 8)
+                        .accessibilityLabel(expanded ? "Show fewer for \(entry.project.name)" : "Show all \(entry.waiting.count) for \(entry.project.name)")
+                    }
+                }
+                .padding(.bottom, 6)
+                .accessibilityElement(children: .contain)
+                .accessibilityLabel("Waiting for you in \(entry.project.name)")
+            }
+        }
+    }
+}
+
+/// One thing waiting for you: its icon, one sentence, how long ago. Opens it inside Dever.
+private struct ItemRow: View {
+    let item: WaitingItem
+    let density: OverviewSettings.Density
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 10) {
+                Image(systemName: item.symbol)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(item.kind == .mention ? Soot.lime : Soot.muted)
+                    .frame(width: 16)
+                    .accessibilityHidden(true)
+                Text(item.text).font(.system(size: 13)).foregroundStyle(Soot.ink).lineLimit(1).truncationMode(.tail)
+                Text("· \(Brief.ago(item.date))").font(.system(size: 12)).foregroundStyle(Soot.muted).monospacedDigit()
+                    .fixedSize()
+                    .help(item.date.formatted(date: .abbreviated, time: .shortened))
+                Spacer(minLength: 12)
+            }
+            .padding(.leading, Grid.itemIndent)
+            .padding(.trailing, 12 + Grid.pin + Grid.gap)
+            .frame(height: density == .compact ? 28 : 32)
+        }
+        .buttonStyle(RowButton(lift: .ground))
+        .help(item.text)
+        .accessibilityLabel("\(item.text), \(item.date.formatted(.relative(presentation: .named)))")
+        .accessibilityHint(item.kind == .review ? "Opens the pull request in the project" : "Opens the message in the project")
+    }
+}
+
 private struct ProjectRow: View {
     @EnvironmentObject var app: AppState
     let entry: OverviewView.Entry
@@ -501,6 +585,7 @@ private struct ProjectRow: View {
     let density: OverviewSettings.Density
     @Binding var favorite: Bool
     let open: () -> Void
+    let link: (ProjectEditorSheet.Step) -> Void
     @ObservedObject private var previews = PreviewStore.shared
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var hovering = false
@@ -516,50 +601,53 @@ private struct ProjectRow: View {
                 ForEach(columns) { column in
                     cell(column).frame(width: column.width, alignment: .leading)
                 }
-                // Room for the pin, which sits on top of the row so it takes its own click.
+                // Room for the status and the pin, which sit on top of the row: an incomplete
+                // project's link button and the pin take their own clicks.
+                Color.clear.frame(width: Grid.status)
                 Color.clear.frame(width: Grid.pin)
             }
             .padding(.horizontal, 12)
             .frame(height: density.rowHeight)
         }
         .buttonStyle(RowButton(lift: .ground))
-        .overlay(alignment: .trailing) { pin.padding(.trailing, 12) }
+        .overlay(alignment: .trailing) {
+            HStack(spacing: Grid.gap) {
+                status.frame(width: Grid.status, alignment: .leading)
+                pin
+            }
+            .padding(.trailing, 12)
+        }
         .onHover { hovering = $0 }
         .contextMenu {
             Button("Open \(project.name)", action: open)
             Button(favorite ? "Unpin from top" : "Pin to top") { favorite.toggle() }
         }
         .animation(reduceMotion ? nil : .easeOut(duration: 0.25), value: loaded)
-        .accessibilityElement(children: .ignore)
+        .accessibilityElement(children: .combine)
         .accessibilityLabel(summary)
         .accessibilityHint("Opens the project")
     }
 
-    /// The row in words, in column order, for VoiceOver.
+    /// The row in words for VoiceOver: name, what waits, the columns, the status.
     private var summary: String {
         var parts = [project.name + (favorite ? ", pinned" : "")]
+        if !entry.waiting.isEmpty { parts.append("\(entry.waiting.count) for you") }
+        else if let last = entry.last { parts.append("\(last.text), \(last.date.formatted(.relative(presentation: .named)))") }
         for column in columns {
             switch column {
             case .slack:
-                if let s = snapshot?.slack {
-                    parts.append("Slack: \(s.messagesThisWeek) messages this week" + (s.lastActivity.map { ", last \($0.formatted(.relative(presentation: .named)))" } ?? ""))
-                } else if project.slack == nil { parts.append("no Slack channel") }
+                if let n = snapshot?.slack?.unread { parts.append(n == 0 ? "Slack all read" : "\(n) unread in Slack") }
             case .linear:
-                if let d = snapshot?.delivery { parts.append("Linear: \(d.shipped) of \(d.total) shipped") }
-                else if project.linear == nil { parts.append("no Linear project") }
+                if let d = snapshot?.delivery, d.total > 0 { parts.append("Linear: \(d.shipped) of \(d.total) shipped") }
             case .github:
                 if let g = snapshot?.github { parts.append("GitHub: pipeline \(PipelineGlyph.word(g.pipeline)), \(g.openPRs) open pull requests") }
-                else if snapshot?.githubNeedsLinear == true { parts.append("GitHub: needs a Linear project to find its pull requests") }
             case .preview:
                 if let phase = previews.state(for: project)?.status?.phase { parts.append("preview \(phase.word.lowercased())") }
             case .target:
-                if let t = snapshot?.linear?.targetDate {
-                    parts.append("due \(t.formatted(.dateTime.day().month(.wide)))" + (overdue ? ", past" : ""))
-                }
-            case .health:
-                parts.append(entry.status.label)
+                if let t = snapshot?.linear?.targetDate { parts.append("due \(t.formatted(.dateTime.day().month(.wide)))") }
             }
         }
+        parts.append(statusWords)
         return parts.joined(separator: ", ")
     }
 
@@ -570,14 +658,20 @@ private struct ProjectRow: View {
             ProjectMark(name: project.name, size: density == .compact ? 24 : 28)
             Text(project.name).font(.system(size: 14, weight: .medium)).foregroundStyle(Soot.ink)
                 .lineLimit(1).truncationMode(.tail).help(project.name)
-            HStack(spacing: 5) {
-                if project.slack != nil { BrandLogo(service: .slack, size: 11).foregroundStyle(Soot.muted) }
-                if project.linear != nil { BrandLogo(service: .linear, size: 11).foregroundStyle(Soot.muted) }
-                if !app.repositories(for: project).isEmpty { BrandLogo(service: .github, size: 11).foregroundStyle(Soot.muted) }
+                .layoutPriority(1)
+            if !entry.waiting.isEmpty {
+                ForYouChip(count: entry.waiting.count)
+                    .transition(Motion.pop)
+            } else if let last = entry.last {
+                Text("\(last.text) · \(Brief.ago(last.date))")
+                    .font(.system(size: 12)).foregroundStyle(Soot.muted).lineLimit(1).truncationMode(.tail)
+                    .help("\(last.text), \(last.date.formatted(.relative(presentation: .named)))")
+                    .transition(.opacity)
+            } else if !loaded {
+                Skeleton(width: 96, height: 10)
             }
-            .accessibilityHidden(true)
-            .padding(.leading, 2)
         }
+        .motion(Motion.ui, value: entry.waiting.count)
     }
 
     /// The pin: always shown for a favourite, otherwise on hover or keyboard focus.
@@ -585,7 +679,96 @@ private struct ProjectRow: View {
         PinButton(on: $favorite, visible: favorite || hovering, name: project.name)
     }
 
-    // MARK: Cells
+    // MARK: Status: what blocks, the one link missing, or how much has shipped
+
+    private enum Status {
+        case loading
+        case link(ProjectEditorSheet.Step, String)
+        case blocked(symbol: String, tint: Color, text: String, help: String)
+        case shipped(Delivery)
+        case quiet(String)
+    }
+
+    private var overdue: Bool {
+        guard let t = snapshot?.linear?.targetDate, let l = snapshot?.linear else { return false }
+        return t < Calendar.current.startOfDay(for: Date()) && l.done < l.total
+    }
+
+    private var current: Status {
+        if project.linear == nil { return .link(.linear, "Link Linear") }
+        if project.slack == nil { return .link(.slack, "Link Slack") }
+        guard let s = snapshot else { return .loading }
+        if s.github?.pipeline == .failing {
+            let repos = s.github?.failingRepositories ?? []
+            return .blocked(symbol: "xmark.circle.fill", tint: Theme.negative, text: "CI failing",
+                            help: repos.isEmpty ? "The pipeline fails" : "Failing in \(repos.joined(separator: ", "))")
+        }
+        if previews.state(for: project)?.status?.phase == .failed {
+            return .blocked(symbol: "xmark.circle.fill", tint: Theme.negative, text: "Preview failed",
+                            help: "The preview of pull request #\(project.previewPullNumber ?? 0) failed to deploy")
+        }
+        if overdue, let t = s.linear?.targetDate {
+            return .blocked(symbol: "exclamationmark.circle.fill", tint: Theme.negative, text: "Past due date",
+                            help: "Due \(t.formatted(.dateTime.day().month(.wide))), issues still open")
+        }
+        if let w = s.github?.longWait {
+            return .blocked(symbol: "clock.fill", tint: Theme.chart3, text: "#\(w.number) waiting \(Brief.ago(w.since))",
+                            help: "Pull request #\(w.number) has waited for a review since \(w.since.formatted(.relative(presentation: .named)))")
+        }
+        if let state = s.errors[.linear], state.needsConnecting { return .link(.linear, "Reconnect Linear") }
+        if let d = s.delivery {
+            return d.total == 0 ? .quiet("No issues") : .shipped(d)
+        }
+        return .quiet("—")
+    }
+
+    private var statusWords: String {
+        switch current {
+        case .loading: "loading"
+        case .link(_, let title): "missing a link: \(title)"
+        case .blocked(_, _, let text, _): text
+        case .shipped(let d): "\(d.shipped) of \(d.total) shipped"
+        case .quiet(let text): text == "—" ? "" : text
+        }
+    }
+
+    @ViewBuilder private var status: some View {
+        switch current {
+        case .loading:
+            HStack(spacing: 8) { Skeleton(width: 40, height: 6, radius: 3); Skeleton(width: 64, height: 12) }
+        case .link(let step, let title):
+            Button { link(step) } label: {
+                Label(title, systemImage: title.hasPrefix("Reconnect") ? "arrow.clockwise" : "link")
+                    .labelStyle(.titleAndIcon)
+            }
+            .buttonStyle(SecondaryButton(size: .panel))
+            .fixedSize()
+            .help(title.hasPrefix("Reconnect") ? "Reconnect Linear in Settings" : "\(title) to see what is left to ship")
+            .transition(.opacity)
+        case .blocked(let symbol, let tint, let text, let help):
+            HStack(spacing: 6) {
+                Image(systemName: symbol).font(.system(size: 12, weight: .semibold)).foregroundStyle(tint)
+                    .accessibilityHidden(true)
+                Text(text).font(.system(size: 13, weight: .medium)).foregroundStyle(Soot.ink).lineLimit(1)
+            }
+            .help(help)
+            .transition(.opacity)
+        case .shipped(let d):
+            HStack(spacing: 8) {
+                ShipBar(delivery: d).frame(width: 40)
+                Text("\(d.shipped)/\(d.total) shipped").font(.system(size: 13)).foregroundStyle(Soot.ink).monospacedDigit()
+                    .contentTransition(.numericText(value: Double(d.shipped)))
+                    .animation(reduceMotion ? nil : .easeOut(duration: 0.25), value: d.shipped)
+                    .lineLimit(1)
+            }
+            .help("\(d.shipped) of \(d.total) issues done, or merged in GitHub")
+            .transition(.opacity)
+        case .quiet(let text):
+            Text(text).font(.system(size: 13)).foregroundStyle(Soot.muted)
+        }
+    }
+
+    // MARK: Optional columns
 
     @ViewBuilder private func cell(_ column: OverviewSettings.Column) -> some View {
         switch column {
@@ -594,50 +777,46 @@ private struct ProjectRow: View {
         case .github: github
         case .preview: preview
         case .target: target
-        case .health: health
         }
     }
 
     @ViewBuilder private var slack: some View {
-        if let s = snapshot?.slack {
+        if let s = snapshot?.slack, let n = s.unread {
             HStack(spacing: 4) {
-                if s.messagesThisWeek == 0 {
-                    Text("None").font(.system(size: 13)).foregroundStyle(Soot.muted)
+                if n == 0 {
+                    Text("All read").font(.system(size: 13)).foregroundStyle(Soot.muted)
                 } else {
-                    Text(s.messagesThisWeek, format: .number).font(.system(size: 13, weight: .medium)).foregroundStyle(Soot.ink)
+                    Text(n, format: .number).font(.system(size: 13, weight: .medium)).foregroundStyle(Soot.ink)
                         .monospacedDigit()
-                        .contentTransition(.numericText(value: Double(s.messagesThisWeek)))
-                        .animation(reduceMotion ? nil : .easeOut(duration: 0.25), value: s.messagesThisWeek)
-                    Text(s.messagesThisWeek == 1 ? "message" : "messages").font(.system(size: 13)).foregroundStyle(Soot.muted)
+                        .contentTransition(.numericText(value: Double(n)))
+                        .animation(reduceMotion ? nil : .easeOut(duration: 0.25), value: n)
+                    Text("unread").font(.system(size: 13)).foregroundStyle(Soot.muted)
                 }
             }
             .lineLimit(1)
-            .help("Messages in the channel over the last 7 days"
-                  + (s.lastActivity.map { " · last one \($0.formatted(.relative(presentation: .named)))" } ?? ""))
+            .help(n == 0 ? "Nothing new in #\(project.slack?.name ?? "the channel") since you last read it"
+                         : "\(n) messages in #\(project.slack?.name ?? "the channel") since you last read it")
             .transition(.opacity)
+        } else if snapshot?.slack != nil {
+            dash("Slack's read position could not be loaded")
         } else if project.slack == nil {
             dash("No Slack channel linked")
         } else if let state = snapshot?.errors[.slack] {
             unavailable(.slack, state)
         } else {
-            Skeleton(width: 80, height: 12)
+            Skeleton(width: 64, height: 12)
         }
     }
 
     @ViewBuilder private var linear: some View {
         if let d = snapshot?.delivery, d.total == 0 {
             Text("No issues").font(.system(size: 13)).foregroundStyle(Soot.muted)
-                .help("The Linear project has no issues yet")
-                .transition(.opacity)
         } else if let d = snapshot?.delivery {
             HStack(spacing: 8) {
                 ShipBar(delivery: d).frame(width: 72)
                 Text("\(d.shipped)/\(d.total)").font(.system(size: 13)).foregroundStyle(Soot.ink).monospacedDigit()
-                    .contentTransition(.numericText(value: Double(d.shipped)))
-                    .animation(reduceMotion ? nil : .easeOut(duration: 0.25), value: d.shipped)
-                    .help("\(d.shipped) of \(d.total) issues shipped" + (d.merged > 0 ? " · \(d.merged) merged but still in progress in Linear" : ""))
             }
-            .transition(.opacity)
+            .help("\(d.shipped) of \(d.total) issues shipped")
         } else if project.linear == nil {
             dash("No Linear project linked")
         } else if let state = snapshot?.errors[.linear] {
@@ -654,18 +833,15 @@ private struct ProjectRow: View {
                 Text(PipelineGlyph.word(g.pipeline)).font(.system(size: 13)).foregroundStyle(Soot.ink)
                 if g.openPRs > 0 {
                     Text("· \(g.openPRs) PR").font(.system(size: 12)).foregroundStyle(Soot.muted).monospacedDigit()
-                        .help("\(g.openPRs) open pull requests")
                 }
             }
             .lineLimit(1)
-            .transition(.opacity)
         } else if app.repositories(for: project).isEmpty {
             dash("No repository linked")
         } else if snapshot?.githubNeedsLinear == true {
-            Text(project.linear == nil ? "Needs Linear" : "—").font(.system(size: 13)).foregroundStyle(Soot.muted)
+            Text("Needs Linear").font(.system(size: 13)).foregroundStyle(Soot.muted)
                 .help("This project shares \(app.workspaceRepository ?? "the workspace repository") with other projects: "
                       + "its pull requests are the ones linked to its Linear issues")
-                .transition(.opacity)
         } else if let state = snapshot?.errors[.github] {
             unavailable(.github, state)
         } else {
@@ -679,44 +855,21 @@ private struct ProjectRow: View {
                 PreviewPhaseGlyph(phase: phase, size: 12)
                 Text(phase.word).font(.system(size: 13)).foregroundStyle(Soot.ink).lineLimit(1)
             }
-            .help("Preview of pull request #\(project.previewPullNumber ?? 0): \(phase.word.lowercased())")
-            .transition(.opacity)
-        } else if project.previewPullNumber == nil || !loaded {
-            if project.previewPullNumber != nil { Skeleton(width: 56, height: 12) } else { dash("No preview followed") }
+        } else if project.previewPullNumber != nil && !loaded {
+            Skeleton(width: 56, height: 12)
         } else {
             dash("No preview followed")
         }
     }
 
-    private var overdue: Bool {
-        guard let t = snapshot?.linear?.targetDate, let l = snapshot?.linear else { return false }
-        return t < Calendar.current.startOfDay(for: Date()) && l.done < l.total
-    }
-
     @ViewBuilder private var target: some View {
         if let t = snapshot?.linear?.targetDate {
-            HStack(spacing: 5) {
-                if overdue {
-                    Image(systemName: "exclamationmark.circle.fill").font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(Theme.negative).accessibilityHidden(true)
-                }
-                Text(t.formatted(.dateTime.day().month(.abbreviated))).font(.system(size: 13))
-                    .foregroundStyle(overdue ? Theme.negative : Soot.ink).monospacedDigit().lineLimit(1)
-            }
-            .help(overdue ? "Target date passed with issues still open" : "Linear target date")
-            .transition(.opacity)
+            Text(t.formatted(.dateTime.day().month(.abbreviated))).font(.system(size: 13))
+                .foregroundStyle(overdue ? Theme.negative : Soot.ink).monospacedDigit().lineLimit(1)
         } else if project.linear == nil || loaded {
-            dash("No target date")
+            dash("No due date")
         } else {
             Skeleton(width: 44, height: 12)
-        }
-    }
-
-    @ViewBuilder private var health: some View {
-        if entry.status == .loading {
-            HStack(spacing: 6) { Skeleton(width: 12, height: 12, radius: 6); Skeleton(width: 56, height: 12) }
-        } else {
-            HealthMark(status: entry.status).transition(.opacity)
         }
     }
 
@@ -725,8 +878,7 @@ private struct ProjectRow: View {
         Text(verbatim: "—").font(.system(size: 13)).foregroundStyle(Soot.muted).help(help)
     }
 
-    /// A tool to connect is a quiet chip; a tool that failed says so in a word, the negative
-    /// colour on the glyph only.
+    /// A tool to connect is a quiet chip; a tool that failed says so in a word.
     @ViewBuilder private func unavailable(_ service: ServiceKind, _ state: ServiceState) -> some View {
         switch state {
         case .notConnected: ConnectChip(service: service)
@@ -744,6 +896,23 @@ private struct ProjectRow: View {
             }
             .help("Couldn't reach \(service.label): \(message)")
         }
+    }
+}
+
+/// "3 for you": what waits in the project, on the lime that marks things to act on.
+private struct ForYouChip: View {
+    let count: Int
+    var body: some View {
+        Text("\(count) for you")
+            .font(.system(size: 11, weight: .semibold))
+            .foregroundStyle(Soot.limeInk)
+            .monospacedDigit()
+            .contentTransition(.numericText(value: Double(count)))
+            .padding(.horizontal, 7)
+            .frame(height: 20)
+            .background(Soot.lime, in: Capsule())
+            .fixedSize()
+            .accessibilityHidden(true)
     }
 }
 

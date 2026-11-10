@@ -80,7 +80,11 @@ struct ContentView: View {
                 case .overview:
                     OverviewView(open: { selection = .project($0.id) },
                                  newProject: { showNew = true },
-                                 importFrom: { importSource = $0 })
+                                 importFrom: { importSource = $0 },
+                                 link: { project, step in
+                                     ProjectEditorSheet.openAt = step
+                                     editing = project
+                                 })
                 }
             }
             .id(selection)

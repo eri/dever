@@ -18,6 +18,23 @@ struct ProjectSnapshot {
     struct SlackStats {
         var messagesThisWeek = 0
         var lastActivity: Date?
+        /// Who wrote the channel's latest message, for "Léa in #channel".
+        var lastAuthor: String?
+        /// Messages from others since Slack's read cursor (which Dever moves when you read the
+        /// channel here), over the last week; nil when the cursor could not be read.
+        var unread: Int?
+        /// The oldest of them, where reading starts, and when the newest arrived.
+        var firstUnreadTS: String?
+        var lastUnreadAt: Date?
+        /// The unread messages that name you, newest first.
+        var mentions: [Mention] = []
+
+        struct Mention: Equatable {
+            var ts: String
+            var author: String
+            var text: String
+            var date: Date
+        }
     }
 
     struct GitHubStats {
@@ -35,6 +52,21 @@ struct ProjectSnapshot {
         /// The repositories these numbers add up, and those whose pipeline fails.
         var repositories: [String] = []
         var failingRepositories: [String] = []
+        /// The project's open pull requests where your review is asked for.
+        var reviewRequests: [ReviewRequest] = []
+        /// The open pull request that has waited longest for a review, past three days.
+        var longWait: (number: Int, since: Date)?
+        /// The latest merged pull request: who wrote it, its number, when it landed.
+        var lastMerged: (number: Int, author: String, date: Date)?
+
+        struct ReviewRequest: Equatable {
+            var number: Int
+            var title: String
+            var url: String
+            /// The Linear issue the pull request belongs to, when it is matched to one.
+            var issue: String?
+            var date: Date
+        }
 
         /// One project's numbers across its repositories: counts add up, sets join, the
         /// pipeline is the worst of them.
@@ -49,7 +81,11 @@ struct ProjectSnapshot {
                 out.mergedPRIssues.formUnion(s.mergedPRIssues)
                 out.repositories.append(repo)
                 if s.pipeline == .failing { out.failingRepositories.append(repo) }
+                out.reviewRequests += s.reviewRequests
+                if let w = s.longWait, w.since < (out.longWait?.since ?? .distantFuture) { out.longWait = w }
+                if let m = s.lastMerged, m.date > (out.lastMerged?.date ?? .distantPast) { out.lastMerged = m }
             }
+            out.reviewRequests.sort { $0.date > $1.date }
             out.mergedButOpen = Array(Set(out.mergedButOpen)).sorted()
             out.pipeline = PipelineState.worst(parts.map(\.stats.pipeline))
             return out
@@ -191,6 +227,13 @@ final class OverviewStore: ObservableObject {
     }
 
     func refresh(_ app: AppState) async {
+        // Snapshots: a made-up workspace instead of the linked one (Support/OverviewDemo.swift).
+        if let demo = OverviewDemo.scene {
+            if app.projects.map(\.id) != demo.projects.map(\.id) { app.projects = demo.projects }
+            snapshots = demo.snapshots
+            lastRefresh = Date()
+            return
+        }
         guard !isRefreshing else { return }
         isRefreshing = true
         defer { isRefreshing = false; lastRefresh = Date() }
@@ -235,7 +278,8 @@ final class OverviewStore: ObservableObject {
         let whole = await app.showsWholeRepository(p)
         let repositories = shared && issues == nil ? [] : await app.repositories(for: p)
         if shared && issues == nil, !(await app.repositories(for: p)).isEmpty { s.githubNeedsLinear = true }
-        async let github = loadGitHub(p, repositories, repos, issues: projectIssues, whole: whole)
+        let login = await app.github?.login
+        async let github = loadGitHub(p, repositories, repos, issues: projectIssues, whole: whole, login: login)
         switch await slack {
         case .success(let v): s.slack = v
         case .failure(let e): s.errors[.slack] = await app.failure(e, .slack)
@@ -285,8 +329,29 @@ final class OverviewStore: ObservableObject {
             var recent = try await app.withSlack { try await $0.history(id, limit: 200, since: weekAgo) }
             recent.removeAll { $0.subtype == "channel_join" || $0.subtype == "channel_leave" }
             var stats = ProjectSnapshot.SlackStats(messagesThisWeek: recent.count, lastActivity: recent.map(\.date).max())
-            if stats.lastActivity == nil {
-                stats.lastActivity = try await app.withSlack { try await $0.history(id, limit: 1) }.first?.date
+            var latest = recent.max { $0.ts < $1.ts }
+            if latest == nil {
+                latest = try await app.withSlack { try await $0.history(id, limit: 1) }.first
+                stats.lastActivity = latest?.date
+            }
+            let me = await app.slack?.userID
+            let team = await app.slack?.teamID ?? ""
+            let users = (try? await app.withSlack { try await SlackDirectory.shared.users(team: team, via: $0) }) ?? [:]
+            stats.lastAuthor = latest?.user.flatMap { users[$0]?.name }
+            // What arrived since your last read, from others; mentions of you put forward.
+            if let cursor = try? await app.withSlack({ try await $0.lastRead(id) }) {
+                let unread = recent.filter { !SlackTS.isAtOrBefore($0.ts, cursor) && $0.user != me && $0.subtype == nil }
+                stats.unread = unread.count
+                stats.firstUnreadTS = unread.min { $0.ts < $1.ts }?.ts
+                stats.lastUnreadAt = unread.map(\.date).max()
+                if let me {
+                    stats.mentions = unread.filter { ($0.text ?? "").contains("<@\(me)>") }
+                        .sorted { $0.ts > $1.ts }
+                        .map { m in
+                            .init(ts: m.ts, author: m.user.flatMap { users[$0]?.name } ?? "Someone",
+                                  text: SlackPlain.text(m.text ?? "", users: users), date: m.date)
+                        }
+                }
             }
             return .success(stats)
         } catch {
@@ -296,12 +361,12 @@ final class OverviewStore: ObservableObject {
 
     /// Every repository the project follows, added up; one failing call fails the whole.
     private static func loadGitHub(_ p: Project, _ repositories: [String], _ repos: Result<RepoCache, Error>,
-                                   issues: [LinearClient.ProjectSummary.Issue]?, whole: Bool)
+                                   issues: [LinearClient.ProjectSummary.Issue]?, whole: Bool, login: String?)
         async -> Result<ProjectSnapshot.GitHubStats?, Error> {
         guard !repositories.isEmpty else { return .success(nil) }
         var parts: [(repo: String, stats: ProjectSnapshot.GitHubStats)] = []
         for repo in repositories {
-            switch await loadGitHub(p, repo: repo, repos, issues: issues, whole: whole) {
+            switch await loadGitHub(p, repo: repo, repos, issues: issues, whole: whole, login: login) {
             case .success(let stats): parts.append((repo, stats))
             case .failure(let error): return .failure(error)
             }
@@ -313,12 +378,14 @@ final class OverviewStore: ObservableObject {
     }
 
     private static func loadGitHub(_ p: Project, repo: String, _ repos: Result<RepoCache, Error>,
-                                   issues: [LinearClient.ProjectSummary.Issue]?, whole: Bool)
+                                   issues: [LinearClient.ProjectSummary.Issue]?, whole: Bool, login: String?)
         async -> Result<ProjectSnapshot.GitHubStats, Error> {
         do {
             let repos = try repos.get()
             let prs = ProjectPullRequests(pulls: try await repos.openPulls(repo), issues: issues,
                                           wholeRepository: whole)
+            let attention = await Self.attention(prs, repo: repo, repos: repos, issues: issues, whole: whole,
+                                                 login: login)
             if prs.scoped, let issues {
                 let pipeline = prs.pipeline(from: try await repos.runs(repo))
                 let merged = ProjectPullRequests(pulls: try await repos.mergedPulls(repo), issues: issues, wholeRepository: false)
@@ -327,21 +394,67 @@ final class OverviewStore: ObservableObject {
                 let stale = issues.filter {
                     Delivery.isBehind(stateType: $0.state.type, stateName: $0.state.name, merged: mergedIDs.contains($0.identifier))
                 }.map(\.identifier).sorted()
-                return .success(.init(openPRs: prs.matches.count, pipeline: pipeline.state, scoped: true,
-                                      mergedButOpen: stale,
-                                      openPRIssues: Set(prs.matches.compactMap(\.issue)),
-                                      mergedPRIssues: mergedIDs))
+                var stats = ProjectSnapshot.GitHubStats(openPRs: prs.matches.count, pipeline: pipeline.state, scoped: true,
+                                                        mergedButOpen: stale,
+                                                        openPRIssues: Set(prs.matches.compactMap(\.issue)),
+                                                        mergedPRIssues: mergedIDs)
+                attention.apply(to: &stats)
+                return .success(stats)
             }
             // Unscoped: the health of the default branch, not of whichever branch ran last.
             let branch = try await repos.defaultBranch(repo)
             let run = try await repos.runs(repo, branch: branch).first
-            return .success(.init(openPRs: prs.matches.count,
-                                  pipeline: run.map(ProjectSnapshot.PipelineState.init(run:)) ?? .unknown,
-                                  branch: branch))
+            var stats = ProjectSnapshot.GitHubStats(openPRs: prs.matches.count,
+                                                    pipeline: run.map(ProjectSnapshot.PipelineState.init(run:)) ?? .unknown,
+                                                    branch: branch)
+            attention.apply(to: &stats)
+            return .success(stats)
         } catch {
             return .failure(error)
         }
     }
+
+    /// What in one repository waits for you or holds the project back: the pull requests whose
+    /// review is asked of you, the one waiting longest, and the latest merge.
+    private struct Attention {
+        var reviews: [ProjectSnapshot.GitHubStats.ReviewRequest] = []
+        var longWait: (number: Int, since: Date)?
+        var lastMerged: (number: Int, author: String, date: Date)?
+
+        func apply(to stats: inout ProjectSnapshot.GitHubStats) {
+            stats.reviewRequests = reviews
+            stats.longWait = longWait
+            stats.lastMerged = lastMerged
+        }
+    }
+
+    private static func attention(_ prs: ProjectPullRequests, repo: String, repos: RepoCache,
+                                  issues: [LinearClient.ProjectSummary.Issue]?, whole: Bool, login: String?) async -> Attention {
+        var out = Attention()
+        let me = login?.lowercased()
+        for m in prs.matches {
+            let pull = m.pull
+            let updated = Self.iso(pull.updated_at) ?? Date()
+            let reviewers = pull.requested_reviewers ?? []
+            if let me, reviewers.contains(where: { $0.login.lowercased() == me }) {
+                out.reviews.append(.init(number: pull.number, title: pull.title, url: pull.html_url, issue: m.issue, date: updated))
+            }
+            if pull.draft != true, !reviewers.isEmpty, Date().timeIntervalSince(updated) > 3 * 86_400,
+               updated < (out.longWait?.since ?? .distantFuture) {
+                out.longWait = (pull.number, updated)
+            }
+        }
+        // The merges of this project only (the same matching as the open ones).
+        if let merged = try? await repos.mergedPulls(repo) {
+            let mine = ProjectPullRequests(pulls: merged, issues: issues, wholeRepository: whole).matches
+            if let last = mine.compactMap({ m in m.pull.merged_at.flatMap(Self.iso).map { (m.pull, $0) } }).max(by: { $0.1 < $1.1 }) {
+                out.lastMerged = (last.0.number, last.0.user.login, last.1)
+            }
+        }
+        return out
+    }
+
+    private static func iso(_ s: String) -> Date? { ISO8601DateFormatter().date(from: s) }
 
     private static let dayFormatter: DateFormatter = {
         let f = DateFormatter()

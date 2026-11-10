@@ -288,11 +288,6 @@ private struct ListMiniature: View {
             RoundedRectangle(cornerRadius: 2).fill(quiet).frame(width: 14, height: 10)
         case .target:
             Capsule().fill(quiet).frame(width: 24, height: 4)
-        case .health:
-            HStack(spacing: 4) {
-                Circle().fill(line.health).frame(width: 6, height: 6)
-                Capsule().fill(quiet).frame(width: 22, height: 4)
-            }
         }
     }
 }

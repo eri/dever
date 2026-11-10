@@ -95,3 +95,54 @@ reads: gate 4); a shimmer on skeletons (the project's `Skeleton` pulses on its o
 - VoiceOver's reading of the row summary (`accessibilityLabel`) was checked in code only.
 - Group by team needs a Linear project with a team; the test workspace's projects have one but
   the capture ran grouped by health.
+
+## Round 3 — what is waiting for you
+
+The table above is superseded. A developer rarely follows more than two projects at once, so the
+page now answers "what is waiting for me", with what waits listed under its project.
+
+**Row.** Mark, name, a lime "N for you" chip when something waits (otherwise the last activity in
+one muted line: "Ana wrote in #proj-search · 1d", "sam merged #212 · 3d"), the optional columns,
+then one status at the trailing edge: what blocks (CI failing, preview failed, past due date, a
+pull request waiting for a review for more than three days), else how much has shipped
+("15/16 shipped" with a small bar), else the one link an incomplete project lacks, as a
+secondary "Link Linear" / "Link Slack" button that opens the editor on that step.
+
+**Items.** Under a project with things waiting, one line each, indented under the name: icon,
+sentence, age. Mentions first ("Léa: can you check the staging build? · 40m"), then review
+requests ("Review #4871 Tip preview width · 2h"), then one line for the rest of the unread
+messages ("6 more unread in #proj-checkout"). Three at most, then "Show all N". A click opens the
+item inside Dever: a Slack message opens the project's reading room on it (earlier pages load
+first when needed); a pull request opens the page of the Linear issue it belongs to, or the
+project page when it belongs to none. When nothing waits anywhere, the list stays plain: no
+empty block, no message.
+
+**What counts as waiting.** Pull requests of the project (the shared-repository scoping applies)
+whose review is requested from your GitHub login; unread messages in the project's channel since
+Slack's read cursor, which Dever moves when you read the channel here, from others, over the last
+seven days; among them, the ones that name you, put forward. Your own tickets and pull requests
+are not in this list.
+
+**Order.** Pinned first, then projects where something waits, then the most recently active
+(the newer of the last message and the last merge). Settings › Overview › Sort offers For you
+(that order), Activity and Name.
+
+**Columns.** Slack shows unread messages ("7 unread", "All read"); it is the only column on by
+default. Linear, GitHub, Preview and Due date stay available in the View popover and in
+Settings › Overview. The Health column is gone: the trailing status says it in words.
+
+**Motion.** Items enter with `Motion.rise`, the chip with `Motion.pop`, reorders on `Motion.move`,
+counts roll; all fade only under Reduce Motion.
+
+**Accessibility.** A row reads "Checkout, pinned, 4 for you, 7 unread in Slack, 15 of 16 shipped";
+each item reads its sentence and its age, with the hint "Opens the message in the project" or
+"Opens the pull request in the project"; the items of a project are a group named "Waiting for you
+in Checkout". Status is a glyph and a word; the mention icon is lime and also an "@".
+
+**Demo.** `DEVER_SNAPSHOT_OVERVIEW_DEMO=busy|quiet` (with `DEVER_SNAPSHOT_DIR`) runs the page on a
+made-up workspace: waiting items, a failing pipeline, a long-waiting pull request, a finished
+project and an incomplete one; `quiet` is the same with nothing waiting.
+
+**Not verified by hand.** Real unread counts and mentions against a live channel, review requests
+on live pull requests (the workspace had none asked of the viewer), the deep links landing on the
+message and on the issue page, VoiceOver.

@@ -128,7 +128,10 @@ struct ProjectDetailView: View {
         .modifier(FilePreviewHost(preview: $previewFile))
         .navigationTitle(project.name)
         .windowTitleHidden()
-        .task { await load() }
+        .task {
+            await load()
+            await land()
+        }
         .sheet(isPresented: $flow.githubSheet) { GitHubLoginSheet() }
         .onChange(of: connectionKey) { _, _ in Task { await load() } }
         .onReceive(NotificationCenter.default.publisher(for: .toggleSlackWide)) { _ in toggleSlackWide() }
@@ -594,6 +597,29 @@ struct ProjectDetailView: View {
         }
         return ServiceFailureRow(service: service, state: state, lastLoaded: lastLoaded[service] ?? fromSnapshot,
                                  retry: { Task { await load(force: true) } }, flow: flow, compact: compact)
+    }
+
+    /// A click on the Overview's "waiting for you" line leaves where to land: a Slack message
+    /// opens the reading room on it, a pull request opens the page of the issue it belongs to.
+    private func land() async {
+        guard let target = ProjectFocus.take(for: project.id) else { return }
+        switch target {
+        case .slack(let ts):
+            guard project.slack != nil else { return }
+            // An unread message older than the loaded page: bring the earlier pages in first.
+            var tries = 0
+            while !messages.contains(where: { SlackTS.isAtOrBefore($0.ts, ts) }), hasEarlier, tries < 4 {
+                await showEarlier()
+                tries += 1
+            }
+            slackFocus = ts
+            if !slackExpanded { toggleSlackWide() }
+            try? await Task.sleep(nanoseconds: 4_000_000_000)
+            if slackFocus == ts { Motion.run(Motion.ui, fade: true) { slackFocus = nil } }
+        case .pull(let identifier, _):
+            guard let identifier, let issue = issues.first(where: { $0.identifier == identifier }) else { return }
+            NotificationCenter.default.post(name: .openIssue, object: IssueRoute(project: project, issue: issue))
+        }
     }
 
     private func load(force: Bool = false) async {

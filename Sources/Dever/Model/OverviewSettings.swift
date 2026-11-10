@@ -5,15 +5,16 @@ import Foundation
 /// (`AppState.overview`); the page reads it, Settings › Overview and the page's own
 /// View control write it.
 struct OverviewSettings: Codable, Equatable {
+    /// Pinned projects always come first. `forYou` then puts the projects where something waits
+    /// for you, then the most recently active; the others drop the waiting step.
     enum Sort: String, CaseIterable, Identifiable, Codable {
-        case name, activity, health, targetDate
+        case forYou, activity, name
         var id: String { rawValue }
         var label: String {
             switch self {
-            case .name: "Name"
+            case .forYou: "For you"
             case .activity: "Activity"
-            case .health: "Health"
-            case .targetDate: "Due date"
+            case .name: "Name"
             }
         }
     }
@@ -44,18 +45,18 @@ struct OverviewSettings: Codable, Equatable {
         var rowHeight: CGFloat { self == .compact ? 44 : 56 }
     }
 
-    /// The columns after the project's name, in the order they are drawn.
+    /// The optional columns between the project's name and its status, in the order they are
+    /// drawn. The status at the trailing edge (what blocks, or issues shipped) always shows.
     enum Column: String, CaseIterable, Identifiable, Codable {
-        case slack, linear, github, preview, target, health
+        case slack, linear, github, preview, target
         var id: String { rawValue }
         var label: String {
             switch self {
-            case .slack: "Slack, 7 days"
+            case .slack: "Slack"
             case .linear: "Issues shipped"
             case .github: "GitHub"
             case .preview: "Preview"
             case .target: "Due date"
-            case .health: "Health"
             }
         }
         /// The column's name on a Settings chip, where the tool's name is enough.
@@ -66,37 +67,35 @@ struct OverviewSettings: Codable, Equatable {
             case .github: "GitHub"
             case .preview: "Preview"
             case .target: "Due date"
-            case .health: "Health"
             }
         }
         /// What the column shows, for the Settings row and the column header's tooltip.
         var detail: String {
             switch self {
-            case .slack: "Messages in the channel over the last 7 days"
+            case .slack: "Unread messages in the channel"
             case .linear: "Linear issues done, or merged in GitHub, out of all"
             case .github: "Pipeline, open pull requests"
             case .preview: "The followed pull request's preview"
             case .target: "The Linear project's target date"
-            case .health: "Needs attention, quiet, on track"
             }
         }
         /// The column's width in points; the project column takes the rest.
         var width: CGFloat {
             switch self {
-            case .slack: 104
+            case .slack: 88
             case .linear: 124
             case .github: 120
             case .preview: 80
             case .target: 72
-            case .health: 136
             }
         }
     }
 
-    var sort: Sort = .health
+    var sort: Sort = .forYou
     var group: Group = .none
     var density: Density = .comfortable
-    var columns: Set<Column> = Set(Column.allCases)
+    /// Slack's unread count only: what blocks and what shipped are in the status already.
+    var columns: Set<Column> = [.slack]
     /// Projects whose every Linear issue is done leave the list.
     var hideFinished = false
 
