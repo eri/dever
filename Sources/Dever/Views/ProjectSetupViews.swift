@@ -278,11 +278,11 @@ struct ProjectEditorSheet: View {
                 connectHint(.github)
             } else {
                 ChoiceTiles {
-                    ChoiceTile(thumb: .found, title: "The shared repository",
+                    ChoiceTile(thumb: .found, title: "Shared repository",
                                detail: app.workspaceRepository.map(GitHubRepository.short) ?? "Not picked in Settings yet",
                                tag: "Recommended",
                                selected: githubChoice == .workspace) { choose(.github, .workspace) }
-                    ChoiceTile(thumb: .existing, title: "Its own repositories",
+                    ChoiceTile(thumb: .existing, title: "Separate repository",
                                detail: project.githubRepos.isEmpty ? "One or several" : Plural.text("^[\(project.githubRepos.count) repository](inflect: true)"),
                                selected: githubChoice == .own) { choose(.github, .own) }
                 }
