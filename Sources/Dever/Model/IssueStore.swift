@@ -27,6 +27,11 @@ final class IssueStore: ObservableObject {
         var number: Int
         var title: String
         var state: State
+        /// The Linear identifier Dever matched it to (branch, title or Linear's attachment).
+        var issue: String? = nil
+        /// Merged: when it merged. Open: its last update.
+        var date: Date? = nil
+        var author: String? = nil
     }
 
     @Published private(set) var projects: [String: ProjectIssues] = [:]

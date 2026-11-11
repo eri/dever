@@ -933,10 +933,14 @@ struct ProjectDetailView: View {
         pulls = derived.open
         pullsScoped = derived.scoped
         merged = derived.merged
-        for m in merged { issueStore.pullsByURL[m.url] = .init(number: m.number, title: m.title ?? "", state: .merged) }
+        for m in merged {
+            issueStore.pullsByURL[m.url] = .init(number: m.number, title: m.title ?? "", state: .merged, issue: m.issue, date: m.mergedAt)
+        }
+        let iso = ISO8601DateFormatter()
         for p in pulls {
             issueStore.pullsByURL[p.pull.html_url] = .init(number: p.pull.number, title: p.pull.title,
-                                                           state: p.pull.draft == true ? .draft : .open)
+                                                           state: p.pull.draft == true ? .draft : .open, issue: p.issue,
+                                                           date: iso.date(from: p.pull.updated_at), author: p.pull.user.login)
         }
         return true
     }

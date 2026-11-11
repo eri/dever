@@ -20,7 +20,6 @@ struct IssueDetailView: View {
     /// Set by the blocked-by chip: scrolls to Linked issues and outlines it for a moment.
     @State private var linksJump = 0
     @State private var linksHighlighted = false
-    @State private var linksExpanded = false
     @State private var labelsExpanded = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -142,7 +141,7 @@ struct IssueDetailView: View {
         let subsText = inQA == 0 ? "\(done) of \(subs.count) sub-issues done"
             : inQA == subs.count ? "All \(subs.count) sub-issues in QA"
             : "\(done) done · \(inQA) in QA of \(subs.count) sub-issues"
-        let code = (d.attachments?.nodes ?? []).compactMap { store.pullsByURL[$0.url] }
+        let code = pulls(d).map(\.ref)
         return FlowRow(spacing: 8) {
             statusMenu(current)
             priorityMenu(current)
@@ -180,12 +179,19 @@ struct IssueDetailView: View {
 
     // MARK: Merged banner
 
-    /// The merged pull request behind one of the attachments, when the project page knows it.
+    /// The pull requests behind this issue: those Linear attached, and those the project page
+    /// matched by branch or title (a branch not named after the issue still counts).
+    private func pulls(_ d: LinearIssueDetail) -> [(ref: IssueStore.PullRef, url: URL)] {
+        let attached = Set((d.attachments?.nodes ?? []).map(\.url))
+        return store.pullsByURL
+            .filter { attached.contains($0.key) || $0.value.issue == d.identifier }
+            .compactMap { key, ref in URL(string: key).map { (ref, $0) } }
+            .sorted { $0.ref.number > $1.ref.number }
+    }
+
+    /// The merged pull request the banner names, the newest one.
     private func mergedPull(_ d: LinearIssueDetail) -> (ref: IssueStore.PullRef, url: URL)? {
-        for a in d.attachments?.nodes ?? [] {
-            if let ref = store.pullsByURL[a.url], ref.state == .merged, let url = URL(string: a.url) { return (ref, url) }
-        }
-        return nil
+        pulls(d).first { $0.ref.state == .merged }
     }
 
     private func mergedBanner(_ pull: (ref: IssueStore.PullRef, url: URL), _ d: LinearIssueDetail) -> some View {
@@ -271,61 +277,82 @@ struct IssueDetailView: View {
         let current = row ?? d.asRow
         return VStack(alignment: .leading, spacing: 16) {
             card(symbol: "info.circle", title: "Details") {
-                VStack(alignment: .leading, spacing: 0) {
+                VStack(alignment: .leading, spacing: 18) {
                     if !current.labelList.isEmpty {
                         let labels = current.labelList
-                        let shown = labelsExpanded ? labels : Array(labels.prefix(2))
-                        detailRow(symbol: "tag", label: "Labels") {
-                            FlowRow(spacing: 4) {
+                        let shown = labelsExpanded ? labels : Array(labels.prefix(3))
+                        caption("Labels") {
+                            FlowRow(spacing: 6) {
                                 ForEach(shown) { LabelPill(label: $0) }
-                                if labels.count > 2 {
-                                    Button {
-                                        labelsExpanded.toggle()
-                                    } label: {
-                                        Text(labelsExpanded ? "Less" : "+\(labels.count - 2)")
-                                            .font(.system(size: 11, weight: .semibold))
-                                            .foregroundStyle(Soot.ink)
-                                            .padding(.horizontal, 7)
-                                            .frame(height: 20)
-                                    }
-                                        .buttonStyle(ChipButton(fill: .clear))
-                                        .help(labelsExpanded ? "Show fewer labels" : labels.dropFirst(2).map(\.name).joined(separator: ", "))
-                                        .accessibilityLabel(labelsExpanded ? "Show fewer labels" : "Show \(labels.count - 2) more labels")
+                                if labels.count > 3 {
+                                    Button(labelsExpanded ? "Less" : "+\(labels.count - 3)") { labelsExpanded.toggle() }
+                                        .buttonStyle(.plain)
+                                        .font(.system(size: 11, weight: .semibold))
+                                        .foregroundStyle(Soot.ink)
+                                        .padding(.horizontal, 7)
+                                        .frame(height: 20)
+                                        .overlay(Capsule().strokeBorder(Soot.edge))
+                                        .contentShape(Capsule())
+                                        .modifier(FocusOutline(radius: 10))
+                                        .help(labelsExpanded ? "Show fewer labels" : labels.dropFirst(3).map(\.name).joined(separator: ", "))
+                                        .accessibilityLabel(labelsExpanded ? "Show fewer labels" : "Show \(labels.count - 3) more labels")
                                 }
                             }
                         }
                     }
-                    if let e = d.estimate { detailRow(symbol: "scalemass", label: "Estimate", value: e.formatted() + (e == 1 ? " point" : " points")) }
-                    if let c = d.cycle { detailRow(symbol: "arrow.triangle.2.circlepath", label: "Cycle", value: c.name ?? "Cycle \(c.number)") }
-                    if let m = d.projectMilestone { detailRow(symbol: "flag", label: "Milestone", value: m.name) }
-                    if let due = current.dueDate { detailRow(symbol: "calendar", label: "Due", value: LinearDate.short(due) ?? due) }
-                    if let branch = d.branchName ?? current.branchName, !branch.isEmpty {
-                        detailRow(symbol: "arrow.triangle.branch", label: "Branch") {
-                            CopyChip(value: branch, what: "branch name", maxWidth: 190)
+                    let facts: [(String, String)] = [
+                        d.estimate.map { ("Estimate", $0.formatted() + ($0 == 1 ? " point" : " points")) },
+                        current.dueDate.map { ("Due", LinearDate.short($0) ?? $0) },
+                        d.cycle.map { ("Cycle", $0.name ?? "Cycle \($0.number)") },
+                        d.projectMilestone.map { ("Milestone", $0.name) },
+                    ].compactMap { $0 }
+                    if !facts.isEmpty {
+                        Grid(alignment: .leading, horizontalSpacing: 20, verticalSpacing: 14) {
+                            ForEach(Array(stride(from: 0, to: facts.count, by: 2)), id: \.self) { i in
+                                GridRow {
+                                    caption(facts[i].0) { factValue(facts[i].1) }
+                                    if i + 1 < facts.count { caption(facts[i + 1].0) { factValue(facts[i + 1].1) } } else { Color.clear.gridCellUnsizedAxes([.horizontal, .vertical]) }
+                                }
+                            }
                         }
                     }
-                    detailRow(symbol: "clock", label: "Created", value: LinearDate.dayAndAge(d.createdAt) ?? "")
-                    detailRow(symbol: "clock.arrow.circlepath", label: "Updated", value: LinearDate.dayAndAge(current.updatedAt) ?? "")
+                    if let branch = d.branchName ?? current.branchName, !branch.isEmpty {
+                        caption("Branch") {
+                            CopyChip(value: branch, what: "branch name", maxWidth: 200)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                    }
+                    VStack(alignment: .leading, spacing: 4) {
+                        Rectangle().fill(Soot.line).frame(height: 1).padding(.bottom, 8)
+                        datedLine("Created", d.createdAt)
+                        if current.updatedAt != d.createdAt { datedLine("Updated", current.updatedAt) }
+                    }
                 }
             }
         }
     }
 
-    private func detailRow(symbol: String, label: String, value: String) -> some View {
-        detailRow(symbol: symbol, label: label) {
-            Text(value).font(.system(size: 13, weight: .medium)).foregroundStyle(Soot.ink).multilineTextAlignment(.trailing)
-        }
-    }
-
-    private func detailRow<V: View>(symbol: String, label: String, @ViewBuilder value: () -> V) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 10) {
-            Image(systemName: symbol).font(.system(size: 12, weight: .medium)).foregroundStyle(Soot.muted)
-                .frame(width: 16).accessibilityHidden(true)
-            Text(label).font(.system(size: 13)).foregroundStyle(Soot.muted)
-            Spacer(minLength: 12)
+    /// A small caption above its value: the Details card's one pattern.
+    private func caption<V: View>(_ title: String, @ViewBuilder value: () -> V) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title).font(.system(size: 12, weight: .medium)).foregroundStyle(Soot.muted)
             value()
         }
-        .frame(minHeight: 32)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .combine)
+    }
+
+    private func factValue(_ text: String) -> some View {
+        Text(text).font(.system(size: 14, weight: .medium)).foregroundStyle(Soot.ink)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private func datedLine(_ label: String, _ date: String) -> some View {
+        HStack(spacing: 6) {
+            Text(label).foregroundStyle(Soot.muted)
+            Text(LinearDate.dayAndAge(date) ?? "").foregroundStyle(Soot.ink)
+        }
+        .font(.system(size: 13))
         .accessibilityElement(children: .combine)
     }
 
@@ -479,18 +506,18 @@ struct IssueDetailView: View {
 
     @ViewBuilder
     private func linksCard(_ d: LinearIssueDetail) -> some View {
+        // What stands in the way first; sub-issues stay out (their progress is a signal up top).
         let groups: [(String, String, [LinearIssueDetail.Brief])] = [
-            ("arrow.turn.left.up", "Parent", d.parent.map { [$0] } ?? []),
-            ("list.bullet.indent", "Sub-issues", d.subIssues),
             ("hand.raised", "Blocked by", d.blockedBy),
             ("lock", "Blocks", d.blocks),
+            ("arrow.turn.left.up", "Parent", d.parent.map { [$0] } ?? []),
             ("link", "Related", d.related),
         ].filter { !$0.2.isEmpty }
         let total = groups.reduce(0) { $0 + $1.2.count }
-        let cap = 5
+        let cap = 3
         // Five rows across the groups, in order; the rest behind "Show all".
         let visible: [(String, String, [LinearIssueDetail.Brief], Int)] = {
-            var budget = linksExpanded ? Int.max : cap
+            var budget = cap
             var out: [(String, String, [LinearIssueDetail.Brief], Int)] = []
             for (symbol, title, briefs) in groups where budget > 0 {
                 out.append((symbol, title, Array(briefs.prefix(budget)), briefs.count))
@@ -534,9 +561,6 @@ struct IssueDetailView: View {
                                 .accessibilityLabel("\(b.identifier), \(b.title), \(b.state.name)")
                             }
                         }
-                    }
-                    if total > cap {
-                        ShowAllButton(count: total, expanded: $linksExpanded).padding(.top, -8)
                     }
                 }
                 .padding(.horizontal, -8)
@@ -597,14 +621,21 @@ struct IssueDetailView: View {
     // MARK: Activity: comments and the issue's history on one thread, oldest first
 
     private enum Item: Identifiable {
-        case created(String)
+        case created(String, LinearIssue.State?)
         case comment(LinearIssueDetail.Comment)
         case event(LinearIssueDetail.HistoryEvent, [Change])
+        case pull(IssueStore.PullRef, String)
         var id: String {
-            switch self { case .created: "created"; case .comment(let c): "c-" + c.id; case .event(let e, _): "h-" + e.id }
+            switch self {
+            case .created: "created"; case .comment(let c): "c-" + c.id; case .event(let e, _): "h-" + e.id
+            case .pull(let p, _): "p-\(p.number)"
+            }
         }
         var date: String {
-            switch self { case .created(let d): d; case .comment(let c): c.createdAt; case .event(let e, _): e.createdAt }
+            switch self {
+            case .created(let d, _): d; case .comment(let c): c.createdAt; case .event(let e, _): e.createdAt
+            case .pull(_, let d): d
+            }
         }
     }
 
@@ -618,8 +649,13 @@ struct IssueDetailView: View {
 
     private func items(_ d: LinearIssueDetail) -> [Item] {
         let labels = Dictionary(d.labelList.map { ($0.id, $0.name) }, uniquingKeysWith: { a, _ in a })
-        var list: [Item] = [.created(d.createdAt)]
+        // The state the issue was created in: the first move's origin, or today's state when it never moved.
+        let moves = (d.history?.nodes ?? []).filter { $0.toState != nil }.sorted { $0.createdAt < $1.createdAt }
+        let initial = moves.first?.fromState ?? (moves.isEmpty ? (row ?? d.asRow).state : nil)
+        var list: [Item] = [.created(d.createdAt, initial)]
         list += d.thread.map { .comment($0) }
+        let iso = ISO8601DateFormatter()
+        for p in pulls(d) { if let date = p.ref.date { list.append(.pull(p.ref, iso.string(from: date))) } }
         for e in d.history?.nodes ?? [] {
             let changes = describe(e, labels: labels)
             if !changes.isEmpty { list.append(.event(e, changes)) }
@@ -665,9 +701,17 @@ struct IssueDetailView: View {
             ForEach(Array(list.enumerated()), id: \.element.id) { index, item in
                 let previous = index > 0 ? list[index - 1] : nil
                 switch item {
-                case .created(let date):
+                case .created(let date, let state):
                     eventRow(name: d.creator?.name, avatar: d.creator?.avatarUrl,
-                             changes: [Change(symbol: "plus.circle", text: "created the issue")], date: date)
+                             changes: [Change(symbol: state == nil ? "plus.circle" : "", text: state.map { "created the issue in \($0.name)" } ?? "created the issue", state: state)],
+                             date: date)
+                case .pull(let p, let date):
+                    let n = String(p.number)
+                    eventRow(name: "GitHub", avatar: nil,
+                             changes: [Change(symbol: p.state == .merged ? "arrow.triangle.merge" : "arrow.triangle.pull",
+                                              text: p.state == .merged ? "PR #\(n) merged"
+                                                  : (p.state == .draft ? "draft PR #\(n)" : "PR #\(n)") + (p.author.map { " by \($0)" } ?? "") + (p.state == .draft ? "" : ", waiting for review"))],
+                             date: date)
                 case .comment(let c):
                     let grouped: Bool = {
                         guard case .comment(let p)? = previous else { return false }
