@@ -88,6 +88,9 @@ Repository modes: `DEVER_SNAPSHOT_REPO_MODE=single|perProject|mixed[:owner/name]
 repository), `DEVER_SNAPSHOT_REPOS=owner/a,owner/b` gives the first project those repositories, and
 `DEVER_SNAPSHOT_UNLINK=slack,linear,github,preview` runs as if the captured project had not linked those tools
 (nothing is written back). `DEVER_SNAPSHOT_SCROLL_END=1` adds each main screen scrolled to its end (`settings-dark-end.png` shows the Repositories section).
+On-device intelligence: `DEVER_SNAPSHOT_INTELLIGENCE=available|notReady|off|unsupported` runs as if the Mac's model were in
+that state and shows every feature's interface (Settings › Intelligence included); with `DEVER_SNAPSHOT_GALLERY=1` it adds
+`generated-{dark,light}.png`, generated text in each of its states.
 Nothing is written back in these runs.
 
 ## Onboarding

@@ -143,7 +143,7 @@ enum Snapshotter {
             for (themeName, appearance) in [("dark", NSAppearance.Name.darkAqua), ("light", .aqua)] {
                 NSApp.appearance = NSAppearance(named: appearance)
                 NotificationCenter.default.post(name: .showScreen, object: SidebarItem.settings)
-                for section in SettingsView.Section.allCases {
+                for section in SettingsView.Section.visible {
                     NotificationCenter.default.post(name: .showSettingsSection, object: section.rawValue)
                     try? await Task.sleep(nanoseconds: UInt64((wait == 0 ? 0.4 : 2.5) * 1_000_000_000))
                     capture(to: dir.appendingPathComponent("settings-\(section.rawValue)-\(themeName).png"))
@@ -163,11 +163,17 @@ enum Snapshotter {
                 }
             }
         }
+        // Every button role in every state (hover and press forced through the style's override),
+        // in its own window, in both modes: buttons-dark.png, buttons-light.png. With
+        // DEVER_SNAPSHOT_INTELLIGENCE set, generated text in its states too: generated-*.png.
+        var galleries: [(name: String, view: AnyView)] = []
         if ProcessInfo.processInfo.environment["DEVER_SNAPSHOT_GALLERY"] == "1" {
-            // Every button role in every state (hover and press forced through the style's
-            // override), in its own window, in both modes: buttons-dark.png, buttons-light.png.
+            galleries.append(("buttons", AnyView(ButtonGallery())))
+            if IntelligenceStatus.snapshotOverride != nil { galleries.append(("generated", AnyView(GeneratedGallery()))) }
+        }
+        for gallery in galleries {
             for (themeName, appearance) in [("dark", NSAppearance.Name.darkAqua), ("light", .aqua)] {
-                let host = NSHostingView(rootView: ButtonGallery())
+                let host = NSHostingView(rootView: gallery.view)
                 host.frame = NSRect(origin: .zero, size: host.fittingSize)
                 let window = NSWindow(contentRect: host.frame, styleMask: [.borderless], backing: .buffered, defer: false)
                 window.appearance = NSAppearance(named: appearance)
@@ -176,7 +182,7 @@ enum Snapshotter {
                 try? await Task.sleep(nanoseconds: 1_500_000_000)
                 if let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) {
                     host.cacheDisplay(in: host.bounds, to: rep)
-                    try? rep.representation(using: .png, properties: [:])?.write(to: dir.appendingPathComponent("buttons-\(themeName).png"))
+                    try? rep.representation(using: .png, properties: [:])?.write(to: dir.appendingPathComponent("\(gallery.name)-\(themeName).png"))
                 }
                 window.orderOut(nil)
             }

@@ -12,8 +12,16 @@ struct SettingsView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     enum Section: String, CaseIterable, Identifiable {
-        case accounts, repositories, overview, appearance, alerts, launch, about
+        case accounts, repositories, overview, appearance, alerts, intelligence, launch, about
         var id: String { rawValue }
+
+        /// The sections this Mac has: Intelligence only where the model can run (now or after a
+        /// fix in System Settings) and a feature that uses it exists.
+        @MainActor static var visible: [Section] {
+            let status = IntelligenceStatus.shared.availability
+            let intelligence = status != .unsupported && !IntelligenceFeature.shipped.isEmpty
+            return allCases.filter { $0 != .intelligence || intelligence }
+        }
         var label: String {
             switch self {
             case .accounts: "Accounts"
@@ -21,6 +29,7 @@ struct SettingsView: View {
             case .overview: "Overview"
             case .appearance: "Appearance"
             case .alerts: "Notifications"
+            case .intelligence: "Intelligence"
             case .launch: "Launch"
             case .about: "About"
             }
@@ -32,6 +41,7 @@ struct SettingsView: View {
             case .overview: "list.bullet.rectangle"
             case .appearance: "circle.lefthalf.filled"
             case .alerts: "bell"
+            case .intelligence: "sparkles"
             case .launch: "power"
             case .about: "info.circle"
             }
@@ -52,6 +62,7 @@ struct SettingsView: View {
                     case .overview: OverviewSettingsView()
                     case .appearance: AppearanceSection()
                     case .alerts: AlertsSection()
+                    case .intelligence: IntelligenceSection()
                     case .launch: LaunchSection()
                     case .about: AboutSection()
                     }
@@ -118,7 +129,7 @@ private struct Identity: View {
                 .foregroundStyle(Soot.ink).lineLimit(1)
                 .accessibilityAddTraits(.isHeader)
             VStack(spacing: 2) {
-                ForEach(SettingsView.Section.allCases) { s in
+                ForEach(SettingsView.Section.visible) { s in
                     let on = s == section
                     Button {
                         withAnimation(reduceMotion ? nil : .spring(response: 0.3, dampingFraction: 0.85)) { section = s }
@@ -1223,6 +1234,90 @@ private struct NotificationPreview: View {
         .background(Soot.ground, in: RoundedRectangle(cornerRadius: 14))
         .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(Soot.line))
         .accessibilityHidden(true)
+    }
+}
+
+// MARK: - Intelligence
+
+/// What the Mac's own model does in Dever: one switch per use, the language of summaries.
+/// While the model is off or not ready, the reason and the way to System Settings instead.
+private struct IntelligenceSection: View {
+    @ObservedObject private var status = IntelligenceStatus.shared
+    @AppStorage(IntelligencePreferences.summaryLanguageKey) private var language = IntelligencePreferences.SummaryLanguage.source.rawValue
+
+    private var headline: String {
+        switch status.availability {
+        case .available: "Runs on this Mac. Nothing leaves it."
+        case .off: "Apple Intelligence is off on this Mac"
+        case .notReady, .unsupported: "Apple Intelligence is not ready on this Mac yet"
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            SectionHead(title: "Intelligence", detail: headline)
+            if status.availability == .available {
+                ForEach(IntelligenceFeature.Group.allCases) { group in
+                    let features = group.features.filter { IntelligenceFeature.shipped.contains($0) }
+                    if !features.isEmpty {
+                        Text(group.rawValue).font(.system(size: 12, weight: .semibold)).foregroundStyle(Soot.muted)
+                            .padding(.leading, 16).padding(.bottom, 8)
+                            .accessibilityAddTraits(.isHeader)
+                        SettingRows {
+                            ForEach(features) { feature in
+                                let last = feature == features.last && group != .summaries
+                                IntelligenceSwitch(feature: feature, divided: !last)
+                            }
+                            if group == .summaries {
+                                SettingRow(title: "Language", divided: false) {
+                                    SegmentPicker(label: "Language of summaries",
+                                                  options: IntelligencePreferences.SummaryLanguage.allCases.map { (label: $0.label, value: $0.rawValue) },
+                                                  selection: $language)
+                                }
+                            }
+                        }
+                        .padding(.bottom, 24)
+                    }
+                }
+            } else {
+                SettingRows {
+                    SettingRow(title: status.availability == .off ? "Turn it on to use it here" : "Dever will use it once it is ready",
+                               detail: "Summaries and drafts are written on this Mac. Nothing leaves it.",
+                               divided: false) {
+                        ExternalLink("Open System Settings", destination: IntelligenceInvitation.settingsURL,
+                                     lift: Soot.ground)
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// One use of the model, on or off. Turning it off removes what it had written.
+private struct IntelligenceSwitch: View {
+    let feature: IntelligenceFeature
+    let divided: Bool
+    @AppStorage private var on: Bool
+
+    init(feature: IntelligenceFeature, divided: Bool) {
+        self.feature = feature
+        self.divided = divided
+        _on = AppStorage(wrappedValue: true, feature.settingKey)
+    }
+
+    private func set(_ value: Bool) {
+        on = value
+        if !value { IntelligenceStore.shared.drop(feature) }
+    }
+
+    var body: some View {
+        SettingRow(title: feature.title, detail: feature.detail, divided: divided, tap: { set(!on) }) {
+            HStack(spacing: 10) {
+                if feature == .detectedMentions { GeneratedMark(size: 12, mention: true) }
+                Toggle(feature.title, isOn: Binding(get: { on }, set: set))
+                    .labelsHidden().toggleStyle(.switch).tint(Soot.lime).controlSize(.small)
+            }
+        }
     }
 }
 

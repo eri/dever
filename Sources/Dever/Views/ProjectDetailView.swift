@@ -591,6 +591,7 @@ struct ProjectDetailView: View {
             } else if messages.isEmpty {
                 QuietEmpty(symbol: "bubble.left", text: "No messages yet")
             } else {
+                if !slackExpanded { IntelligenceInvitation() }
                 SlackThreadView(messages: messages, users: users, domain: app.slack?.domain,
                                 channelID: project.slack?.id, channelName: project.slack?.name, otherChannels: linkedChannels,
                                 shown: shownMessages, railMessages: railPlan.messages, readUpTo: lastRead,

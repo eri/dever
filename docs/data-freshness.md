@@ -349,6 +349,7 @@ already exists for this).
 | Repository mode or workspace repository | Which pull requests belong to which project | Whole Overview refresh | Recompute from the stores; fetch only repositories not yet loaded |
 | Refresh every | The background cadence | Read at the next tick | Keep |
 | System Settings for notifications and back | Permission | Rechecked on activation | Keep |
+| System Settings for Apple Intelligence and back (Settings › Intelligence, the invitation in the Slack rail) | Whether the Mac's model can be used | Read again on activation and when the system says it changed (`IntelligenceStatus`); no request | Keep |
 
 ### Onboarding
 

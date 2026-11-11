@@ -242,14 +242,19 @@ Pipelines
   `Motion`), links through the existing button roles.
 - Tests in `Tests/DeverTests`: thresholds, keys and invalidation, input budgeting and truncation, what
   each failure does. The model itself is behind a protocol so tests run without it.
-- Snapshots: a `DEVER_SNAPSHOT_INTELLIGENCE` fixture feeds made-up generated texts, so captures need
-  neither the model nor the network.
+- Snapshots: `DEVER_SNAPSHOT_INTELLIGENCE=available|notReady|off|unsupported` stands in for the system's
+  answer and shows every feature's interface, built or not, so captures need neither the model nor the
+  network. With `DEVER_SNAPSHOT_GALLERY=1` it also writes `generated-{dark,light}.png`: the marks, a
+  text being written, a written one, the invitation.
+- `IntelligenceFeature.built` lists the features that exist. A feature not in it has no switch, no
+  interface and no invitation, and Settings › Intelligence is not listed while the set is empty: the
+  ground can ship before any feature does.
 
 ## 9. Plan
 
 | Phase | Content | Depends on |
 | --- | --- | --- |
-| 0. Ground | Run the probe on a ready model and record context size and timings here. `Intelligence` service and availability gating, `IntelligenceStore`, the mark, Settings › Intelligence, the one-time invitation, snapshot fixture. No feature visible yet. | the model downloaded on the development Mac |
+| 0. Ground | **Built:** `Intelligence` service and availability gating, `IntelligenceStore`, the mark and the generated block, Settings › Intelligence, the one-time invitation, snapshot states, tests. No feature visible yet (`IntelligenceFeature.built` is empty). **Left:** run the probe on a ready model and record context size and timings here. | the model downloaded on the development Mac |
 | 1. Slack catch-up | 5.1 in the rail, then 5.2 in the catch-up, then 5.2 in the Overview. | 0 |
 | 2. Writing | `issueCreate` and the sheet (useful without the model), its filling (5.3), then the reply draft (5.4). | 0; the sheet itself depends on nothing |
 | 3. Issue summary | 5.5. | 0 |
