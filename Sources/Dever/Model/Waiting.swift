@@ -4,12 +4,7 @@ import Foundation
 /// whose review is asked of you, Slack messages that name you, and the rest of what arrived in
 /// the channel since you last read it. Each item knows where it opens inside Dever.
 struct WaitingItem: Identifiable, Equatable {
-    enum Kind: Equatable {
-        case mention, review, unread
-        /// A message that speaks of you by name without a Slack mention: found by Dever, never
-        /// drawn as a mention.
-        case detected
-    }
+    enum Kind: Equatable { case mention, review, unread }
 
     let kind: Kind
     let text: String
@@ -25,7 +20,7 @@ struct WaitingItem: Identifiable, Equatable {
 
     var symbol: String {
         switch kind {
-        case .mention, .detected: "at"
+        case .mention: "at"
         case .review: "arrow.triangle.pull"
         case .unread: "bubble.left"
         }
@@ -33,12 +28,9 @@ struct WaitingItem: Identifiable, Equatable {
 }
 
 extension ProjectSnapshot {
-    /// Mentions first (someone is asking you), then review requests, then the messages that
-    /// speak of you without a mention, then one line for the rest of the unread messages;
-    /// newest first within each kind.
-    /// - Parameter detected: "Detected mentions" is on (Settings › Intelligence). Off, those
-    ///   messages are unread messages like the others.
-    func waiting(channel: String?, detected: Bool = false) -> [WaitingItem] {
+    /// Mentions first (someone is asking you), then review requests, then one line for the
+    /// rest of the unread messages; newest first within each kind.
+    func waiting(channel: String?) -> [WaitingItem] {
         var out: [WaitingItem] = []
         for m in slack?.mentions ?? [] {
             out.append(.init(kind: .mention, text: "\(m.author): \(m.text)", date: m.date, target: .slack(ts: m.ts)))
@@ -47,15 +39,11 @@ extension ProjectSnapshot {
             out.append(.init(kind: .review, text: "Review #\(r.number) \(r.title)", date: r.date,
                              target: .pull(issue: r.issue, url: r.url)))
         }
-        let found = detected ? slack?.detected ?? [] : []
-        for m in found {
-            out.append(.init(kind: .detected, text: "\(m.author): \(m.text)", date: m.date, target: .slack(ts: m.ts)))
-        }
-        if let s = slack, let unread = s.unread, unread > s.mentions.count + found.count, let first = s.firstUnreadTS {
-            let rest = unread - s.mentions.count - found.count
+        if let s = slack, let unread = s.unread, unread > s.mentions.count, let first = s.firstUnreadTS {
+            let rest = unread - s.mentions.count
             let count = s.unreadCapped ? "\(rest)+" : "\(rest)"
             let place = channel.map { " in #\($0)" } ?? ""
-            out.append(.init(kind: .unread, text: s.mentions.isEmpty && found.isEmpty ? "\(count) unread\(place)" : "\(count) more unread\(place)",
+            out.append(.init(kind: .unread, text: s.mentions.isEmpty ? "\(count) unread\(place)" : "\(count) more unread\(place)",
                              date: s.lastUnreadAt ?? Date(), target: .slack(ts: first)))
         }
         return out

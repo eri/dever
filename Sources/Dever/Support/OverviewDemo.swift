@@ -62,10 +62,9 @@ enum OverviewDemo {
         s = ProjectSnapshot()
         s.linear = linear(done: 6, total: 11)
         s.delivery = delivery(done: 6, total: 11)
-        s.slack = .init(messagesThisWeek: 12, lastActivity: ago(25), lastAuthor: "Ana", unread: busy ? 2 : 0,
+        s.slack = .init(messagesThisWeek: 12, lastActivity: ago(25), lastAuthor: "Ana", unread: busy ? 1 : 0,
                         firstUnreadTS: busy ? ts(25) : nil, lastUnreadAt: busy ? ago(25) : nil,
-                        mentions: busy ? [.init(ts: ts(25), author: "Ana", text: "the invoice export fails on Safari for every customer with more than one VAT rate, I tried clearing the cache and switching accounts but nothing changes, any idea?", date: ago(25))] : [],
-                        detected: busy ? [.init(ts: ts(18), author: "Marco", text: "Sam wrote the export, he should look at the rounding before we ship", date: ago(18))] : [])
+                        mentions: busy ? [.init(ts: ts(25), author: "Ana", text: "the invoice export fails on Safari for every customer with more than one VAT rate, I tried clearing the cache and switching accounts but nothing changes, any idea?", date: ago(25))] : [])
         g = ProjectSnapshot.GitHubStats(openPRs: 2, pipeline: .failing)
         g.failingRepositories = ["demo/billing"]
         s.github = g

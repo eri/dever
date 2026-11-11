@@ -30,9 +30,6 @@ struct ProjectSnapshot {
         var lastUnreadAt: Date?
         /// The unread messages that name you, newest first.
         var mentions: [Mention] = []
-        /// The unread messages that speak of you by name without a mention, newest first
-        /// (`DetectedMention`). Never among `mentions`: shown apart, behind their switch.
-        var detected: [Mention] = []
         /// Every unread message's `ts`, so reading part of the channel can be subtracted.
         var unreadTS: [String] = []
         /// More unread messages than one call brings (200): the count is shown as "200+".
@@ -297,16 +294,12 @@ final class OverviewStore: ObservableObject {
     func slackRead(_ project: UUID, upTo ts: String) {
         guard var s = snapshots[project]?.slack else { return }
         s.mentions.removeAll { SlackTS.isAtOrBefore($0.ts, ts) }
-        s.detected.removeAll { SlackTS.isAtOrBefore($0.ts, ts) }
         s.unreadTS.removeAll { SlackTS.isAtOrBefore($0, ts) }
         if s.unread != nil { s.unread = s.unreadTS.count }
         s.firstUnreadTS = s.unreadTS.min { (Double($0) ?? 0) < (Double($1) ?? 0) }
         if s.unreadTS.isEmpty { s.lastUnreadAt = nil; s.unreadCapped = false }
         snapshots[project]?.slack = s
     }
-
-    /// Tests only: a project's snapshot, without a cycle.
-    func setForTesting(_ snapshot: ProjectSnapshot, for project: UUID) { snapshots[project] = snapshot }
 
     /// - Parameter quiet: a cycle nobody asked for: the Refresh button and the header stay
     ///   still (the very first load always shows).
@@ -481,7 +474,6 @@ final class OverviewStore: ObservableObject {
                             .init(ts: m.ts, author: m.user.flatMap { users[$0]?.name } ?? "Someone",
                                   text: SlackPlain.text(m.text ?? "", users: users), date: m.date)
                         }
-                    stats.detected = DetectedMention.find(in: unread, me: me, users: users)
                 }
             }
             return .success(stats)

@@ -63,7 +63,7 @@ enum IntelligenceFeature: String, CaseIterable, Identifiable, Sendable {
 
     /// The features that exist in this build. A feature not listed has no switch, no interface
     /// and no invitation; each phase of docs/on-device-ai.md adds its own here.
-    static let built: Set<IntelligenceFeature> = [.messageSummary, .detectedMentions]
+    static let built: Set<IntelligenceFeature> = [.messageSummary]
 
     /// Built, or shown for a capture (`DEVER_SNAPSHOT_INTELLIGENCE`).
     static var shipped: Set<IntelligenceFeature> {

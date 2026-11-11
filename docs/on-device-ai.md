@@ -20,7 +20,6 @@ board already answers it.
 | Kept | Where | Trigger |
 | --- | --- | --- |
 | Long messages as summaries | Slack rail, in the place of each message the rail cuts | automatic, newest first |
-| Detected mentions | the "for you" items of the Overview | automatic, by name, without the model |
 | Issue summary | top of the Linear issue page | automatic, from a threshold of length |
 | Explain a pipeline failure | "Start here" tile, pull request chip of the issue page | on demand |
 
@@ -131,58 +130,33 @@ arrow on a summarised message that asks something of the user. Lessons kept for 
 small task at a time, guided generation, no example in the instructions (the model repeats it), and a
 check in code for anything the model gets wrong in a known way.
 
-### 5.2 Detected mentions
+### 5.2 Detected mentions (dropped)
 
-**Built.** An unread message that speaks of the user by name without a Slack mention shows among the
-project's "for you" items in the Overview.
+An unread message that speaks of the user by name without a Slack mention, shown among the project's
+"for you" items in the Overview with the `@✦` glyph. Built in code with no model, pushed, and removed
+the same day:
 
-- **Where:** a "for you" item of the project, after the Slack mentions and the review requests, with
-  the `@✦` glyph and the message one click away, like a mention. It counts in the "N for you" chip and
-  leaves the "N more unread" line.
-- **Never** a system notification (rule 4), and never mixed with real mentions: its own list in the
-  snapshot (`SlackStats.detected`), its own glyph in muted ink, a tooltip and an accessible name that
-  say it is detected and may be wrong. A message that carries a real mention of the user is never
-  detected too.
-- **How: in code, with no model** (`DetectedMention`). The model cannot be trusted to say who a message
-  is about (9b), so nothing is asked of it. A message is kept when its prose holds a word of the user's
-  display name as a whole word, whatever the case and the accents:
-  - words of three letters or more; initials and particles do not count;
-  - a word another person of the workspace also carries names no one (two people called Sam: "Sam"
-    is dropped, the family name still counts); bots do not count as people;
-  - prose only: mentions of others, channels, links, addresses, inline code and code blocks are
-    removed first, so a name in a branch, a URL or a command is not a mention;
-  - a name that is also a common English or French word (a short fixed list: Will, Mark, Rose, Max,
-    Pierre…) counts only with its capital, and at the head of a sentence only when it is called out
-    ("Will, can you…"). "Will you merge?", "Mark this as done" and "it will break" name no one.
-- **What it misses, by choice** (silent rather than inventive): a common-word name written without
-  its capital ("pierre tu regardes ?") or heading a sentence without a comma ("Mark knows the billing
-  code"); a nickname that is not a word of the display name; "he wrote that screen, he should look",
-  which names nobody. What it still gets wrong: a month or a word with a capital in mid-sentence for
-  someone called June or Rose, and a message that speaks of the user without asking anything
-  ("Sam fixed that yesterday").
-- **Checked and not used:** the system's spelling dictionary takes "sam", "tom" and "martin" for
-  ordinary words, and the system's word tagger (`NLTagger`) reads a first name written without its capital at the head
-  of a French sentence as a pronoun and the one in "Will, can you review?" as a verb. Neither can tell a name from a word.
-- **The model as a filter, measured and not used so far.** Keeping only the messages the model files
-  as Request or Question (the kinds of 5.7) was measured on the real model with 20 invented short
-  messages that name the reader, French and English, twice each
-  (`RealModelTests.testKindOfShortMessagesThatNameTheReader`): 36 of 40 right, 1.4 to 3.5 s a message.
-  One real request was dropped in one pass of two ("On attend le retour de Sam sur le front pour
-  merger" came back as Problem, then as Request), and three plain statements were kept ("Sam a déjà
-  mergé la PR, on peut tester" as Request both times, "Sam is off tomorrow, I'll cover the release"
-  once). The same message does not always get the same kind, and the kind says that something is
-  asked, not that it is asked of the reader.
-- **Follows the read cursor:** reading the channel in Dever removes them in place (`slackRead`), like
-  mentions.
-- **Switch:** "Detected mentions" in Settings › Intelligence. Off, these messages are unread messages
-  like the others. The switch lives on that page, so the feature shows only where the page does (the
-  model available), although it does not use the model.
-- **Data contract.** Reads: the unread messages and the members' names the Overview's cycle already
-  holds (`OverviewStore.loadSlack`); nothing new. Writes: none. Invalidates: nothing. Budget: that of
-  "Slack read cursor, unread, mentions". Loading: none of its own, it arrives with the Slack part of
-  the row. Failure: a failed cycle keeps the last list with the row's age. Exits: opening the message
-  reads the channel, which removes the item. Cost: no request, no generation.
-- **Rule 2 holds:** the Slack mentions are unchanged; detected ones are added beside them.
+1. **A Slack profile is not a name.** The match can only know the words of the display name and of the
+   full name. People rename themselves for fun (a first name bent into a pun), teams use nicknames
+   that are in no field, and then the message that says the real first name is never found.
+2. **Who wants to be read uses a mention.** What is left for detection is mostly messages that speak
+   of the user without asking anything ("Sam fixed that yesterday"): noise among the "for you" items.
+3. **The model does not rescue it.** Keeping only the messages the model files as Request or Question
+   (the kinds of 5.7) was measured on the real model with 20 invented short messages that name the
+   reader, French and English, twice each: 36 of 40 right, 1.4 to 3.5 s a message. One real request
+   was dropped in one pass of two ("On attend le retour de Sam sur le front pour merger": Problem,
+   then Request), three plain statements were kept ("Sam a déjà mergé la PR, on peut tester" as Request
+   both times). The same message does not always get the same kind, and the kind says that something
+   is asked, not that it is asked of the reader.
+
+What the matching taught, for any later use of names: whole words of three letters or more with case
+and accents folded; a word a colleague also carries names no one; mentions of others, links, addresses
+and code are removed first; a name that is also a common word (Will, Mark, Rose) needs its capital and
+more at the head of a sentence. The system's spelling dictionary takes "sam", "tom" and "martin" for
+ordinary words, and the system's word tagger (`NLTagger`) reads a first name written without its
+capital at the head of a French sentence as a pronoun: neither can tell a name from a word.
+
+The `@✦` mark and the "Detected mentions" case of `IntelligenceFeature` stay unused.
 
 ### 5.3 Issue from a message (dropped)
 
@@ -280,7 +254,6 @@ Runs on this Mac. It can be wrong: the original is always one click away.
 
 Summaries
   Long messages                         [on]
-  Detected mentions  @✦                 [on]
   Language            [ Source | English ]
 
 ┌ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ┐
@@ -346,7 +319,7 @@ Summaries
   background); one function per use, each with its instructions, its `@Generable` output and its input
   budget. Token counts with `tokenCount(for:)` where it exists, a character estimate before 26.4.
 - `Model/IntelligenceStore.swift`: app-lifetime, memory only. Holds what the model wrote by key
-  (detected mentions are not generated: they live in the Overview's snapshot); views read it, never call the model (rule 1 of CLAUDE.md).
+  (summaries, failure explanations); views read it, never call the model (rule 1 of CLAUDE.md).
 - Prompts are English instructions that name the output language; inputs are plain text
   (`SlackPlain.text`), with authors' display names, never ids.
 - Views: one `GeneratedMark` and one `GeneratedText` component (sparkle, tooltip, skeleton, fade through
@@ -372,7 +345,7 @@ Summaries
 | 1. Slack catch-up | **Dropped** after four forms on real channels (5.1). | 0 |
 | 1b. Long messages | **Built:** 5.7, with kinds and the arrow for what is asked of the user, tuned on real channels. | 0 |
 | 2. Writing | **Dropped:** issue from a message (5.3) and the reply draft (5.4). | 0 |
-| 2b. Detected mentions | **Built:** 5.2, by name in code, in the Overview. | |
+| 2b. Detected mentions | **Dropped:** built by name in code, removed (5.2). | |
 | 3. Issue summary | 5.5. | 0 |
 | 4. Pipeline failure | job and log reads, then 5.6. | 0 |
 
@@ -390,6 +363,7 @@ Apple's on-device model (about three billion parameters, 4,096 tokens) was put t
 | Propose an issue from a message | Dropped: good titles, a description that repeats the message, a priority that cannot be trusted. |
 | Draft a reply | Dropped: safe enough to send means too bland to help. |
 | Say who a request is for | Never trusted: done in code (`MessageSummary.isForReader`). |
+| Find messages that speak of the user without a mention | Dropped (5.2): done in code, defeated by what people call themselves on Slack. |
 
 The pattern: the model transforms one short text well; it does not weigh several texts against each
 other, judge importance, or speak for someone. Anything left in the plan is to be measured against that
@@ -407,6 +381,6 @@ before it is built.
   (only opened threads are loaded). A busy thread is where decisions are made; loading unread replies
   for the catch-up costs one request per thread and needs its own budget row.
 - **Detected mentions with no name.** "He wrote that screen, he should look" needs the thread around
-  it and a judgement the model does not make reliably: not detected (5.2).
+  it and a judgement the model does not make reliably; detected mentions are dropped (5.2).
 - **Onboarding wording.** Settled: the tooltip said Dever "never posts on your behalf" while thread
   replies post as the user. It now says Dever "posts only what you write and send".

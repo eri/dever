@@ -10,9 +10,6 @@ import SwiftUI
 struct OverviewView: View {
     @EnvironmentObject var app: AppState
     @EnvironmentObject var store: OverviewStore
-    @ObservedObject private var intelligence = IntelligenceStatus.shared
-    /// Read so that the switch in Settings redraws the list.
-    @AppStorage(IntelligenceFeature.detectedMentions.settingKey) private var detectedMentionsOn = true
     let open: (Project) -> Void
     let newProject: () -> Void
     let importFrom: (ImportSheet.Source) -> Void
@@ -53,11 +50,10 @@ struct OverviewView: View {
     private var settings: OverviewSettings { app.overview }
 
     private var entries: [Entry] {
-        let detected = intelligence.offers(.detectedMentions)
-        return app.projects.map { p in
+        app.projects.map { p in
             let s = store.snapshots[p.id]
             return Entry(project: p, status: p.status(s), snapshot: s,
-                         waiting: s?.waiting(channel: p.slack?.name, detected: detected) ?? [],
+                         waiting: s?.waiting(channel: p.slack?.name) ?? [],
                          last: s?.lastActivity(channel: p.slack?.name))
         }
     }
@@ -580,16 +576,11 @@ private struct ItemRow: View {
     var body: some View {
         Button(action: action) {
             HStack(spacing: 10) {
-                if item.kind == .detected {
-                    // Its own glyph and tooltip: never taken for a Slack mention.
-                    GeneratedMark(size: 10, mention: true).fixedSize().frame(width: 16)
-                } else {
-                    Image(systemName: item.symbol)
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(item.kind == .mention ? Soot.lime : Soot.muted)
-                        .frame(width: 16)
-                        .accessibilityHidden(true)
-                }
+                Image(systemName: item.symbol)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(item.kind == .mention ? Soot.lime : Soot.muted)
+                    .frame(width: 16)
+                    .accessibilityHidden(true)
                 Text(item.text).font(.system(size: 13)).foregroundStyle(Soot.ink).lineLimit(1).truncationMode(.tail)
                 Text("· \(Brief.ago(item.date))").font(.system(size: 12)).foregroundStyle(Soot.muted).monospacedDigit()
                     .fixedSize()
@@ -602,7 +593,7 @@ private struct ItemRow: View {
         }
         .buttonStyle(RowButton(lift: .ground))
         .help(item.text)
-        .accessibilityLabel("\(item.kind == .detected ? "Detected mention, may be wrong: " : "")\(item.text), \(item.date.formatted(.relative(presentation: .named)))")
+        .accessibilityLabel("\(item.text), \(item.date.formatted(.relative(presentation: .named)))")
         .accessibilityHint(item.kind == .review ? "Opens the pull request in the project" : "Opens the message in the project")
     }
 }
