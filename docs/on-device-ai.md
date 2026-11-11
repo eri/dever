@@ -21,7 +21,7 @@ board already answers it.
 | --- | --- | --- |
 | Long messages as summaries | Slack rail, in the place of each message the rail cuts | automatic, newest first |
 | Issue summary | top of the Linear issue page | automatic, from a threshold of length |
-| Explain a pipeline failure | "Start here" tile, pull request chip of the issue page | on demand |
+| Explain a pipeline failure | "Start here" tile, pull request chip of the issue page | on demand (built) |
 
 Cut, and not to be brought back without a new decision: morning brief across projects, one sentence per
 project in the Overview table, the reason of the "Start here" pick in generated words, "since your last
@@ -198,16 +198,61 @@ time; a bolder one would speak for the user. Writing on the user's behalf is not
 
 ### 5.6 Explain a pipeline failure
 
-- **Where:** a "✦ Why?" link beside "CI failed on #N" on the "Start here" tile, and on the pull request
-  chip of the issue page.
-- **When:** on click only. No log is downloaded without it.
-- **What:** Dever loads the failed job's name and the tail of its log, then shows the job name (raw),
-  one generated sentence, and "Open log ↗". When the log does not say: "The log does not say." The
-  red state, the count and the word "failed" are GitHub's (rule 2).
-- **Needs first:** two GitHub reads Dever does not make today: the jobs of a run and the log of a job
-  (tail only, capped in bytes). Budget and cost rows in data-freshness.md section 4.
-- **Kept:** per run id, in memory; a new run drops it. The explanation carries the run's age like any
-  pipeline state.
+**Built.** "✦ Why?" beside a failed pipeline; on a click only, the failed job as GitHub names it, one
+generated sentence, and the link to the real log.
+
+- **Where:** beside "CI failed on #N" on the "Start here" tile of the Delivery board, and on the issue
+  page, whose pull request chip now reads "#N CI failed" when the copy the app already holds says so
+  (no request of its own; past twice the budget of a pull request's checks the chip is drawn muted,
+  with the age of that copy). The explanation opens under the tile, or under the issue's signals.
+- **When:** on click only. Nothing is read from GitHub and nothing is generated without it.
+- **What shows,** in this order: the job's name and the step that failed, raw, with the run's age
+  ("failed 12m ago") and how many other checks failed; the sentence, behind the sparkle; "Open log ↗",
+  always. The red state, the count and the word "failed" are GitHub's (rule 2).
+- **Which job:** the Actions job that failed first on the pull request's head commit (what fails after
+  it often fails because of it). A check another service reports has no log to read: its name, "This
+  check has no log Dever can read.", and its link.
+- **What the model reads:** not the tail of the log but the failed step alone, cut out in code
+  (`PipelineLog.excerpt`): the step's command, its last 60 lines of output at most (1,600 tokens at
+  most), the runner's error. The runner's time stamps, colour codes, set-up and clean-up are removed.
+- **"The log does not say why." is decided in code, not by the model.** When no line of the step
+  reports something going wrong (a step that prints its progress and exits 1, a formatter that prints
+  a diff, warnings only), the model is not asked at all. Asked whether the log states the error, the
+  real model answered yes every time, including for a log that only waits and exits: the boolean is
+  kept in the guided answer so that the model decides before it writes, and is not relied on.
+- **The model must point before it writes.** The guided answer is, in this order: does the log state
+  the error, the line of the log that states it (copied), the sentence. The sentence is shown only
+  when that line is really in the log (four words in five of one line, the model tidies as it
+  copies), is not the runner's exit code, and is not a warning. Otherwise: the job, the log link, and
+  no sentence (rule 4).
+- **Measured on the real model** (`RealModelTests.testWhyAStepFailed`, 8 made-up steps and 5 real
+  public job logs, three passes each, 3 to 7 s an answer). First wording: 24 sentences, the cause
+  right each time but the step misnamed ("the test in ExportButton.tsx had a type error", "Test
+  ./scripts/deploy-preview.sh failed") because the instructions said "naming the test, the file or
+  the command". Second: "the build failed" for runs of tests. Third, kept: the reader already sees
+  the job and the step, so the sentence says only what went wrong; 27 sentences, 26 faithful to the
+  log, 1 false (a deprecation warning taken for the cause, now refused in code). The sentences stay
+  close to the log's own line ("19.97 was not equal to 19.98 in tests/test_billing.py", "The C
+  compiler /usr/bin/clang is not able to compile a simple test program"): the model picks the line
+  and puts it in plain words, it does not diagnose. The three steps whose log states no error were
+  never sent to it.
+- **Failures.** Offline, a rate limit, a rejected token, anything else: one line of fixed words and
+  "Try again"; nothing is kept. No failed check on the latest commit any more: said so, and the
+  repository is marked to be read again. The log gone or not readable with this account (403, 404,
+  410): the job, "The log can't be read from here.", the link. The model refusing or failing: the
+  job and the link, no sentence, no message.
+- **Kept:** in `FailureStore`, memory only, by repository and pull request. Dropped when the pull
+  request's checks are no longer failing in `GitHubStore` (a new run started or passed), when the
+  switch is turned off, and never refreshed by a timer. It carries the run's age.
+- **Switch:** "Explain a failure" in Settings › Intelligence. Off: no link, nothing kept.
+- **Data contract.** Reads: two new ones, on click only: `failedChecks(repo, pull)` (one GraphQL
+  query, about 1 kB for ten checks) and `jobLogTail(repo, job)` (GitHub's redirect, the size of the
+  log, then its last 64 kB at most, never the whole log; the token is not sent to the storage host).
+  Writes: none. Invalidates: `GitHubStore`'s repository when GitHub no longer reports a failure.
+  Budget: none, read once per run and per ask. Loading: skeleton lines for the job, then for the
+  sentence; the job's name shows as soon as GitHub answers. Failure: as above. Exits: "Open log"
+  opens GitHub; the pull request's checks are refreshed on return by the page's own rule. Cost: three
+  API requests and at most 64 kB per ask; one generation of 3 to 7 s.
 
 ### 5.7 Long messages as summaries
 
@@ -394,7 +439,7 @@ Summaries
 | 2. Writing | **Dropped:** issue from a message (5.3) and the reply draft (5.4). | 0 |
 | 2b. Detected mentions | **Dropped:** built by name in code, removed (5.2). | |
 | 3. Issue summary | 5.5. | 0 |
-| 4. Pipeline failure | job and log reads, then 5.6. | 0 |
+| 4. Pipeline failure | **Built:** the failed checks and the log tail read on click, then 5.6. | 0 |
 
 Each phase updates data-freshness.md (a budget row for each new kind of data in section 4, the new exits
 in section 5) in the same change.
@@ -409,6 +454,7 @@ Apple's on-device model (about three billion parameters, 4,096 tokens) was put t
 | Sum up a channel (four forms) | Dropped: vague or false across several messages; the reliable form repeated the rail. |
 | Propose an issue from a message | Dropped: good titles, a description that repeats the message, a priority that cannot be trusted. |
 | Draft a reply | Dropped: safe enough to send means too bland to help. |
+| Say why a pipeline step failed, from its log | **Kept**, with the judgement taken away: code cuts out the failed step, decides whether it states an error at all, and checks the line the model says it rests on. |
 | Say who a request is for | Never trusted: done in code (`MessageSummary.isForReader`). |
 | Find messages that speak of the user without a mention | Dropped (5.2): done in code, defeated by what people call themselves on Slack. |
 

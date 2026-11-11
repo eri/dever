@@ -36,6 +36,9 @@ protocol LanguageModel: Sendable {
     func respond(instructions: String, prompt: String, maximumTokens: Int?) async throws -> String
     /// One message shortened: what kind of message it is, and its point in a sentence.
     func summarise(instructions: String, prompt: String) async throws -> MessageSummaryAnswer
+    /// A failed step read from the end of its log: whether the log states the error, the line
+    /// that does, and one sentence.
+    func explainFailure(instructions: String, prompt: String) async throws -> FailureAnswer
 }
 
 /// What the model says of one message.
@@ -56,6 +59,17 @@ private struct MessageSummaryShape {
     var kind: String
 }
 
+@available(macOS 26.0, *)
+@Generable
+private struct FailureShape {
+    // In this order: the model decides, then points at the line, and only then writes.
+    @Guide(description: "True only when a line of the log reports the error that made the step fail. False when the step only stops with an exit code and no line says what went wrong")
+    var logStatesTheError: Bool
+    @Guide(description: "The one line of the log that states the error, copied exactly as written. Empty when the log does not state the error")
+    var line: String
+    @Guide(description: "What failed and why, in one sentence of at most 25 words, using only what the log shows. Empty when the log does not state the error")
+    var sentence: String
+}
 #endif
 
 enum IntelligenceError: Error, Equatable {
@@ -117,6 +131,19 @@ struct SystemLanguageModelClient: LanguageModel {
             let shape = try await session.respond(to: prompt, generating: MessageSummaryShape.self,
                                                   options: GenerationOptions(maximumResponseTokens: 100)).content
             return MessageSummaryAnswer(kind: shape.kind, summary: shape.summary)
+        }
+        #endif
+        throw IntelligenceError.unavailable
+    }
+
+    func explainFailure(instructions: String, prompt: String) async throws -> FailureAnswer {
+        #if canImport(FoundationModels)
+        if #available(macOS 26.0, *) {
+            guard SystemLanguageModel.default.availability == .available else { throw IntelligenceError.unavailable }
+            let session = LanguageModelSession(instructions: instructions)
+            let shape = try await session.respond(to: prompt, generating: FailureShape.self,
+                                                  options: GenerationOptions(maximumResponseTokens: 200)).content
+            return FailureAnswer(stated: shape.logStatesTheError, line: shape.line, sentence: shape.sentence)
         }
         #endif
         throw IntelligenceError.unavailable

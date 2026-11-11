@@ -7,6 +7,11 @@ import SwiftUI
 struct IssueDetailView: View {
     @EnvironmentObject var app: AppState
     @ObservedObject private var store = IssueStore.shared
+    @ObservedObject private var github = GitHubStore.shared
+    @ObservedObject private var intelligence = IntelligenceStatus.shared
+    @AppStorage(IntelligenceFeature.explainFailure.settingKey) private var explainsFailures = true
+    /// The pull request whose failed pipeline is being explained under the signals.
+    @State private var why: FailureStore.Key?
     @Environment(\.dismiss) private var dismiss
     let route: IssueRoute
 
@@ -141,8 +146,15 @@ struct IssueDetailView: View {
         let subsText = inQA == 0 ? "\(done) of \(subs.count) sub-issues done"
             : inQA == subs.count ? "All \(subs.count) sub-issues in QA"
             : "\(done) done · \(inQA) in QA of \(subs.count) sub-issues"
-        let code = pulls(d).map(\.ref)
-        return FlowRow(spacing: 8) {
+        var open = pulls(d).filter { $0.ref.state != .merged }
+        // Captures: a made-up open pull request, so the failed chip shows whatever the issue holds.
+        if Snapshotter.directory != nil, ProcessInfo.processInfo.environment["DEVER_SNAPSHOT_WHY"] != nil, open.isEmpty {
+            open = [(IssueStore.PullRef(number: 951, title: "Demo", state: .open), URL(string: "https://github.com/demo/app/pull/951")!)]
+        }
+        let code = open.prefix(2)
+        let explains = explainsFailures && intelligence.offers(.explainFailure)
+        return VStack(alignment: .leading, spacing: 10) {
+          FlowRow(spacing: 8) {
             statusMenu(current)
             priorityMenu(current)
             assigneeMenu(current)
@@ -169,11 +181,34 @@ struct IssueDetailView: View {
                 }
             }
             // Merged work has its own banner below; open pull requests are a signal here.
-            ForEach(code.filter { $0.state != .merged }.prefix(2), id: \.number) { pull in
+            ForEach(Array(code), id: \.ref.number) { entry in
+                let pull = entry.ref
                 let n = String(pull.number)
-                signal(symbol: "arrow.triangle.pull", text: "#\(n) \(pull.state.label.lowercased())",
-                       tint: Theme.chart2, label: "Pull request \(n), \(pull.state.label)")
+                // Its checks failed, by the copy the app already holds: said here with its age,
+                // and never in red once that copy is old.
+                if let key = PullFailure.key(url: entry.url.absoluteString), let readAt = PullFailure.failed(key, in: github) {
+                    let stale = PullFailure.isStale(readAt)
+                    signal(symbol: "xmark.circle.fill", text: stale ? "#\(n) CI failed · read \(Brief.ago(readAt)) ago" : "#\(n) CI failed",
+                           tint: stale ? nil : Theme.negative, label: "Pull request \(n), CI failed\(stale ? ", read \(Brief.ago(readAt)) ago" : "")")
+                    if explains {
+                        // A capture shows it open.
+                        let _ = Snapshotter.directory != nil && why == nil && ProcessInfo.processInfo.environment["DEVER_SNAPSHOT_WHY"] == "open"
+                            ? DispatchQueue.main.async { why = key } : ()
+                        WhyLink(open: why == key) { Motion.run(Motion.ui, fade: true) { why = why == key ? nil : key } }
+                            .padding(.leading, -6).frame(height: 30)
+                    }
+                } else {
+                    signal(symbol: "arrow.triangle.pull", text: "#\(n) \(pull.state.label.lowercased())",
+                           tint: Theme.chart2, label: "Pull request \(n), \(pull.state.label)")
+                }
             }
+          }
+          if let why, explains {
+              FailurePanel(key: why, lift: Soot.ground)
+                  .padding(.horizontal, 12).padding(.vertical, 10)
+                  .background(Soot.surface, in: RoundedRectangle(cornerRadius: 8))
+                  .transition(.opacity)
+          }
         }
     }
 

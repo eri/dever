@@ -45,6 +45,11 @@ struct DeliveryBoard: View {
     @ObservedObject private var previews = PreviewStore.shared
     @EnvironmentObject private var appState: AppState
     @State private var showsAllShipped = false
+    @ObservedObject private var intelligence = IntelligenceStatus.shared
+    @AppStorage(IntelligenceFeature.explainFailure.settingKey) private var explainsFailures = true
+    /// The pull request whose failure is being explained under the "Start here" tile.
+    @State private var why: FailureStore.Key? = ProcessInfo.processInfo.environment["DEVER_SNAPSHOT_WHY"] == nil ? nil
+        : .init(repository: "demo/app", number: 0)
     @State private var teams: [String: LinearTeamContext] = [:]
     @State private var notice: Notice?
     @State private var noticeTask: Task<Void, Never>?
@@ -231,9 +236,34 @@ struct DeliveryBoard: View {
         }
     }
 
+    /// The failed pull request "Why?" can be asked of, where the feature is offered.
+    private func failure(of item: DeliveryPlan.Item) -> FailureStore.Key? {
+        guard item.situation == .ciFailed, let pull = item.pull, explainsFailures, intelligence.offers(.explainFailure) else { return nil }
+        return .init(repository: pull.repository, number: pull.number)
+    }
+
+    /// The tile and, once asked, why its pipeline failed: one block, the explanation under it.
     private func startTile(_ item: DeliveryPlan.Item, grab: Bool) -> some View {
+        let failure = failure(of: item)
+        // A capture opens it on whichever pull request the demo starts with.
+        let open = failure != nil && (why == failure || why?.number == 0)
+        return VStack(alignment: .leading, spacing: 0) {
+            startLink(item, grab: grab, failure: failure, open: open)
+            if open, let failure {
+                FailurePanel(key: failure, lift: Soot.surface)
+                    .padding(.leading, 16 + 26 + 14).padding(.trailing, 16).padding(.bottom, 14)
+                    .transition(.opacity)
+            }
+        }
+        .background(Soot.ground, in: RoundedRectangle(cornerRadius: 10))
+    }
+
+    private func startLink(_ item: DeliveryPlan.Item, grab: Bool, failure: FailureStore.Key?, open: Bool) -> some View {
         let move = move(for: item, grab: grab)
         let why = reason(item, grab: grab)
+        let ask = WhyLink(open: open, lift: Soot.surface) {
+            Motion.run(Motion.ui, fade: true) { self.why = open ? nil : failure }
+        }
         return NavigationLink(value: IssueRoute(project: project, issue: item.issue)) {
             HStack(alignment: .center, spacing: 14) {
                 SituationGlyph(situation: item.situation, size: 22)
@@ -245,6 +275,11 @@ struct DeliveryBoard: View {
                     HStack(spacing: 8) {
                         Text(verbatim: item.issue.identifier).font(.system(size: 12, weight: .medium, design: .monospaced))
                         Text(why).lineLimit(1)
+                        // Room for the link, which sits on top so it takes its own click.
+                        if failure != nil {
+                            ask.hidden().accessibilityHidden(true).padding(.leading, -6)
+                                .anchorPreference(key: WhyAnchor.self, value: .bounds) { $0 }
+                        }
                     }
                     .font(.system(size: 13)).foregroundStyle(Soot.muted)
                 }
@@ -260,6 +295,14 @@ struct DeliveryBoard: View {
         .accessibilityLabel("\(grab ? "Up for grabs" : "Start here"): \(item.issue.identifier), \(item.issue.title). \(why)")
         .accessibilityHint("Opens the issue")
         .overlay(alignment: .trailing) { moveButton(move, item: item).padding(.trailing, 16) }
+        .overlayPreferenceValue(WhyAnchor.self) { anchor in
+            GeometryReader { proxy in
+                if let anchor, failure != nil {
+                    let place = proxy[anchor]
+                    ask.position(x: place.midX, y: place.midY)
+                }
+            }
+        }
     }
 
     @ViewBuilder

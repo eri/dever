@@ -57,6 +57,30 @@ struct GitHubRun: Codable, Identifiable {
     var actor: GitHubPull.User?
 }
 
+/// A check of a pull request's head commit that failed, as GitHub names it.
+struct GitHubFailedCheck: Equatable, Sendable {
+    var name: String
+    /// Its page on GitHub: the job's log for an Actions job.
+    var url: String
+    /// The Actions job behind it, whose log can be read; nil for a check another service reports.
+    var jobID: Int?
+    /// The first step of the job that failed.
+    var step: String?
+    var completedAt: Date?
+}
+
+/// The failed checks of a pull request's head commit.
+struct GitHubFailedChecks: Equatable, Sendable {
+    var sha: String
+    var failed: [GitHubFailedCheck]
+
+    /// The check to explain: the Actions job that failed first (what fails after it often
+    /// fails because of it), or a check without a log when there is no such job.
+    var first: GitHubFailedCheck? {
+        failed.filter { $0.jobID != nil }.min { ($0.completedAt ?? .distantFuture) < ($1.completedAt ?? .distantFuture) } ?? failed.first
+    }
+}
+
 /// One pull request in full: its state, its head and its labels, with its comment count
 /// (which page of comments is the last one).
 struct GitHubPullDetail: Codable {
@@ -180,6 +204,15 @@ private final class GitHubETags: @unchecked Sendable {
             entries[key] = newValue
         }
     }
+}
+
+/// A job's log that cannot be read from here: no right to, gone, or not an answer to trust.
+enum GitHubLogError: Error, Equatable { case unavailable(Int) }
+
+/// Stops at a redirect and hands it back, so its address can be read.
+private final class NoRedirect: NSObject, URLSessionTaskDelegate {
+    func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
+                    newRequest request: URLRequest) async -> URLRequest? { nil }
 }
 
 struct GitHubClient {
@@ -447,6 +480,105 @@ struct GitHubClient {
         guard let job = jobs.first(where: { $0.status == "in_progress" }) ?? jobs.first(where: { $0.status == "queued" }) else { return nil }
         let step = job.steps?.first(where: { $0.status == "in_progress" })?.name
         return (job.name, step ?? job.name)
+    }
+
+    /// The checks of a pull request's head commit that failed, with the step each Actions job
+    /// failed on: one GraphQL query, read when someone asks why (about 1 kB for ten checks).
+    func failedChecks(_ repo: String, number: Int) async throws -> GitHubFailedChecks {
+        struct Context: Decodable {
+            struct Suite: Decodable { struct Run: Decodable { var databaseId: Int? }; var workflowRun: Run? }
+            struct Steps: Decodable { struct Step: Decodable { var name: String; var conclusion: String? }; var nodes: [Step] }
+            // A check run (an Actions job, or another app's check).
+            var name: String?, conclusion: String?, databaseId: Int?, detailsUrl: String?, completedAt: String?
+            var checkSuite: Suite?, steps: Steps?
+            // A commit status.
+            var context: String?, state: String?, targetUrl: String?, createdAt: String?
+        }
+        struct R: Decodable {
+            struct Repo: Decodable {
+                struct Pull: Decodable {
+                    struct Commits: Decodable {
+                        struct Node: Decodable {
+                            struct Commit: Decodable {
+                                struct Rollup: Decodable { struct Contexts: Decodable { var nodes: [Context] }; var contexts: Contexts }
+                                var oid: String; var statusCheckRollup: Rollup?
+                            }
+                            var commit: Commit
+                        }
+                        var nodes: [Node]
+                    }
+                    var commits: Commits
+                }
+                var pullRequest: Pull?
+            }
+            var repository: Repo?
+        }
+        var variables = Self.split(repo)
+        variables["number"] = number
+        let r = try await graphql("""
+        query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){
+          commits(last:1){nodes{commit{oid statusCheckRollup{contexts(first:100){nodes{__typename
+            ... on CheckRun{name conclusion databaseId detailsUrl completedAt checkSuite{workflowRun{databaseId}} steps(first:60){nodes{name conclusion}}}
+            ... on StatusContext{context state targetUrl createdAt}}}}}}}}}}
+        """, variables: variables, as: R.self)
+        guard let commit = r.repository?.pullRequest?.commits.nodes.first?.commit else {
+            throw AppError.message("GitHub: pull request #\(number) of \(repo) not found, or this account cannot see it")
+        }
+        let iso = ISO8601DateFormatter()
+        let failed = (commit.statusCheckRollup?.contexts.nodes ?? []).compactMap { c -> GitHubFailedCheck? in
+            if let name = c.name {
+                guard ["FAILURE", "TIMED_OUT", "STARTUP_FAILURE"].contains(c.conclusion ?? "") else { return nil }
+                return GitHubFailedCheck(name: name, url: c.detailsUrl ?? "",
+                                         jobID: c.checkSuite?.workflowRun?.databaseId == nil ? nil : c.databaseId,
+                                         step: c.steps?.nodes.first { $0.conclusion == "FAILURE" || $0.conclusion == "TIMED_OUT" }?.name,
+                                         completedAt: c.completedAt.flatMap(iso.date))
+            }
+            guard let name = c.context, ["FAILURE", "ERROR"].contains(c.state ?? "") else { return nil }
+            return GitHubFailedCheck(name: name, url: c.targetUrl ?? "", jobID: nil, step: nil, completedAt: c.createdAt.flatMap(iso.date))
+        }
+        return GitHubFailedChecks(sha: commit.oid, failed: failed)
+    }
+
+    /// The end of an Actions job's log: `bytes` at most, and whether its start was left out.
+    /// GitHub answers with the address of the log in its storage, which is then asked for its
+    /// size and for its last bytes only; a log shorter than `bytes` comes whole.
+    func jobLogTail(_ repo: String, jobID: Int, bytes: Int) async throws -> (data: Data, cut: Bool) {
+        let path = "/repos/\(repo)/actions/jobs/\(jobID)/logs"
+        var req = URLRequest(url: URL(string: "https://api.github.com" + path)!, cachePolicy: .reloadIgnoringLocalCacheData)
+        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        req.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
+        req.setValue("2022-11-28", forHTTPHeaderField: "X-GitHub-Api-Version")
+        var started = Date()
+        // The redirect is followed by hand: the token must not travel to the storage host.
+        let (_, resp) = try await URLSession.shared.data(for: req, delegate: NoRedirect())
+        let http = resp as? HTTPURLResponse
+        let code = http?.statusCode ?? 0
+        RequestLog.record("github", "GET \(path)", status: code, bytes: 0, since: started)
+        if code == 401 { throw AppError.unauthorized(.github) }
+        if code == 429 || (code == 403 && http?.value(forHTTPHeaderField: "x-ratelimit-remaining") == "0") {
+            let wait = http?.value(forHTTPHeaderField: "Retry-After").flatMap(Double.init) ?? 60
+            throw AppError.rateLimited(.github, retryAfter: min(max(wait, 1), 3600))
+        }
+        // 403: no right to read Actions here. 404: no such job for this account. 410: the log expired.
+        guard (300..<400).contains(code), let location = http?.value(forHTTPHeaderField: "Location").flatMap(URL.init(string:)),
+              location.scheme == "https" else { throw GitHubLogError.unavailable(code) }
+
+        var head = URLRequest(url: location, cachePolicy: .reloadIgnoringLocalCacheData)
+        head.httpMethod = "HEAD"
+        let length = ((try? await URLSession.shared.data(for: head))?.1 as? HTTPURLResponse)
+            .flatMap { $0.value(forHTTPHeaderField: "Content-Length") }.flatMap(Int.init)
+        var get = URLRequest(url: location, cachePolicy: .reloadIgnoringLocalCacheData)
+        // Without a size the whole log would come: refuse rather than download megabytes.
+        guard let length else { throw GitHubLogError.unavailable(0) }
+        let cut = length > bytes
+        if cut { get.setValue("bytes=\(length - bytes)-", forHTTPHeaderField: "Range") }
+        started = Date()
+        let (data, answer) = try await URLSession.shared.data(for: get)
+        let status = (answer as? HTTPURLResponse)?.statusCode ?? 0
+        RequestLog.record("github", "GET job log (storage)", status: status, bytes: data.count, since: started)
+        guard status == 200 || status == 206 else { throw GitHubLogError.unavailable(status) }
+        // A storage that ignored the range sent everything: keep the end.
+        return (data.count > bytes ? data.suffix(bytes) : data, cut)
     }
 
     /// Starts a workflow by hand (`workflow_dispatch`) on `ref` with its inputs.

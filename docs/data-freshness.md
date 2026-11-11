@@ -259,6 +259,8 @@ Refresh every. "Volatile" is the cadence while something is in flight.
 | Open pull requests, review decision, requested reviewers | 60 s | | activation, opened externally | GraphQL |
 | Merged pull requests | 5 min | | a pull request left the open list | GraphQL |
 | Default-branch health | 5 min | 30 s while running | activation | GraphQL |
+| Failed checks of a pull request's head commit (the failed job, its step) | on asking "Why?", once per run | | the click; dropped when the pull request's checks stop failing | GraphQL, about 1 kB |
+| End of a failed job's log, and the sentence generated from it on the Mac | on asking "Why?", once per run | | the click; dropped with the entry above; memory only (`FailureStore`) | the last 64 kB at most, never the whole log |
 | Preview environment | 60 s | 15 s while deploying, updating or deleting (30 s after a command posted from Dever) | command posted, activation | ETag |
 | Slack channel: new messages | 20 s | | reply sent, activation | `oldest` cursor |
 | Slack channel: edits, reactions, reply counts of what is shown | 60 s | | reaction or reply made here (local, at once) | latest page |
@@ -306,6 +308,7 @@ means the behaviour once sections 3.1 to 3.4 are in place.
 | Stay on the page | CI, reviews, new pull requests, messages, issue moves by others | Never updates (F1) | Visible budgets, in place |
 | Open an issue and come back | That issue | Whole page reloads behind the content (5 to 7 GitHub requests + reviews) | Nothing to fetch; the store already has the write |
 | Start / Take it / Move / Undo | One issue | Optimistic in `IssueStore`; Overview copy stale | Same, and the Overview follows because it is derived |
+| Ask "Why?" beside "CI failed on #N", "Open log" | The checks (a new run) | Nothing read before the click; then the failed checks and the end of one log, kept for that run | Dropped when the pull request's checks stop failing; a reading problem says so with "Try again" |
 | "Fix CI", "Review", open a pull request, merge on GitHub | That pull request, its checks, its issue | Old until Refresh | Mark `pulls(repo)` and `issues(project)` dirty; refresh on activation |
 | Open in Linear | That issue | Old until the page reappears | Mark `issues(project)` dirty |
 | Deploy / redeploy / delete preview | Preview phase | Optimistic phase, 30 s polling | Keep; also poll when a push started the run |
@@ -326,6 +329,7 @@ means the behaviour once sections 3.1 to 3.4 are in place.
 | Open in Linear, comment there, return | Comments, anything | Cached detail if the list's `updatedAt` is unchanged | Dirty on external open, refetch on activation |
 | Follow a blocker link | Another issue | Cached for the session when opened without `updatedAt` | Budget applies to every detail |
 | Open its pull request | The pull request | Old | Mark `pulls(repo)` dirty |
+| Ask "Why?" on a failed pull request chip, "Open log" | The checks (a new run) | The chip reads `GitHubStore`'s copy with its age; the explanation is read on the click | Dropped when the copy says the checks no longer fail; "No failed check on the latest commit" marks the repository to be read again |
 | Back | | Project page reloads everything | Nothing to fetch |
 
 ### Slack room and thread

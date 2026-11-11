@@ -1329,6 +1329,7 @@ private struct IntelligenceSwitch: View {
     private func set(_ value: Bool) {
         on = value
         if !value { IntelligenceStore.shared.drop(feature) }
+        if !value, feature == .explainFailure { FailureStore.shared.reset() }
     }
 
     var body: some View {

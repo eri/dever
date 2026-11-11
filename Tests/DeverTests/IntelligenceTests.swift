@@ -25,6 +25,12 @@ private final class FakeModel: LanguageModel, @unchecked Sendable {
         return summary
     }
 
+    var failure = FailureAnswer(stated: true, line: "", sentence: "")
+    private(set) var failurePrompts: [String] = []
+    func explainFailure(instructions: String, prompt: String) async throws -> FailureAnswer {
+        lock.withLock { failurePrompts.append(prompt) }
+        return failure
+    }
 }
 
 final class IntelligenceQueueTests: XCTestCase {
@@ -408,3 +414,94 @@ extension RealModelTests {
 }
 
 
+
+
+/// A job log as GitHub Actions writes it: the step's header, its output, the runner's error,
+/// then the clean-up.
+func actionsLog(command: String, output: [String], errors: [String] = ["Process completed with exit code 1."]) -> Data {
+    var lines = ["##[group]Run actions/checkout@v4", "with:", "  fetch-depth: 1", "##[endgroup]", "Syncing repository",
+                 "##[group]Run \(command)", "\(command)", "shell: /usr/bin/bash -e {0}", "env:", "  CI: true", "##[endgroup]"]
+    lines += output
+    lines += errors.map { "##[error]\($0)" }
+    lines += ["Post job cleanup.", "[command]/usr/bin/git version", "git version 2.51.0", "Cleaning up orphan processes"]
+    return Data(lines.enumerated().map { "2026-11-03T09:14:\(String(format: "%02d", $0.offset % 60)).1234567Z \($0.element)" }.joined(separator: "\n").utf8)
+}
+
+extension RealModelTests {
+    /// Measurement: what the real model answers on failed steps, three times each, and what
+    /// Dever would show once its checks have run. `DEVER_TEST_LOG_DIR` adds real log tails
+    /// (one file each, as downloaded) to the made-up ones.
+    func testWhyAStepFailed() async throws {
+        try XCTSkipUnless(ProcessInfo.processInfo.environment["DEVER_TEST_REAL_MODEL"] == "1", "needs the system model")
+        // (name, the log states the error, job, step, log)
+        var cases: [(String, Bool, String, String?, Data)] = [
+            ("swift-test", true, "test (macos-15)", "Run tests", actionsLog(command: "swift test", output: [
+                "[412/418] Compiling ReaderTests StreakCalendarTests.swift", "[418/418] Linking ReaderPackageTests", "Build complete! (48.21s)",
+                "Test Suite 'All tests' started at 2026-11-03 09:14:02.118.", "Test Suite 'StreakCalendarTests' started at 2026-11-03 09:14:02.120.",
+                "Test Case '-[ReaderTests.StreakCalendarTests testStreakSurvivesMidnight]' passed (0.004 seconds).",
+                "Test Case '-[ReaderTests.StreakCalendarTests testStreakAcrossTimeZoneChange]' started.",
+                "/Users/runner/work/reader/reader/Tests/ReaderTests/StreakCalendarTests.swift:88: error: -[ReaderTests.StreakCalendarTests testStreakAcrossTimeZoneChange] : XCTAssertEqual failed: (\"3\") is not equal to (\"4\") - streak should count the day in the new time zone",
+                "Test Case '-[ReaderTests.StreakCalendarTests testStreakAcrossTimeZoneChange]' failed (0.012 seconds).",
+                "Test Case '-[ReaderTests.StreakCalendarTests testEmptyHistory]' passed (0.001 seconds).",
+                "Test Suite 'StreakCalendarTests' failed at 2026-11-03 09:14:02.160.", "\t Executed 3 tests, with 1 failure (0 unexpected) in 0.017 (0.040) seconds"])),
+            ("typescript", true, "build-console", "Build", actionsLog(command: "npm run build", output: [
+                "> teacher-console@3.4.0 build", "> tsc --noEmit && vite build", "",
+                "npm warn deprecated inflight@1.0.6: This module is not supported, and leaks memory.",
+                "npm warn deprecated glob@7.2.3: Glob versions prior to v9 are no longer supported",
+                "src/screens/Results/ExportButton.tsx:42:27 - error TS2345: Argument of type 'string | undefined' is not assignable to parameter of type 'string'.",
+                "  Type 'undefined' is not assignable to type 'string'.", "", "42     downloadPdf(classId, selectedTerm);", "                             ~~~~~~~~~~~~", "",
+                "Found 1 error in src/screens/Results/ExportButton.tsx:42"], errors: ["Process completed with exit code 2."])),
+            ("waits-then-exits", false, "deploy-preview", "Deploy", actionsLog(command: "./scripts/deploy-preview.sh pr-2207", output: [
+                "Preparing bundle for pr-2207", "Uploading 214 files to preview storage", "Upload complete (38.4 MB)", "Requesting preview environment pr-2207",
+                "Waiting for environment to become ready", "Waiting for environment to become ready", "Waiting for environment to become ready", "Waiting for environment to become ready"])),
+            ("time-limit", true, "e2e (tablet)", "Run Playwright", actionsLog(command: "npx playwright test --project=tablet", output: [
+                "  Running 64 tests using 4 workers", "  ✓  1 [tablet] › library.spec.ts:12:5 › opens the library (2.1s)", "  ✓  2 [tablet] › library.spec.ts:30:5 › filters by level (1.8s)",
+                "  ✓  3 [tablet] › reader.spec.ts:9:5 › opens a book (3.0s)", "  ✓  4 [tablet] › reader.spec.ts:41:5 › plays audio (5.2s)",
+                "  ✓  5 [tablet] › streaks.spec.ts:8:5 › shows the calendar (1.4s)", "  ✓  6 [tablet] › streaks.spec.ts:26:5 › shows the reward (1.9s)",
+                "  ✓  7 [tablet] › offline.spec.ts:10:5 › downloads a book (8.8s)"],
+                errors: ["The operation was canceled.", "The job running on runner hosted-agent-7 has exceeded the maximum execution time of 30 minutes."])),
+            ("network-in-lint", true, "lint", "Install", actionsLog(command: "npm ci", output: [
+                "npm warn deprecated rimraf@3.0.2: Rimraf versions prior to v4 are no longer supported",
+                "npm warn deprecated eslint@8.57.1: This version is no longer supported. Please see https://eslint.org/version-support for other options.",
+                "npm error code ECONNRESET", "npm error syscall read", "npm error errno ECONNRESET",
+                "npm error network request to https://registry.npmjs.org/@typescript-eslint%2fparser failed, reason: read ECONNRESET",
+                "npm error network This is a problem related to network connectivity.", "npm error network In most cases you are behind a proxy or have bad network settings.",
+                "npm error A complete log of this run can be found in: /home/runner/.npm/_logs/2026-11-03T09_02_11_512Z-debug-0.log"])),
+            ("format-diff", false, "Lint", "Check formatting", actionsLog(command: "pnpm format && git diff --exit-code", output: [
+                "$ prettier --write .", "Finished in 118ms on 2591 files using 4 threads.", "diff --git a/docs/guide.md b/docs/guide.md", "index 06481aa..ae49612 100644",
+                "--- a/docs/guide.md", "+++ b/docs/guide.md", "@@ -12,3 +12,3 @@ Install", "-Run  the installer", "+Run the installer"])),
+            ("warnings-only", false, "build", "Build", actionsLog(command: "make release", output: [
+                "cc -O2 -c src/main.c", "src/main.c:14:9: warning: unused variable 'n' [-Wunused-variable]", "cc -O2 -c src/io.c", "ld -o bin/app main.o io.o", "Packaging bin/app",
+                "Uploading artifact"], errors: ["Process completed with exit code 137."])),
+            ("pytest", true, "tests (3.12)", "pytest", actionsLog(command: "pytest -q", output: [
+                "........F...                                                             [100%]", "=================================== FAILURES ===================================",
+                "______________________________ test_invoice_total ______________________________", "", "    def test_invoice_total():", ">       assert total([Line(2, 9.99)]) == 19.98",
+                "E       assert 19.97 == 19.98", "", "tests/test_billing.py:41: AssertionError", "=========================== short test summary info ============================",
+                "FAILED tests/test_billing.py::test_invoice_total - assert 19.97 == 19.98", "1 failed, 11 passed in 0.84s"])),
+        ]
+        if let dir = ProcessInfo.processInfo.environment["DEVER_TEST_LOG_DIR"] {
+            for file in (try? FileManager.default.contentsOfDirectory(atPath: dir).sorted()) ?? [] where file.hasPrefix("tail") {
+                if let data = FileManager.default.contents(atPath: dir + "/" + file) { cases.append(("real:" + file, true, "real job", nil, data)) }
+            }
+        }
+        var shown = 0, silent = 0
+        for (name, states, job, step, data) in cases {
+            guard let excerpt = PipelineLog.excerpt(PipelineLog.lines(data, cut: name.hasPrefix("real"))) else { print("why \(name): no error marker in the tail"); continue }
+            let gate = PipelineLog.statesAnError(excerpt)
+            print("why \(name): expected \(states ? "states" : "does not say"), code gate \(gate ? "asks the model" : "does not ask"), command \(excerpt.command?.prefix(60) ?? "-"), \(excerpt.output.count) lines, errors \(excerpt.errors)")
+            guard gate else { continue }
+            for run in 1...3 {
+                let start = Date()
+                let raw = try? await Intelligence.shared.perform(.onScreen) { model -> FailureAnswer in
+                    let room = TextBudget.room(contextSize: model.contextSize, instructions: await model.tokenCount(FailureExplanation.instructions), reserve: 250)
+                    let prompt = await FailureExplanation.prompt(job: job, step: step, excerpt: excerpt, room: min(room, 1_600), cost: model.tokenCount) ?? ""
+                    return try await model.explainFailure(instructions: FailureExplanation.instructions, prompt: prompt)
+                }
+                let sentence = raw.flatMap { FailureExplanation.sentence(from: $0, excerpt: excerpt) }
+                if sentence == nil { silent += 1 } else { shown += 1 }
+                print("why \(name) run \(run) \(String(format: "%.1f", Date().timeIntervalSince(start))) s: stated \(raw.map { "\($0.stated)" } ?? "refused") | line: \(raw?.line.prefix(110) ?? "") | sentence: \(raw?.sentence ?? "") | SHOWN: \(sentence ?? "The log does not say why.")")
+            }
+        }
+        print("why: \(shown) sentences shown, \(silent) times silent")
+    }
+}
