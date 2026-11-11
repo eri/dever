@@ -467,3 +467,48 @@ final class DetectedMentionTests: XCTestCase {
         XCTAssertTrue(IntelligencePreferences.isOn(.messageSummary, defaults: defaults))
     }
 }
+
+extension RealModelTests {
+    /// Measurement, not a check: would the kind the model gives a short message tell the ones
+    /// that ask something of the reader from the ones that only speak of them?
+    func testKindOfShortMessagesThatNameTheReader() async throws {
+        try XCTSkipUnless(ProcessInfo.processInfo.environment["DEVER_TEST_REAL_MODEL"] == "1", "needs the system model")
+        // (asks something of Sam, author, message)
+        let cases: [(Bool, String, String)] = [
+            (true, "Marco", "Sam, can you review the migration before noon?"),
+            (true, "Léa", "sam tu peux regarder la PR 4871 quand tu as 5 min ?"),
+            (true, "Ana", "Il faudrait que Sam relise le texte de l'écran de paiement avant demain."),
+            (true, "Marco", "Sam wrote the export, he should look at the rounding before we ship"),
+            (true, "Kyryl", "Question for Sam: do we keep the old endpoint for the mobile app?"),
+            (true, "Léa", "On attend le retour de Sam sur le front pour merger."),
+            (true, "Ana", "Sam, any idea why staging is red?"),
+            (true, "Marco", "Quelqu'un peut demander à Sam s'il a les accès à la console ?"),
+            (true, "Kyryl", "Need Sam's approval on #4866 to release."),
+            (true, "Léa", "Sam, t'en penses quoi de la nouvelle page d'accueil ?"),
+            (false, "Marco", "Sam fixed the receipt totals yesterday, it's in staging."),
+            (false, "Léa", "Merci Sam pour la revue !"),
+            (false, "Ana", "Sam a déjà mergé la PR, on peut tester."),
+            (false, "Kyryl", "As Sam said this morning, the cache is refreshed on a timer."),
+            (false, "Marco", "Sam is off tomorrow, I'll cover the release."),
+            (false, "Léa", "J'ai vu ça avec Sam, on part sur la solution 2."),
+            (false, "Ana", "Welcome Sam to the team!"),
+            (false, "Kyryl", "Le bug de Sam est corrigé, je ferme le ticket."),
+            (false, "Marco", "I paired with Sam on the login flow, PR is up."),
+            (false, "Léa", "Sam et moi avons fini la migration ce matin."),
+        ]
+        var right = 0, missed = 0, extra = 0
+        for run in 1...2 {
+            for (asks, author, message) in cases {
+                let input = MessageSummary.Input(author: author, text: message, language: "English")
+                let start = Date()
+                let answer = try? await Intelligence.shared.perform(.background) { model in
+                    try await model.summarise(instructions: MessageSummary.instructions(input), prompt: "\(author): \(message)")
+                }
+                let kept = answer.map { $0.kind == "Request" || $0.kind == "Question" } ?? false
+                if kept == asks { right += 1 } else if asks { missed += 1 } else { extra += 1 }
+                print("filter run \(run) \(kept == asks ? "ok  " : asks ? "MISS" : "EXTRA") [\(answer?.kind ?? "refused")] \(String(format: "%.1f", Date().timeIntervalSince(start))) s | \(message)")
+            }
+        }
+        print("filter: \(right) right, \(missed) asked but dropped, \(extra) kept though nothing asked, of \(cases.count * 2)")
+    }
+}

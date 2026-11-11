@@ -163,6 +163,15 @@ project's "for you" items in the Overview.
 - **Checked and not used:** the system's spelling dictionary takes "sam", "tom" and "martin" for
   ordinary words, and the system's word tagger (`NLTagger`) reads a first name written without its capital at the head
   of a French sentence as a pronoun and the one in "Will, can you review?" as a verb. Neither can tell a name from a word.
+- **The model as a filter, measured and not used so far.** Keeping only the messages the model files
+  as Request or Question (the kinds of 5.7) was measured on the real model with 20 invented short
+  messages that name the reader, French and English, twice each
+  (`RealModelTests.testKindOfShortMessagesThatNameTheReader`): 36 of 40 right, 1.4 to 3.5 s a message.
+  One real request was dropped in one pass of two ("On attend le retour de Sam sur le front pour
+  merger" came back as Problem, then as Request), and three plain statements were kept ("Sam a déjà
+  mergé la PR, on peut tester" as Request both times, "Sam is off tomorrow, I'll cover the release"
+  once). The same message does not always get the same kind, and the kind says that something is
+  asked, not that it is asked of the reader.
 - **Follows the read cursor:** reading the channel in Dever removes them in place (`slackRead`), like
   mentions.
 - **Switch:** "Detected mentions" in Settings › Intelligence. Off, these messages are unread messages
