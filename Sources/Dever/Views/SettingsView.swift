@@ -1129,12 +1129,14 @@ enum Appearance: String, CaseIterable, Identifiable {
 // MARK: - Alerts
 
 private struct AlertsSection: View {
+    @EnvironmentObject var app: AppState
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var status: UNAuthorizationStatus = .notDetermined
     @State private var enabled: [AlertKind: Bool] = Dictionary(uniqueKeysWithValues: AlertKind.allCases.map { ($0, $0.isEnabled) })
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            SectionHead(title: "Alerts", detail: "A macOS notification, once per situation")
+            SectionHead(title: "Alerts", detail: "What Dever sends you, once per situation")
             switch status {
             case .denied:
                 VStack(alignment: .leading, spacing: 12) {
@@ -1160,17 +1162,32 @@ private struct AlertsSection: View {
                     .buttonStyle(PrimaryButton())
                 }
             default:
-                SettingRows {
-                    ForEach(Array(AlertKind.allCases.enumerated()), id: \.element) { index, kind in
+                // Each alert as the notification it sends, in the user's own project.
+                VStack(spacing: 8) {
+                    ForEach(AlertKind.allCases) { kind in
                         let binding = Binding(
                             get: { enabled[kind] ?? true },
                             set: { enabled[kind] = $0; UserDefaults.standard.set($0, forKey: kind.settingKey) }
                         )
-                        SettingRow(title: kind.shortLabel, detail: kind.detail, divided: index < AlertKind.allCases.count - 1,
-                                   tap: { binding.wrappedValue.toggle() }) {
-                            Toggle(kind.shortLabel, isOn: binding)
-                            .labelsHidden().toggleStyle(.switch).tint(Soot.lime).controlSize(.small)
+                        let sample = kind.sample(project: app.projects.first?.name ?? "Checkout")
+                        Button { binding.wrappedValue.toggle() } label: {
+                            HStack(spacing: 16) {
+                                NotificationPreview(title: sample.title, message: sample.body)
+                                    .opacity(binding.wrappedValue ? 1 : 0.4)
+                                Spacer(minLength: 0)
+                                Toggle(kind.shortLabel, isOn: binding)
+                                    .labelsHidden().toggleStyle(.switch).tint(Soot.lime).controlSize(.small)
+                            }
+                            .padding(.leading, 8).padding(.trailing, 16).padding(.vertical, 8)
+                            .background(Soot.surface, in: RoundedRectangle(cornerRadius: 12))
                         }
+                        .buttonStyle(RowButton(lift: .tone, radius: 12))
+                        .animation(reduceMotion ? nil : .easeOut(duration: 0.15), value: binding.wrappedValue)
+                        .accessibilityElement(children: .ignore)
+                        .accessibilityLabel(kind.shortLabel)
+                        .accessibilityHint("Sends \u{201C}\(sample.title)\u{201D}")
+                        .accessibilityValue(binding.wrappedValue ? "On" : "Off")
+                        .accessibilityAddTraits(.isToggle)
                     }
                 }
             }
@@ -1197,12 +1214,46 @@ extension AlertKind {
         }
     }
 
-    var detail: String {
+    /// The notification as it would read for `project`, with made-up numbers.
+    func sample(project: String) -> (title: String, body: String) {
         switch self {
-        case .pipelineFailing: "A branch of the project fails its checks"
-        case .pastTarget: "Issues still open after the Linear target date"
-        case .mergedButOpen: "Merged in code, still in progress in Linear"
+        case .pipelineFailing:
+            return ("\(project): pipeline failing", "The default branch fails its checks.")
+        case .pastTarget:
+            let target = Calendar.current.date(byAdding: .day, value: -3, to: Date()) ?? Date()
+            return ("\(project): past target date",
+                    "3 issues still open after \(target.formatted(date: .abbreviated, time: .omitted)).")
+        case .mergedButOpen:
+            return ("\(project): 2 issues to move forward", "Merged in code, still in progress in Linear: ENG-142, ENG-157.")
         }
+    }
+}
+
+/// A macOS notification banner in miniature: the app's mark, a title, a line, "now".
+private struct NotificationPreview: View {
+    let title: String
+    let message: String
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            DeverMark().frame(width: 16, height: 16)
+                .frame(width: 30, height: 30)
+                .background(Soot.surface, in: RoundedRectangle(cornerRadius: 7))
+                .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(Soot.line))
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(title).font(.system(size: 13, weight: .semibold)).foregroundStyle(Soot.ink).lineLimit(1)
+                    Spacer(minLength: 0)
+                    Text("now").font(.system(size: 11)).foregroundStyle(Soot.muted)
+                }
+                Text(message).font(.system(size: 12)).foregroundStyle(Soot.muted).lineLimit(1)
+            }
+        }
+        .padding(10)
+        .frame(width: 440, alignment: .leading)
+        .background(Soot.ground, in: RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Soot.line))
+        .accessibilityHidden(true)
     }
 }
 

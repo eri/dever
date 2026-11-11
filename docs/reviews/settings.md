@@ -230,3 +230,16 @@ takes, and names each one the way a developer does.
 - **Accessibility.** Each tile is a button named "One repository, Monorepo" and so on, with the
   selected trait and the consequence as its hint. The card and the line fade (none under Reduce
   Motion).
+
+## Follow-up: Alerts as the notifications themselves
+
+Three rows of label, sentence and switch said nothing about what a switch turns on. Each alert is
+now shown as the macOS notification it sends.
+
+- **A banner per alert.** The app's mark, the title and the line exactly as the notifier writes
+  them, and "now", in the user's first project ("Checkout" when there is none): "Checkout: pipeline
+  failing / The default branch fails its checks." The numbers and issue keys are made up.
+- **The switch stays** on the right; the whole row toggles. Off, the banner fades to 40%.
+- **Head.** "What Dever sends you, once per situation".
+- **Accessibility.** Each row is one toggle named by the situation ("Pipeline failing"), with the
+  sample title as its hint; the banner itself is hidden from VoiceOver.
