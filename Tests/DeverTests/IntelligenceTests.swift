@@ -340,3 +340,130 @@ extension RealModelTests {
 }
 
 
+
+final class DetectedMentionTests: XCTestCase {
+    private let users = [
+        "ME": SlackUser(id: "ME", name: "Sam Rivers", avatar: nil, isBot: false),
+        "U1": SlackUser(id: "U1", name: "Alex Stone", avatar: nil, isBot: false),
+        "B1": SlackUser(id: "B1", name: "Sam Bot", avatar: nil, isBot: true),
+    ]
+    private func message(_ ts: String, _ text: String, user: String = "U1") -> SlackMessage { SlackMessage(ts: ts, user: user, text: text) }
+    private func found(_ text: String, users: [String: SlackUser]? = nil) -> Bool {
+        !DetectedMention.find(in: [message("1", text)], me: "ME", users: users ?? self.users).isEmpty
+    }
+
+    func testAWordOfTheNameWhateverTheCaseAndTheAccents() {
+        XCTAssertTrue(found("il faudrait que Sam relise la migration"))
+        XCTAssertTrue(found("sam tu peux regarder ?"))
+        XCTAssertTrue(found("c'est l'écran de Sam, non ?"))
+        XCTAssertTrue(found("ask Rivers about it"))
+        XCTAssertTrue(found("SAM!!"))
+        var accented = users
+        accented["ME"] = SlackUser(id: "ME", name: "Léa Martin", avatar: nil, isBot: false)
+        XCTAssertTrue(found("on voit ça avec lea demain", users: accented))
+        XCTAssertFalse(found("samedi on livre"), "part of a word is not the name")
+        XCTAssertFalse(found("Robin, tu peux relire ?"))
+    }
+
+    func testARealMentionIsNeverDetectedToo() {
+        XCTAssertFalse(found("<@ME> Sam, tu peux relire ?"))
+        XCTAssertFalse(found("<@ME|sam> tu peux relire ?"))
+        XCTAssertTrue(found("<@U1> demande à Sam"), "someone else's mention does not hide the name")
+    }
+
+    func testTheReadersOwnMessagesAreNotAboutThem() {
+        XCTAssertTrue(DetectedMention.find(in: [message("1", "Sam here, I pushed the fix", user: "ME")], me: "ME", users: users).isEmpty)
+    }
+
+    func testANameSharedWithAColleagueNamesNoOne() {
+        var two = users
+        two["U2"] = SlackUser(id: "U2", name: "Sam Lee", avatar: nil, isBot: false)
+        XCTAssertEqual(DetectedMention.words(reader: "ME", users: two), ["rivers"])
+        XCTAssertFalse(found("Sam, tu peux relire ?", users: two))
+        XCTAssertTrue(found("Rivers, tu peux relire ?", users: two))
+        XCTAssertEqual(DetectedMention.words(reader: "ME", users: users), ["sam", "rivers"], "a bot of the same name does not count")
+        two["ME"] = SlackUser(id: "ME", name: "Sam", avatar: nil, isBot: false)
+        XCTAssertFalse(found("Sam, tu peux relire ?", users: two), "nothing left that names the reader alone")
+    }
+
+    func testShortWordsAndInitialsAreNotNames() {
+        var short = users
+        short["ME"] = SlackUser(id: "ME", name: "Jo C. de Luca", avatar: nil, isBot: false)
+        XCTAssertEqual(DetectedMention.words(reader: "ME", users: short), ["luca"])
+        XCTAssertTrue(DetectedMention.words(reader: "nobody", users: users).isEmpty)
+    }
+
+    func testANameThatIsAlsoAWordNeedsItsCapitalAndMoreAtTheHeadOfASentence() {
+        var will = users
+        will["ME"] = SlackUser(id: "ME", name: "Will Mark", avatar: nil, isBot: false)
+        for text in ["it will break staging", "Will you merge this today?", "I will look. Will it pass?", "mark this as done please",
+                     "Mark this as done please", "can mark take a look?", "first line\nWill it pass"] {
+            XCTAssertFalse(found(text, users: will), text)
+        }
+        for text in ["ask Will about the migration", "Will, can you review #42?", "Mark: any idea?", "c'est Will qui a écrit cet écran",
+                     "ok. Will, tu regardes ?"] {
+            XCTAssertTrue(found(text, users: will), text)
+        }
+    }
+
+    func testCodeLinksAndAddressesAreNotProse() {
+        XCTAssertFalse(found("`git log --author=sam` shows nothing"))
+        XCTAssertFalse(found("```\nowner: sam\n```"))
+        XCTAssertFalse(found("see <https://example.com/users/sam/settings>"))
+        XCTAssertFalse(found("mail <mailto:sam@example.com|sam@example.com>"))
+        XCTAssertFalse(found("branch is in <#C1|sam-sandbox>"))
+        XCTAssertFalse(found("https://example.com/sam is down"))
+        XCTAssertTrue(found("see <https://example.com/doc|the doc Sam wrote>"))
+    }
+
+    func testNewestFirstWithAuthorAndPlainText() {
+        let out = DetectedMention.find(in: [message("10.0", "Sam ?"), message("20.0", "ask <@U1> or Sam")], me: "ME", users: users)
+        XCTAssertEqual(out.map(\.ts), ["20.0", "10.0"])
+        XCTAssertEqual(out.first?.author, "Alex Stone")
+        XCTAssertEqual(out.first?.text, "ask @Alex Stone or Sam")
+    }
+
+    private func snapshot() -> ProjectSnapshot {
+        var s = ProjectSnapshot()
+        let date = Date(timeIntervalSince1970: 100)
+        s.slack = .init(unread: 4, firstUnreadTS: "1.0", lastUnreadAt: date,
+                        mentions: [.init(ts: "4.0", author: "Alex", text: "@Sam Rivers look", date: date)],
+                        detected: [.init(ts: "3.0", author: "Alex", text: "ask Sam", date: date)],
+                        unreadTS: ["1.0", "2.0", "3.0", "4.0"])
+        return s
+    }
+
+    func testDetectedItemsCountBesideMentionsAndNeverAsOne() {
+        let items = snapshot().waiting(channel: "team", detected: true)
+        XCTAssertEqual(items.map(\.kind), [.mention, .detected, .unread])
+        XCTAssertEqual(items[1].target, .slack(ts: "3.0"))
+        XCTAssertEqual(items[2].text, "2 more unread in #team")
+        XCTAssertEqual(Set(items.map(\.id)).count, 3)
+    }
+
+    func testSwitchedOffTheyAreUnreadMessagesLikeTheOthers() {
+        let items = snapshot().waiting(channel: "team")
+        XCTAssertEqual(items.map(\.kind), [.mention, .unread])
+        XCTAssertEqual(items[1].text, "3 more unread in #team")
+    }
+
+    @MainActor
+    func testReadingTheChannelRemovesThem() {
+        let store = OverviewStore()
+        let id = UUID()
+        store.setForTesting(snapshot(), for: id)
+        store.slackRead(id, upTo: "3.0")
+        XCTAssertEqual(store.snapshots[id]?.slack?.detected.count, 0)
+        XCTAssertEqual(store.snapshots[id]?.slack?.mentions.count, 1)
+        XCTAssertEqual(store.snapshots[id]?.slack?.unread, 1)
+    }
+
+    func testTheFeatureIsBuiltWithItsOwnSwitch() {
+        XCTAssertTrue(IntelligenceFeature.built.contains(.detectedMentions))
+        let defaults = UserDefaults(suiteName: "detected-\(UUID().uuidString)")!
+        XCTAssertTrue(IntelligencePreferences.isOn(.detectedMentions, defaults: defaults))
+        defaults.set(false, forKey: IntelligenceFeature.detectedMentions.settingKey)
+        XCTAssertFalse(IntelligencePreferences.isOn(.detectedMentions, defaults: defaults))
+        XCTAssertTrue(IntelligencePreferences.isOn(.messageSummary, defaults: defaults))
+    }
+}

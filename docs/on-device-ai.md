@@ -20,7 +20,7 @@ board already answers it.
 | Kept | Where | Trigger |
 | --- | --- | --- |
 | Long messages as summaries | Slack rail, in the place of each message the rail cuts | automatic, newest first |
-| Detected mentions | the catch-up, and the "for you" items of the Overview | automatic |
+| Detected mentions | the "for you" items of the Overview | automatic, by name, without the model |
 | Issue summary | top of the Linear issue page | automatic, from a threshold of length |
 | Explain a pipeline failure | "Start here" tile, pull request chip of the issue page | on demand |
 
@@ -133,19 +133,47 @@ check in code for anything the model gets wrong in a known way.
 
 ### 5.2 Detected mentions
 
-Someone speaks of the user, or asks something of them, without a Slack mention.
+**Built.** An unread message that speaks of the user by name without a Slack mention shows among the
+project's "for you" items in the Overview.
 
-- **Where:** as the "for you" line of the catch-up, and as a "for you" item of the project in the
-  Overview, with the `@✦` glyph and the message one click away. It counts in the "N for you" chip.
-- **Never** a system notification (rule 4), and never mixed with real mentions: a different glyph, a
-  tooltip that says it is detected.
-- **How:** unread messages not written by the user and without an explicit mention are classified
-  (guided generation, a boolean and the message it rests on), a few at a time with the thread around
-  them, each message once (result kept by timestamp, in memory). The model is given the user's display
-  name.
-- **Cost:** no network; one short generation per batch of new unread messages, in the background queue
-  behind anything on screen.
-- **Rule 2 holds:** the count of Slack mentions is unchanged; detected ones are added beside it.
+- **Where:** a "for you" item of the project, after the Slack mentions and the review requests, with
+  the `@✦` glyph and the message one click away, like a mention. It counts in the "N for you" chip and
+  leaves the "N more unread" line.
+- **Never** a system notification (rule 4), and never mixed with real mentions: its own list in the
+  snapshot (`SlackStats.detected`), its own glyph in muted ink, a tooltip and an accessible name that
+  say it is detected and may be wrong. A message that carries a real mention of the user is never
+  detected too.
+- **How: in code, with no model** (`DetectedMention`). The model cannot be trusted to say who a message
+  is about (9b), so nothing is asked of it. A message is kept when its prose holds a word of the user's
+  display name as a whole word, whatever the case and the accents:
+  - words of three letters or more; initials and particles do not count;
+  - a word another person of the workspace also carries names no one (two people called Sam: "Sam"
+    is dropped, the family name still counts); bots do not count as people;
+  - prose only: mentions of others, channels, links, addresses, inline code and code blocks are
+    removed first, so a name in a branch, a URL or a command is not a mention;
+  - a name that is also a common English or French word (a short fixed list: Will, Mark, Rose, Max,
+    Pierre…) counts only with its capital, and at the head of a sentence only when it is called out
+    ("Will, can you…"). "Will you merge?", "Mark this as done" and "it will break" name no one.
+- **What it misses, by choice** (silent rather than inventive): a common-word name written without
+  its capital ("pierre tu regardes ?") or heading a sentence without a comma ("Mark knows the billing
+  code"); a nickname that is not a word of the display name; "he wrote that screen, he should look",
+  which names nobody. What it still gets wrong: a month or a word with a capital in mid-sentence for
+  someone called June or Rose, and a message that speaks of the user without asking anything
+  ("Sam fixed that yesterday").
+- **Checked and not used:** the system's spelling dictionary takes "sam", "tom" and "martin" for
+  ordinary words, and the system's word tagger (`NLTagger`) reads a first name written without its capital at the head
+  of a French sentence as a pronoun and the one in "Will, can you review?" as a verb. Neither can tell a name from a word.
+- **Follows the read cursor:** reading the channel in Dever removes them in place (`slackRead`), like
+  mentions.
+- **Switch:** "Detected mentions" in Settings › Intelligence. Off, these messages are unread messages
+  like the others. The switch lives on that page, so the feature shows only where the page does (the
+  model available), although it does not use the model.
+- **Data contract.** Reads: the unread messages and the members' names the Overview's cycle already
+  holds (`OverviewStore.loadSlack`); nothing new. Writes: none. Invalidates: nothing. Budget: that of
+  "Slack read cursor, unread, mentions". Loading: none of its own, it arrives with the Slack part of
+  the row. Failure: a failed cycle keeps the last list with the row's age. Exits: opening the message
+  reads the channel, which removes the item. Cost: no request, no generation.
+- **Rule 2 holds:** the Slack mentions are unchanged; detected ones are added beside them.
 
 ### 5.3 Issue from a message (dropped)
 
@@ -279,8 +307,8 @@ Pipelines
   enum the rest of the app can read on macOS 14; a serial queue with two priorities (on screen,
   background); one function per use, each with its instructions, its `@Generable` output and its input
   budget. Token counts with `tokenCount(for:)` where it exists, a character estimate before 26.4.
-- `Model/IntelligenceStore.swift`: app-lifetime, memory only. Holds catch-ups, detected mentions, issue
-  summaries and failure explanations by key; views read it, never call the model (rule 1 of CLAUDE.md).
+- `Model/IntelligenceStore.swift`: app-lifetime, memory only. Holds what the model wrote by key
+  (detected mentions are not generated: they live in the Overview's snapshot); views read it, never call the model (rule 1 of CLAUDE.md).
 - Prompts are English instructions that name the output language; inputs are plain text
   (`SlackPlain.text`), with authors' display names, never ids.
 - Views: one `GeneratedMark` and one `GeneratedText` component (sparkle, tooltip, skeleton, fade through
@@ -306,6 +334,7 @@ Pipelines
 | 1. Slack catch-up | **Dropped** after four forms on real channels (5.1). | 0 |
 | 1b. Long messages | **Built:** 5.7, with kinds and the arrow for what is asked of the user, tuned on real channels. | 0 |
 | 2. Writing | **Dropped:** issue from a message (5.3) and the reply draft (5.4). | 0 |
+| 2b. Detected mentions | **Built:** 5.2, by name in code, in the Overview. | |
 | 3. Issue summary | 5.5. | 0 |
 | 4. Pipeline failure | job and log reads, then 5.6. | 0 |
 
@@ -340,7 +369,6 @@ before it is built.
   (only opened threads are loaded). A busy thread is where decisions are made; loading unread replies
   for the catch-up costs one request per thread and needs its own budget row.
 - **Detected mentions with no name.** "He wrote that screen, he should look" needs the thread around
-  it and will produce false positives; the rate has to be looked at on real channels before 5.2 reaches
-  the Overview.
+  it and a judgement the model does not make reliably: not detected (5.2).
 - **Onboarding wording.** A tooltip says Dever "never posts on your behalf" while thread replies post
   as the user; issue creation adds a second write. To be reworded with phase 2.

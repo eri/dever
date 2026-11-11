@@ -55,6 +55,11 @@ enum Snapshotter {
         // freeze every transition mid-way in the pictures.
         NSApp.activate(ignoringOtherApps: true)
         NSApp.windows.first(where: { $0.canBecomeMain })?.makeKeyAndOrderFront(nil)
+        // Launched while another app is being used, the window may never have been shown at all
+        // (and a hidden window cannot become main): show it, or there is nothing to photograph.
+        if !NSApp.windows.contains(where: { $0.isVisible && $0.canBecomeMain }) {
+            NSApp.windows.first { $0.styleMask.contains(.titled) }?.orderFrontRegardless()
+        }
         try? await Task.sleep(nanoseconds: UInt64(wait * 1_000_000_000))
         // DEVER_SNAPSHOT_SCREENS=0 skips the main screens when only sheets or onboarding are wanted.
         let wantScreens = ProcessInfo.processInfo.environment["DEVER_SNAPSHOT_SCREENS"] != "0"
