@@ -17,6 +17,7 @@
   <img src="https://img.shields.io/badge/SwiftUI-native-DAFA9C?style=flat-square&labelColor=151719" alt="Native SwiftUI">
   <img src="https://img.shields.io/badge/API%20keys-none-DAFA9C?style=flat-square&labelColor=151719" alt="No API keys">
   <img src="https://img.shields.io/badge/AI-on%20device-DAFA9C?style=flat-square&labelColor=151719" alt="On-device AI">
+  <img src="https://img.shields.io/badge/licence-MIT-DAFA9C?style=flat-square&labelColor=151719" alt="MIT licence">
 </p>
 
 <p align="center">
@@ -79,3 +80,7 @@ Your projects are a plain file on your Mac. The AI features run on the Mac's bui
 | ✨ [On-device intelligence](docs/on-device-ai.md) | What the Mac's model does, and what it never does |
 | 🎨 [Brand](docs/brand/README.md) | The mark and its colours |
 | 🤝 [Contributing](CLAUDE.md) | The rules every change follows. Run `swift test` before a push |
+
+## Licence
+
+Dever is open source under the [MIT licence](LICENSE).

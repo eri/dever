@@ -1764,7 +1764,11 @@ private struct WhoReacted: View {
             }
         }
         .padding(12)
-        .frame(maxWidth: 260, alignment: .leading)
+        // A popover takes its size from the content's ideal size. A flexible width left that
+        // to the window, which gave a tall, mostly empty card: fix the width and let the
+        // height follow the text.
+        .frame(width: 240, alignment: .leading)
+        .fixedSize()
         .background(Soot.surface)
     }
 }
