@@ -7,7 +7,7 @@ import Foundation
 
 /// One use of the model. Each has its own switch in Settings › Intelligence, on by default.
 enum IntelligenceFeature: String, CaseIterable, Identifiable, Sendable {
-    case messageSummary, detectedMentions, issueSummary, draftReply, explainFailure
+    case messageSummary, detectedMentions, issueSummary, explainFailure
     var id: String { rawValue }
 
     var title: String {
@@ -15,7 +15,6 @@ enum IntelligenceFeature: String, CaseIterable, Identifiable, Sendable {
         case .messageSummary: "Long messages"
         case .detectedMentions: "Detected mentions"
         case .issueSummary: "Issue summary"
-        case .draftReply: "Draft a reply"
         case .explainFailure: "Explain a failure"
         }
     }
@@ -30,7 +29,7 @@ enum IntelligenceFeature: String, CaseIterable, Identifiable, Sendable {
     }
 
     enum Group: String, CaseIterable, Identifiable {
-        case summaries = "Summaries", writing = "Writing", pipelines = "Pipelines"
+        case summaries = "Summaries", pipelines = "Pipelines"
         var id: String { rawValue }
         var features: [IntelligenceFeature] { IntelligenceFeature.allCases.filter { $0.group == self } }
     }
@@ -38,7 +37,6 @@ enum IntelligenceFeature: String, CaseIterable, Identifiable, Sendable {
     var group: Group {
         switch self {
         case .messageSummary, .detectedMentions, .issueSummary: .summaries
-        case .draftReply: .writing
         case .explainFailure: .pipelines
         }
     }

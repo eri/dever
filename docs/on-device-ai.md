@@ -21,7 +21,6 @@ board already answers it.
 | --- | --- | --- |
 | Long messages as summaries | Slack rail, in the place of each message the rail cuts | automatic, newest first |
 | Detected mentions | the catch-up, and the "for you" items of the Overview | automatic |
-| Draft a reply | thread composer | on demand, one click |
 | Issue summary | top of the Linear issue page | automatic, from a threshold of length |
 | Explain a pipeline failure | "Start here" tile, pull request chip of the issue page | on demand |
 
@@ -154,15 +153,13 @@ language change"); the description mostly repeated the message; and the priority
 (the model read "to fix before the release" as Urgent), so it was kept only when the message had a word
 for urgency. Dever still has no issue creation.
 
-### 5.4 Draft a reply
+### 5.4 Draft a reply (dropped)
 
-- **Where:** the thread composer. A sparkle button, shown when the field is empty.
-- **What:** one click writes a reply in the field from the thread alone, in the thread's language and
-  tone. The field shows "✦ draft" until the first edit; ⌘Z empties it. Nothing is sent before Return.
-- **Known risk, accepted:** the model takes a position for the user ("yes, I'll look at it"). The draft
-  must stay visibly a draft, and the prompt keeps it short and commits to nothing the thread does not
-  support.
-- **Too long:** the parent and the newest replies that fit.
+A sparkle button in the thread composer wrote a reply from the thread alone, one or two sentences, marked
+"✦ Draft" until the first change. Built, tried on the real model, and removed: to commit the user to
+nothing the thread did not hold, the instructions left the model one thing to say, and it said it every
+time ("I will look at it and come back"), a question of opinion included. A draft that safe saves no
+time; a bolder one would speak for the user. Writing on the user's behalf is not a job for this model.
 
 ### 5.5 Issue summary
 
@@ -233,8 +230,6 @@ Summaries
   Detected mentions  @✦                 [on]
   Issue summary                         [on]
   Language            [ Source | English ]
-Writing
-  Draft a reply                         [on]
 Pipelines
   Explain a failure                     [on]
 ```
@@ -290,12 +285,28 @@ Pipelines
 | 0. Ground | **Done.** `Intelligence` service and availability gating, `IntelligenceStore`, the mark and the generated block, Settings › Intelligence, the one-time invitation, snapshot states, tests, measurements (section 2). | |
 | 1. Slack catch-up | **Dropped** after four forms on real channels (5.1). | 0 |
 | 1b. Long messages | **Built:** 5.7, with kinds and the arrow for what is asked of the user, tuned on real channels. | 0 |
-| 2. Writing | Issue from a message: **dropped** (5.3). Reply draft (5.4): next. | 0 |
+| 2. Writing | **Dropped:** issue from a message (5.3) and the reply draft (5.4). | 0 |
 | 3. Issue summary | 5.5. | 0 |
 | 4. Pipeline failure | job and log reads, then 5.6. | 0 |
 
 Each phase updates data-freshness.md (a budget row for each new kind of data in section 4, the new exits
 in section 5) in the same change.
+
+## 9b. What the first day on real channels showed
+
+Apple's on-device model (about three billion parameters, 4,096 tokens) was put to five jobs. One held.
+
+| Job | Outcome |
+| --- | --- |
+| Shorten one long message, and say what kind it is | **Kept.** One input, one sentence out, checkable in a click. |
+| Sum up a channel (four forms) | Dropped: vague or false across several messages; the reliable form repeated the rail. |
+| Propose an issue from a message | Dropped: good titles, a description that repeats the message, a priority that cannot be trusted. |
+| Draft a reply | Dropped: safe enough to send means too bland to help. |
+| Say who a request is for | Never trusted: done in code (`MessageSummary.isForReader`). |
+
+The pattern: the model transforms one short text well; it does not weigh several texts against each
+other, judge importance, or speak for someone. Anything left in the plan is to be measured against that
+before it is built.
 
 ## 10. Open points
 
