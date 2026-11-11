@@ -112,19 +112,30 @@ private struct PromisePicture: View {
     private var raw: some View {
         switch promise {
         case .channel:
-            VStack(alignment: .leading, spacing: 6) {
-                ForEach([84, 112, 66, 98], id: \.self) { width in
+            // A conversation: people (three tints) and their bubbles, of uneven length.
+            VStack(alignment: .leading, spacing: 5) {
+                ForEach(Array(zip([Theme.chart1, Theme.chart3, Theme.chart2], [92, 58, 110]).enumerated()), id: \.offset) { _, row in
                     HStack(spacing: 6) {
-                        Circle().fill(Soot.edge.opacity(0.5)).frame(width: 7, height: 7)
-                        bar(width: CGFloat(width), tone: Soot.edge.opacity(0.35))
+                        Circle().fill(row.0).frame(width: 12, height: 12)
+                        RoundedRectangle(cornerRadius: 6).fill(Soot.edge.opacity(0.3))
+                            .frame(width: CGFloat(row.1), height: 12)
                     }
                 }
             }
         case .issue:
+            // A ticket: its state and identifier, a title, then a paragraph that runs the full width.
             VStack(alignment: .leading, spacing: 6) {
-                bar(width: 70, tone: Soot.edge.opacity(0.7), height: 7)
-                ForEach([124, 116, 128, 80], id: \.self) { width in
-                    bar(width: CGFloat(width), tone: Soot.edge.opacity(0.35))
+                HStack(spacing: 5) {
+                    Image(systemName: "circle.lefthalf.filled").font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(Theme.chart3)
+                    RoundedRectangle(cornerRadius: 2).strokeBorder(Soot.edge.opacity(0.7)).frame(width: 30, height: 9)
+                }
+                bar(width: 104, tone: Soot.edge.opacity(0.8), height: 7)
+                VStack(alignment: .leading, spacing: 4) {
+                    ForEach(0..<3, id: \.self) { line in
+                        Rectangle().fill(Soot.edge.opacity(0.3)).frame(height: 3)
+                            .frame(maxWidth: line == 2 ? 70 : .infinity, alignment: .leading)
+                    }
                 }
             }
         case .pipeline:
