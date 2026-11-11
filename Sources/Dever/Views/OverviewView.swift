@@ -1047,7 +1047,7 @@ private struct ReleaseLine: View {
                         part(.prod, symbol: "checkmark.seal.fill", tint: Soot.lime, title: "Prod",
                              detail: "\(Brief.ago(p.date)) ago · \(p.author)", checks: nil, url: p.url) {
                             ReleaseCard(heading: "#\(p.number) \(p.title)",
-                                        line: "Merged into \(s.productionBranch) \(p.date.formatted(.relative(presentation: .named))) by \(p.author)",
+                                        line: "Merged into \(s.productionBranch) \(Brief.ago(p.date)) ago by \(p.author)",
                                         checks: [], url: p.url)
                         }
                     }
@@ -1055,7 +1055,7 @@ private struct ReleaseLine: View {
                         part(.staging, symbol: "testtube.2", tint: Theme.chart2, title: "Staging",
                              detail: "\(Brief.ago(st.date)) ago · \(st.author)", checks: s.stagingChecks, url: st.url) {
                             ReleaseCard(heading: "#\(st.number) \(st.title)",
-                                        line: "Merged into \(s.stagingBranch ?? "staging") \(st.date.formatted(.relative(presentation: .named))) by \(st.author)",
+                                        line: "Merged into \(s.stagingBranch ?? "staging") \(Brief.ago(st.date)) ago by \(st.author)",
                                         checks: s.stagingCheckList, url: st.url)
                         }
                     }
@@ -1063,7 +1063,7 @@ private struct ReleaseLine: View {
                         part(.next, symbol: "arrow.up.forward.circle.fill", tint: Soot.muted, title: "Next prod",
                              detail: "#\(n.number) · open \(Brief.ago(n.opened))", checks: n.checks, url: n.url) {
                             ReleaseCard(heading: "#\(n.number) \(n.title)",
-                                        line: "Into \(s.productionBranch), opened \(n.opened.formatted(.relative(presentation: .named))) by \(n.author)",
+                                        line: "Into \(s.productionBranch), opened \(Brief.ago(n.opened)) ago by \(n.author)",
                                         checks: n.checkList, url: n.url)
                         }
                     }
@@ -1147,7 +1147,7 @@ private struct ReleaseCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: 5) {
                 Text(heading).font(.system(size: 13, weight: .semibold)).foregroundStyle(Soot.ink).lineLimit(2)
                 Text(line).font(.system(size: 12)).foregroundStyle(Soot.muted)
             }
@@ -1178,6 +1178,8 @@ private struct ReleaseCard: View {
         }
         .padding(12)
         .frame(width: 320, alignment: .leading)
+        // The arrow over the card itself: only its links show the pointing hand.
+        .background(CursorArea(cursor: .arrow))
         .background(Soot.ground, in: RoundedRectangle(cornerRadius: 12))
         .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Soot.line))
         .shadow(color: .black.opacity(0.22), radius: 16, y: 6)
