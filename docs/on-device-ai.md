@@ -41,10 +41,12 @@ repository.
 | Question | Finding |
 | --- | --- |
 | Is the framework there? | Yes. `FoundationModels` is in the SDK; `SystemLanguageModel`, `LanguageModelSession`, guided generation (`@Generable`), streaming. Introduced in macOS 26.0; `tokenCount(for:)` in 26.4; `contextSize` back-deployed to 26.0. |
-| Is the model usable on this Mac? | **Not yet.** `SystemLanguageModel.default.availability` is `.unavailable(.modelNotReady)`: Apple Intelligence is switched on, the model assets are absent. The system logs give the cause: storage is judged sufficient, but Siri's language (French) differs from the Mac's first language (English), which the system reports as `selectedSiriLanguageIneligible`; it then asks for no model asset at all. The public API still answers `modelNotReady`, so that reason does not always mean "downloading". `contextSize` reads 0 in that state. |
+| Is the model usable on this Mac? | Yes, once Siri's language matched the Mac's. It first answered `.unavailable(.modelNotReady)` with no model asset on disk: Siri was in French and the Mac in English, which the system reports as `selectedSiriLanguageIneligible`, and it then asks for no asset at all. Setting Siri to English started the download; the model was ready about 90 minutes later. So `modelNotReady` does not always mean "downloading". |
 | Languages | `supportedLanguages` lists French (France and Canada), English, German, Spanish, Italian, Portuguese, Dutch, Danish, Norwegian, Swedish, Turkish, Vietnamese, Japanese, Korean, Chinese. `supportsLocale` is true for `fr_FR` and `en_US`. |
-| Context size | **Not measured.** Apple documents 4,096 tokens for the session, instructions and answer included; to be read from `contextSize` once the model is ready. |
-| Speed on a Slack thread | **Not measured.** The probe (a 16-message French thread: plain summary, structured digest, issue draft, reply draft, pipeline log) is ready to run again. |
+| Context size | `contextSize` is 4,096 tokens, instructions and answer included. A 16-message French thread (1,348 characters) counts 446 tokens: about 3 characters a token, the estimate `TextBudget` uses before macOS 26.4. |
+| Speed | On that thread: two-sentence summary 2.4 s (first token after 1.9 s), one line of 12 words 1.3 s, reply draft 2.0 s, guided generation (a digest, an issue draft) 4.6 s, a pipeline log explained 1.2 s. Input size costs: 892 tokens 3.1 s, 1,784 tokens 4.8 s, 2,676 tokens 7.1 s, 3,568 tokens 8.3 s for one sentence out. The catch-up as built (six messages, guided) takes 4 to 5 s. |
+| Following a format | Free text in two labelled lines ("YOU: … REST: …") failed one time in two: labels translated or dropped, never "NONE", five sentences where two were asked. Guided generation (`@Generable`) gave the asked shape every time, found a request made in the third person once the instructions spelt that case out, and answered "nothing asked" when nothing was. Structured output is the rule for every feature. |
+| Language | Summaries follow the language asked for, French included. Forced translation works but bends jargon ("staging deploy" became "déploiement de la phase de préparation"): only "English" is offered as a forced language. |
 | Other frameworks | `NaturalLanguage` (language detection, macOS 14 compatible) is used. `Translation`, `AppIntents` and Writing Tools are not needed by the kept scope. The composer is an `NSTextView`, so the system Writing Tools already work in it with no code. |
 
 Consequences for the design, true whatever the measurements say:
@@ -57,7 +59,6 @@ Consequences for the design, true whatever the measurements say:
 - One generation at a time: the framework refuses concurrent requests on a session and the chip is shared
   with the system. Requests are queued, the one on screen first.
 
-Phase 0 runs the probe on a ready model and writes the numbers here before any interface is built.
 
 ## 3. Rules
 
@@ -118,10 +119,10 @@ the parts already decided.
 - **Too long:** no catch-up (rule 4) when the unread messages do not all fit the context, or when some
   of them are older than what `SlackStore` has loaded (20 messages): a catch-up of a part would pass for
   one of the whole. One message counts for at most 600 characters. Chunked summarising is an open point.
-- **How:** the unread messages go to the model numbered, with the reader's name; it answers two lines,
-  `YOU:` (or `NONE`) and `REST:`, each sentence followed by the number of the message it rests on.
-  `CatchUp.parse` turns that into sentences tied to messages; an answer of another shape is silence.
-  Plain text rather than guided generation for now: to be revisited once the model can be tried.
+- **How:** the unread messages go to the model numbered, with the reader's name; guided generation
+  holds the answer to a shape (`CatchUpAnswer`: whether something is asked, what and in which message,
+  then one or two other points with their message). `CatchUp.text(from:)` ties the sentences to their
+  messages. `DEVER_TEST_REAL_MODEL=1 swift test --filter RealModel` runs it on the real model.
 - **Reads:** `SlackStore` messages of the channel, `lastRead` / `seenUpTo`, opened threads, user names.
   **New derived data:** the catch-up, keyed by channel and by the timestamps of the first and last unread
   message, held in an app-lifetime store, memory only. A new message invalidates it; "Mark as read"
@@ -260,8 +261,8 @@ Pipelines
 
 | Phase | Content | Depends on |
 | --- | --- | --- |
-| 0. Ground | **Built:** `Intelligence` service and availability gating, `IntelligenceStore`, the mark and the generated block, Settings › Intelligence, the one-time invitation, snapshot states, tests. No feature visible yet (`IntelligenceFeature.built` is empty). **Left:** run the probe on a ready model and record context size and timings here. | the model downloaded on the development Mac |
-| 1. Slack catch-up | **Built:** 5.1 in the rail, with its "for you" line (the first form of 5.2), tests, a made-up text for captures. **Left:** try and tune the instructions on the real model; 5.2 as `@✦` items in the Overview. | 0 |
+| 0. Ground | **Done.** `Intelligence` service and availability gating, `IntelligenceStore`, the mark and the generated block, Settings › Intelligence, the one-time invitation, snapshot states, tests, measurements (section 2). | |
+| 1. Slack catch-up | **Built:** 5.1 in the rail, with its "for you" line (the first form of 5.2), tuned on the real model. **Left:** look at it on real channels; 5.2 as `@✦` items in the Overview. | 0 |
 | 2. Writing | `issueCreate` and the sheet (useful without the model), its filling (5.3), then the reply draft (5.4). | 0; the sheet itself depends on nothing |
 | 3. Issue summary | 5.5. | 0 |
 | 4. Pipeline failure | job and log reads, then 5.6. | 0 |
@@ -271,8 +272,7 @@ in section 5) in the same change.
 
 ## 10. Open points
 
-- **Measurements.** Context size and speed are unknown on this Mac until the model is downloaded; the
-  thresholds (6 unread, 1,500 characters) and the "fits or nothing" rule of 5.1 are starting points.
+- **Thresholds.** 6 unread messages and 1,500 characters are starting points, to adjust on real channels.
 - **Long catch-ups.** The days with the most unread are the ones where a catch-up helps most and the
   ones least likely to fit 4,096 tokens. Summarising in chunks and then summarising the chunks is
   possible but multiplies the time; decide after measuring.

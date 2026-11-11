@@ -48,11 +48,10 @@ enum CatchUp {
 
     static func instructions(_ input: Input) -> String {
         """
-        You help \(input.reader) catch up on a team chat channel. The messages are numbered.
-        Answer with exactly two lines and nothing else:
-        YOU: one short sentence on what is asked of \(input.reader) or awaits their answer, then the number of that message in brackets, like [4]. Count a request that speaks of \(input.reader) without naming them. Write NONE when nothing is asked of them.
-        REST: one or two short sentences on what else was said or decided. After each sentence, the number of the message it rests on, in brackets.
-        Write the sentences in \(input.language). Say "you" for \(input.reader). Use only what the messages say.
+        You help \(input.reader) catch up on a team chat channel they have not read. The messages are numbered. \(input.reader) is the reader.
+        Say what is asked of \(input.reader), if anything, then the one or two most important other things that were said or decided. Do not repeat what is asked of \(input.reader) in the rest.
+        Something is asked of \(input.reader) when a message tells or asks them to do, check, review or answer something. That includes a message written to someone else that says \(input.reader) should, must or could do it ("\(input.reader) should look at it", "il faudrait que \(input.reader) regarde"), with or without an @. When several messages ask, keep the latest.
+        Every sentence you write is in \(input.language), whatever language the messages are in: translate when they differ. Short plain sentences in your own words, not copies of the messages. Speak to \(input.reader) directly: "you" (in French "tu", never "vous"), never their name. Use only what the messages say.
         """
     }
 
@@ -60,70 +59,41 @@ enum CatchUp {
         input.lines.enumerated().map { "[\($0.offset + 1)] \($0.element.author): \($0.element.text)" }.joined(separator: "\n")
     }
 
-    /// The model's two lines as sentences tied to their messages. Nil when the answer does not
-    /// have the shape asked for: nothing is shown rather than something approximate.
-    static func parse(_ answer: String, lines: [Line]) -> GeneratedText? {
-        var you: String?, rest: String?
-        for raw in answer.split(whereSeparator: \.isNewline) {
-            let line = raw.trimmingCharacters(in: .whitespaces)
-            if let body = body(of: line, label: "YOU:") { you = body }
-            else if let body = body(of: line, label: "REST:") { rest = body }
-            else if rest != nil, !line.isEmpty { rest! += " " + line }
-        }
-        guard you != nil || rest != nil else { return nil }
+    /// The model's answer as sentences tied to their messages: the line for the reader first,
+    /// then the rest. A number that names no message leaves its sentence untied; a sentence said
+    /// twice is kept once. Nil when nothing is left to show.
+    static func text(from answer: CatchUpAnswer, lines: [Line]) -> GeneratedText? {
+        func source(_ number: Int) -> String? { lines.indices.contains(number - 1) ? lines[number - 1].ts : nil }
         var sentences: [GeneratedText.Sentence] = []
-        if let you, you.uppercased().trimmingCharacters(in: CharacterSet(charactersIn: ". ")) != "NONE",
-           let first = pieces(you, lines: lines).first {
-            sentences.append(.init(text: first.text, source: first.source, forYou: true))
+        if let asked = answer.asked, let text = tidy(asked.sentence) {
+            sentences.append(.init(text: text, source: source(asked.message), forYou: true))
         }
-        if let rest {
-            sentences += pieces(rest, lines: lines).prefix(3).map { .init(text: $0.text, source: $0.source) }
+        for point in answer.rest.prefix(2) {
+            guard let text = tidy(point.sentence), !sentences.contains(where: { $0.text == text }) else { continue }
+            sentences.append(.init(text: text, source: source(point.message)))
         }
-        let text = GeneratedText(sentences: sentences)
-        return text.isEmpty ? nil : text
+        return sentences.isEmpty ? nil : GeneratedText(sentences: sentences)
     }
 
-    private static func body(of line: String, label: String) -> String? {
-        guard line.uppercased().hasPrefix(label) else { return nil }
-        return String(line.dropFirst(label.count)).trimmingCharacters(in: .whitespaces)
-    }
-
-    /// Cuts "A sentence. [2] Another one [5]." at its bracketed numbers: each piece of text with
-    /// the message its number names, or with none when the number is missing or out of range.
-    private static func pieces(_ text: String, lines: [Line]) -> [(text: String, source: String?)] {
-        let reference = try! NSRegularExpression(pattern: #"\[(\d+)\]"#)
-        let whole = text as NSString
-        var out: [(String, String?)] = []
-        var start = 0
-        func add(upTo end: Int, source: String?) {
-            let trim = CharacterSet.whitespaces.union(CharacterSet(charactersIn: ".;,"))
-            var piece = whole.substring(with: NSRange(location: start, length: end - start)).trimmingCharacters(in: trim)
-            guard piece.count > 2 else {
-                // "[2][3]" or "[2]." : a number with no text of its own.
-                return
-            }
-            if let last = piece.last, !"!?…".contains(last) { piece += "." }
-            out.append((piece, source))
-        }
-        for match in reference.matches(in: text, range: NSRange(location: 0, length: whole.length)) {
-            let number = Int(whole.substring(with: match.range(at: 1))) ?? 0
-            add(upTo: match.range.location, source: lines.indices.contains(number - 1) ? lines[number - 1].ts : nil)
-            start = match.range.location + match.range.length
-        }
-        add(upTo: whole.length, source: nil)
-        return out.map { (text: $0.0, source: $0.1) }
+    /// A sentence as it is shown: trimmed, a capital first, closed by a full stop.
+    private static func tidy(_ raw: String) -> String? {
+        var text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard text.count > 2 else { return nil }
+        text = text.prefix(1).uppercased() + text.dropFirst()
+        if let last = text.last, !".!?…".contains(last) { text += "." }
+        return text
     }
 
     /// Asks the model, alone on it and ahead of background work. Throws when the unread messages
-    /// do not all fit its context, when it refuses, or when its answer has not the shape asked.
+    /// do not all fit its context, when it refuses, or when its answer holds nothing to show.
     static func write(_ input: Input, with intelligence: Intelligence = .shared) async throws -> GeneratedText {
         if IntelligenceStatus.snapshotOverride != nil { return sample(input) }
         return try await intelligence.perform(.onScreen) { model in
             let instructions = instructions(input), prompt = prompt(input)
             let room = TextBudget.room(contextSize: model.contextSize, instructions: await model.tokenCount(instructions))
             guard await model.tokenCount(prompt) <= room else { throw IntelligenceError.tooLong }
-            let answer = try await model.respond(instructions: instructions, prompt: prompt, maximumTokens: 300)
-            guard let text = parse(answer, lines: input.lines) else { throw IntelligenceError.unavailable }
+            let answer = try await model.catchUp(instructions: instructions, prompt: prompt)
+            guard let text = text(from: answer, lines: input.lines) else { throw IntelligenceError.unavailable }
             return text
         }
     }

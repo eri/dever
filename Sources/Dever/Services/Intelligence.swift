@@ -34,7 +34,44 @@ protocol LanguageModel: Sendable {
     func tokenCount(_ text: String) async -> Int
     /// One answer to one prompt, in a fresh session. Throws on refusal, guardrail, overflow.
     func respond(instructions: String, prompt: String, maximumTokens: Int?) async throws -> String
+    /// A catch-up of numbered messages, in the shape the model is held to (guided generation):
+    /// free text in two labelled lines came back mislabelled or translated one time in two.
+    func catchUp(instructions: String, prompt: String) async throws -> CatchUpAnswer
 }
+
+/// What the model says of a run of numbered messages.
+struct CatchUpAnswer: Equatable, Sendable {
+    struct Point: Equatable, Sendable {
+        var sentence: String
+        /// Number of the message it rests on, from 1; anything else ties it to none.
+        var message: Int
+    }
+    /// What is asked of the reader, and where; nil when nothing is.
+    var asked: Point?
+    var rest: [Point]
+}
+
+#if canImport(FoundationModels)
+@available(macOS 26.0, *)
+@Generable
+private struct CatchUpPoint {
+    @Guide(description: "One short sentence") var sentence: String
+    @Guide(description: "Number of the message the sentence rests on") var message: Int
+}
+
+@available(macOS 26.0, *)
+@Generable
+private struct CatchUpShape {
+    @Guide(description: "True only when a message asks the reader to do, check or answer something, naming them or not")
+    var somethingIsAskedOfTheReader: Bool
+    @Guide(description: "What is asked of the reader, in one short sentence addressed to them. Empty when nothing is asked")
+    var asked: String
+    @Guide(description: "Number of the message that asks it. 0 when nothing is asked")
+    var askedInMessage: Int
+    @Guide(description: "The most important other things said or decided, the most important first", .count(1...2))
+    var rest: [CatchUpPoint]
+}
+#endif
 
 enum IntelligenceError: Error, Equatable {
     case unavailable
@@ -82,6 +119,20 @@ struct SystemLanguageModelClient: LanguageModel {
             let session = LanguageModelSession(instructions: instructions)
             let options = GenerationOptions(maximumResponseTokens: maximumTokens)
             return try await session.respond(to: prompt, options: options).content
+        }
+        #endif
+        throw IntelligenceError.unavailable
+    }
+
+    func catchUp(instructions: String, prompt: String) async throws -> CatchUpAnswer {
+        #if canImport(FoundationModels)
+        if #available(macOS 26.0, *) {
+            guard SystemLanguageModel.default.availability == .available else { throw IntelligenceError.unavailable }
+            let session = LanguageModelSession(instructions: instructions)
+            let shape = try await session.respond(to: prompt, generating: CatchUpShape.self,
+                                                  options: GenerationOptions(maximumResponseTokens: 300)).content
+            let asked = shape.somethingIsAskedOfTheReader ? CatchUpAnswer.Point(sentence: shape.asked, message: shape.askedInMessage) : nil
+            return CatchUpAnswer(asked: asked, rest: shape.rest.map { .init(sentence: $0.sentence, message: $0.message) })
         }
         #endif
         throw IntelligenceError.unavailable

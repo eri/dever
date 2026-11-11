@@ -18,6 +18,12 @@ private final class FakeModel: LanguageModel, @unchecked Sendable {
         lock.withLock { running -= 1 }
         return "answer to \(prompt)"
     }
+
+    var answer = CatchUpAnswer(asked: nil, rest: [])
+    func catchUp(instructions: String, prompt: String) async throws -> CatchUpAnswer {
+        lock.withLock { order.append(prompt) }
+        return answer
+    }
 }
 
 final class IntelligenceQueueTests: XCTestCase {
@@ -260,31 +266,41 @@ final class CatchUpTests: XCTestCase {
 
     private var lines: [CatchUp.Line] { (1...6).map { CatchUp.Line(ts: "\($0)", author: "Alex", text: "m\($0)") } }
 
-    func testParsesBothLinesAndTiesSentencesToMessages() throws {
-        let text = try XCTUnwrap(CatchUp.parse("""
-        YOU: On attend ta réponse sur le front avant midi [6].
-        REST: La migration casse la facturation [1]. L'export CSV sort de la version. [4]
-        """, lines: lines))
+    func testTheLineForYouComesFirstAndSentencesAreTiedAndTidied() throws {
+        let answer = CatchUpAnswer(asked: .init(sentence: "peux-tu regarder le front ?", message: 6),
+                                   rest: [.init(sentence: "la migration casse la facturation", message: 1),
+                                          .init(sentence: "Pas d'export CSV dans cette version.", message: 4)])
+        let text = try XCTUnwrap(CatchUp.text(from: answer, lines: lines))
         XCTAssertEqual(text.sentences, [
-            .init(text: "On attend ta réponse sur le front avant midi.", source: "6", forYou: true),
+            .init(text: "Peux-tu regarder le front ?", source: "6", forYou: true),
             .init(text: "La migration casse la facturation.", source: "1"),
-            .init(text: "L'export CSV sort de la version.", source: "4"),
+            .init(text: "Pas d'export CSV dans cette version.", source: "4"),
         ])
     }
 
-    func testNoneMeansNoLineForYou() throws {
-        let text = try XCTUnwrap(CatchUp.parse("YOU: NONE\nREST: The export leaves the release [2].", lines: lines))
+    func testNothingAskedMeansNoLineForYou() throws {
+        let text = try XCTUnwrap(CatchUp.text(from: .init(asked: nil, rest: [.init(sentence: "The export leaves the release", message: 2)]), lines: lines))
         XCTAssertEqual(text.sentences, [.init(text: "The export leaves the release.", source: "2")])
     }
 
     func testANumberOutOfRangeLeavesTheSentenceUntied() throws {
-        let text = try XCTUnwrap(CatchUp.parse("YOU: none.\nREST: Billing is broken [42]. Nobody told the client", lines: lines))
-        XCTAssertEqual(text.sentences, [.init(text: "Billing is broken."), .init(text: "Nobody told the client.")])
+        let text = try XCTUnwrap(CatchUp.text(from: .init(asked: .init(sentence: "Check the screen", message: 0),
+                                                           rest: [.init(sentence: "Billing is broken", message: 42)]), lines: lines))
+        XCTAssertEqual(text.sentences, [.init(text: "Check the screen.", forYou: true), .init(text: "Billing is broken.")])
     }
 
-    func testAnAnswerWithoutTheShapeIsSilence() {
-        XCTAssertNil(CatchUp.parse("Here is a summary of the conversation: lots happened.", lines: lines))
-        XCTAssertNil(CatchUp.parse("YOU: NONE\nREST:", lines: lines))
+    func testEmptyAndRepeatedSentencesAreDropped() {
+        XCTAssertNil(CatchUp.text(from: .init(asked: .init(sentence: " ", message: 1), rest: [.init(sentence: "", message: 2)]), lines: lines))
+        let twice = CatchUp.text(from: .init(asked: nil, rest: [.init(sentence: "Same thing", message: 1), .init(sentence: "same thing.", message: 2)]), lines: lines)
+        XCTAssertEqual(twice?.sentences.count, 1)
+    }
+
+    func testWriteAsksTheModelAndTiesItsAnswer() async throws {
+        let model = FakeModel()
+        model.answer = .init(asked: .init(sentence: "Answer before noon", message: 6), rest: [.init(sentence: "Billing is broken", message: 1)])
+        let text = try await CatchUp.write(.init(lines: lines, reader: "Sam", language: "English"), with: Intelligence(model: model))
+        XCTAssertEqual(text.sentences.map(\.source), ["6", "1"])
+        XCTAssertEqual(model.order.count, 1)
     }
 
     func testTooLongForTheContextIsRefusedBeforeAsking() async {
@@ -296,5 +312,29 @@ final class CatchUpTests: XCTestCase {
             XCTFail("expected a throw")
         } catch { XCTAssertEqual(error as? IntelligenceError, .tooLong) }
         XCTAssertTrue(model.order.isEmpty)
+    }
+}
+
+/// The real model, on a Mac that has it: `DEVER_TEST_REAL_MODEL=1 swift test --filter RealModel`.
+/// Skipped everywhere else; it checks the shape of the answer, not its words.
+final class RealModelTests: XCTestCase {
+    func testCatchUpOfAFrenchChannel() async throws {
+        try XCTSkipUnless(ProcessInfo.processInfo.environment["DEVER_TEST_REAL_MODEL"] == "1", "needs the system model")
+        let said = [
+            ("Alex", "Le déploiement de la preview est cassé depuis hier soir, la page de paiement renvoie une 500."),
+            ("Robin", "Confirmé, la migration ne remplit pas plan_id pour les comptes créés avant mars."),
+            ("Charlie", "On peut mettre une valeur par défaut legacy en attendant ?"),
+            ("Robin", "Oui mais il faut que le front gère legacy, sinon l'écran de facturation plante."),
+            ("Charlie", "Ok, décision : pas d'export CSV dans cette version."),
+            ("Alex", "Il faudrait que Sam regarde le front avant midi, c'est lui qui a fait l'écran de facturation."),
+        ]
+        let lines = said.enumerated().map { CatchUp.Line(ts: "\($0.offset + 1)", author: $0.element.0, text: $0.element.1) }
+        let start = Date()
+        let text = try await CatchUp.write(.init(lines: lines, reader: "Sam", language: "French"))
+        print("catch-up in \(String(format: "%.1f", Date().timeIntervalSince(start))) s:")
+        for s in text.sentences { print(s.forYou ? " → " : "   ", s.text, "[\(s.source ?? "-")]") }
+        XCTAssertEqual(text.sentences.first?.forYou, true)
+        XCTAssertEqual(text.sentences.first?.source, "6")
+        XCTAssertLessThanOrEqual(text.sentences.count, 3)
     }
 }
