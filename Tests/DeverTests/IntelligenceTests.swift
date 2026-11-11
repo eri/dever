@@ -9,12 +9,15 @@ private final class FakeModel: LanguageModel, @unchecked Sendable {
     private var running = 0
     private(set) var peak = 0
     private(set) var order: [String] = []
+    /// How long an answer takes. Long enough, in a test of ordering, that a busy machine
+    /// cannot let the first answer end before the others have queued.
+    var delay: UInt64 = 20_000_000
 
     func tokenCount(_ text: String) async -> Int { TextBudget.estimate(text) }
 
     func respond(instructions: String, prompt: String, maximumTokens: Int?) async throws -> String {
         lock.withLock { running += 1; peak = max(peak, running); order.append(prompt) }
-        try await Task.sleep(nanoseconds: 20_000_000)
+        try await Task.sleep(nanoseconds: delay)
         lock.withLock { running -= 1 }
         return "answer to \(prompt)"
     }
@@ -51,14 +54,15 @@ final class IntelligenceQueueTests: XCTestCase {
 
     func testOnScreenGoesBeforeBackgroundAlreadyWaiting() async throws {
         let model = FakeModel()
+        model.delay = 400_000_000
         let intelligence = Intelligence(model: model)
         let ask: @Sendable (Intelligence.Priority, String) async throws -> String = { priority, prompt in
             try await intelligence.perform(priority) { try await $0.respond(instructions: "", prompt: prompt, maximumTokens: nil) }
         }
         async let first = ask(.background, "running")
-        try await Task.sleep(nanoseconds: 5_000_000)
+        try await Task.sleep(nanoseconds: 60_000_000)
         async let second = ask(.background, "background")
-        try await Task.sleep(nanoseconds: 5_000_000)
+        try await Task.sleep(nanoseconds: 60_000_000)
         async let third = ask(.onScreen, "on screen")
         _ = try await (first, second, third)
         XCTAssertEqual(model.order, ["running", "on screen", "background"])
