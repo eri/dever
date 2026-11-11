@@ -435,8 +435,8 @@ private struct ProjectControls: View {
 }
 
 
-/// Alerts, with a control that matches what macOS allows right now: a switch over every
-/// alert kind (the same keys as Settings › Alerts), a link to System Settings once denied.
+/// Notifications, with a control that matches what macOS allows right now: the same switch
+/// as Settings › Notifications, a link to System Settings once denied.
 private struct AlertsRow: View {
     @State private var status: UNAuthorizationStatus = .notDetermined
     @State private var on = AlertKind.allCases.allSatisfy(\.isEnabled)
@@ -459,8 +459,8 @@ private struct AlertsRow: View {
             Image(systemName: "bell").font(.system(size: 16)).foregroundStyle(Soot.ink).frame(width: 22)
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {
-                Text("Alerts").font(.system(size: 16, weight: .medium)).foregroundStyle(Soot.ink)
-                Text("When a pipeline fails or a ticket stalls").font(.system(size: 13)).foregroundStyle(Soot.muted)
+                Text("Notifications").font(.system(size: 16, weight: .medium)).foregroundStyle(Soot.ink)
+                Text("When a pipeline fails").font(.system(size: 13)).foregroundStyle(Soot.muted)
                     .lineLimit(1)
             }
             Spacer()
@@ -471,9 +471,9 @@ private struct AlertsRow: View {
                     }
                 }
                 .buttonStyle(TertiaryButton(font: .system(size: 14, weight: .semibold)))
-                .help("Alerts are turned off for Dever in System Settings.")
+                .help("Notifications are turned off for Dever in System Settings.")
             } else {
-                Toggle("Alerts", isOn: master)
+                Toggle("Notifications", isOn: master)
                     .labelsHidden().toggleStyle(.switch).tint(Soot.lime).controlSize(.small)
             }
         }

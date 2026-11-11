@@ -20,7 +20,7 @@ struct SettingsView: View {
             case .repositories: "Repositories"
             case .overview: "Overview"
             case .appearance: "Appearance"
-            case .alerts: "Alerts"
+            case .alerts: "Notifications"
             case .launch: "Launch"
             case .about: "About"
             }
@@ -1126,70 +1126,57 @@ enum Appearance: String, CaseIterable, Identifiable {
     }
 }
 
-// MARK: - Alerts
+// MARK: - Notifications
 
 private struct AlertsSection: View {
     @EnvironmentObject var app: AppState
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var status: UNAuthorizationStatus = .notDetermined
-    @State private var enabled: [AlertKind: Bool] = Dictionary(uniqueKeysWithValues: AlertKind.allCases.map { ($0, $0.isEnabled) })
+    @AppStorage(AlertKind.pipelineFailing.settingKey) private var wanted = true
+
+    /// The notification reaches the user: the switch is on and macOS allows it.
+    private var on: Bool { wanted && status != .denied && status != .notDetermined }
+
+    private var stateLine: String {
+        switch status {
+        case .denied: "Blocked for Dever in System Settings"
+        case .notDetermined: "macOS asks you once"
+        default: wanted ? "A macOS notification, once per failure" : "Off"
+        }
+    }
+
+    /// Turning it on the first time is what makes macOS ask.
+    private func set(_ value: Bool) {
+        wanted = value
+        guard value, status == .notDetermined else { return }
+        Task { _ = await Notifier.shared.requestAuthorization(); await refresh() }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            SectionHead(title: "Alerts", detail: "What Dever sends you, once per situation")
-            switch status {
-            case .denied:
-                VStack(alignment: .leading, spacing: 12) {
-                    Label {
-                        Text("Off for Dever in System Settings").font(.system(size: 13)).foregroundStyle(Soot.ink)
-                    } icon: {
-                        Image(systemName: "bell.slash").foregroundStyle(Soot.muted)
-                    }
-                    Button("Open System Settings") {
-                        if let url = URL(string: "x-apple.systempreferences:com.apple.Notifications-Settings.extension") {
-                            NSWorkspace.shared.open(url)
-                        }
-                    }
-                    .buttonStyle(SecondaryButton())
-                    }
-                    case .notDetermined:
-                VStack(alignment: .leading, spacing: 12) {
-                    Text("When a pipeline fails or a project slips")
-                        .font(.system(size: 13)).foregroundStyle(Soot.muted)
-                    Button("Turn on alerts") {
-                        Task { _ = await Notifier.shared.requestAuthorization(); await refresh() }
-                    }
-                    .buttonStyle(PrimaryButton())
-                }
-            default:
-                // Each alert as the notification it sends, in the user's own project.
-                VStack(spacing: 8) {
-                    ForEach(AlertKind.allCases) { kind in
-                        let binding = Binding(
-                            get: { enabled[kind] ?? true },
-                            set: { enabled[kind] = $0; UserDefaults.standard.set($0, forKey: kind.settingKey) }
-                        )
-                        let sample = kind.sample(project: app.projects.first?.name ?? "Checkout")
-                        Button { binding.wrappedValue.toggle() } label: {
-                            HStack(spacing: 16) {
-                                NotificationPreview(title: sample.title, message: sample.body)
-                                    .opacity(binding.wrappedValue ? 1 : 0.4)
-                                Spacer(minLength: 0)
-                                Toggle(kind.shortLabel, isOn: binding)
-                                    .labelsHidden().toggleStyle(.switch).tint(Soot.lime).controlSize(.small)
+            SectionHead(title: "Notifications", detail: "Dever tells you when a project needs you")
+            SettingRows {
+                SettingRow(title: "When a pipeline fails", detail: stateLine,
+                           tap: status == .denied ? nil : { set(!on) }) {
+                    if status == .denied {
+                        Button("Open System Settings") {
+                            if let url = URL(string: "x-apple.systempreferences:com.apple.Notifications-Settings.extension") {
+                                NSWorkspace.shared.open(url)
                             }
-                            .padding(.leading, 8).padding(.trailing, 16).padding(.vertical, 8)
-                            .background(Soot.surface, in: RoundedRectangle(cornerRadius: 12))
                         }
-                        .buttonStyle(RowButton(lift: .tone, radius: 12))
-                        .animation(reduceMotion ? nil : .easeOut(duration: 0.15), value: binding.wrappedValue)
-                        .accessibilityElement(children: .ignore)
-                        .accessibilityLabel(kind.shortLabel)
-                        .accessibilityHint("Sends \u{201C}\(sample.title)\u{201D}")
-                        .accessibilityValue(binding.wrappedValue ? "On" : "Off")
-                        .accessibilityAddTraits(.isToggle)
+                        .buttonStyle(SecondaryButton())
+                    } else {
+                        Toggle("Notify me when a pipeline fails", isOn: Binding(get: { on }, set: set))
+                            .labelsHidden().toggleStyle(.switch).tint(Soot.lime).controlSize(.small)
                     }
                 }
+                // What it sends, in the user's own project. Dimmed while it is off.
+                NotificationPreview(title: "\(app.projects.first?.name ?? "Checkout"): pipeline failing",
+                                    message: "The default branch fails its checks.")
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 24)
+                    .opacity(on ? 1 : 0.4)
+                    .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: on)
             }
         }
         .task { await refresh() }
@@ -1201,30 +1188,12 @@ private struct AlertsSection: View {
 
     private func refresh() async {
         status = await Notifier.shared.authorizationStatus()
-    }
-}
-
-extension AlertKind {
-    /// The situation in three words, for a switch beside it.
-    var shortLabel: String {
-        switch self {
-        case .pipelineFailing: "Pipeline failing"
-        case .pastTarget: "Past target date"
-        case .mergedButOpen: "Merged but still open"
-        }
-    }
-
-    /// The notification as it would read for `project`, with made-up numbers.
-    func sample(project: String) -> (title: String, body: String) {
-        switch self {
-        case .pipelineFailing:
-            return ("\(project): pipeline failing", "The default branch fails its checks.")
-        case .pastTarget:
-            let target = Calendar.current.date(byAdding: .day, value: -3, to: Date()) ?? Date()
-            return ("\(project): past target date",
-                    "3 issues still open after \(target.formatted(date: .abbreviated, time: .omitted)).")
-        case .mergedButOpen:
-            return ("\(project): 2 issues to move forward", "Merged in code, still in progress in Linear: ENG-142, ENG-157.")
+        // Snapshots: DEVER_SNAPSHOT_NOTIFY=ask|denied|on shows the other states.
+        switch ProcessInfo.processInfo.environment["DEVER_SNAPSHOT_NOTIFY"] {
+        case "ask": status = .notDetermined
+        case "denied": status = .denied
+        case "on": status = .authorized
+        default: break
         }
     }
 }
@@ -1250,9 +1219,9 @@ private struct NotificationPreview: View {
             }
         }
         .padding(10)
-        .frame(width: 440, alignment: .leading)
-        .background(Soot.ground, in: RoundedRectangle(cornerRadius: 12))
-        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Soot.line))
+        .frame(width: 420, alignment: .leading)
+        .background(Soot.ground, in: RoundedRectangle(cornerRadius: 14))
+        .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(Soot.line))
         .accessibilityHidden(true)
     }
 }

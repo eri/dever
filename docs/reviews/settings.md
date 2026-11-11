@@ -231,15 +231,18 @@ takes, and names each one the way a developer does.
   selected trait and the consequence as its hint. The card and the line fade (none under Reduce
   Motion).
 
-## Follow-up: Alerts as the notifications themselves
+## Follow-up: Notifications, one switch and the banner it sends
 
-Three rows of label, sentence and switch said nothing about what a switch turns on. Each alert is
-now shown as the macOS notification it sends.
+"Alerts" was three rows of label, sentence and switch that said nothing about what a switch turns
+on, or that these are macOS notifications.
 
-- **A banner per alert.** The app's mark, the title and the line exactly as the notifier writes
-  them, and "now", in the user's first project ("Checkout" when there is none): "Checkout: pipeline
-  failing / The default branch fails its checks." The numbers and issue keys are made up.
-- **The switch stays** on the right; the whole row toggles. Off, the banner fades to 40%.
-- **Head.** "What Dever sends you, once per situation".
-- **Accessibility.** Each row is one toggle named by the situation ("Pipeline failing"), with the
-  sample title as its hint; the banner itself is hidden from VoiceOver.
+- **Renamed.** The section is "Notifications", in Settings and in the onboarding.
+- **One notification for this version:** a failing pipeline. Past target dates and merged-but-open
+  issues still show in the app; they no longer notify, and their switches are gone.
+- **One switch does both steps.** "When a pipeline fails" is the choice and the permission: the
+  first time it is turned on, macOS asks. Its line says where things stand: "A macOS notification,
+  once per failure", "Off", "macOS asks you once", or "Blocked for Dever in System Settings" with an
+  "Open System Settings" button in place of the switch.
+- **The banner itself** sits under the row: the app's mark, the title and the line exactly as the
+  notifier writes them, and "now", in the user's first project ("Checkout" when there is none).
+  It fades to 40% while notifications are off.

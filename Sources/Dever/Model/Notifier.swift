@@ -1,20 +1,13 @@
 import Foundation
 import UserNotifications
 
-/// Things that need someone to act, each with its own on/off setting.
+/// Things that need someone to act, each with its own on/off setting. One for now:
+/// a failing pipeline. Past target dates and merged-but-open issues show in the app only.
 enum AlertKind: String, CaseIterable, Identifiable {
-    case pipelineFailing, pastTarget, mergedButOpen
+    case pipelineFailing
 
     var id: String { rawValue }
     var settingKey: String { "notify.\(rawValue)" }
-
-    var settingLabel: String {
-        switch self {
-        case .pipelineFailing: "Notify when a project's pipeline starts failing"
-        case .pastTarget: "Notify when a project passes its target date"
-        case .mergedButOpen: "Notify when merged issues are still marked in progress"
-        }
-    }
 
     var isEnabled: Bool {
         UserDefaults.standard.object(forKey: settingKey) as? Bool ?? true
@@ -42,18 +35,6 @@ extension Project {
                              body: (g.scoped
                                  ? "A pull request branch of this project fails its checks"
                                  : "The default branch fails its checks") + (several ? " in \(names)." : ".")))
-        }
-        if let l = s.linear, let target = l.targetDate,
-           target < Calendar.current.startOfDay(for: Date()), l.done < l.total {
-            out.append(.init(kind: .pastTarget, key: "target:\(target.timeIntervalSince1970)",
-                             title: "\(name): past target date",
-                             body: Plural.text("^[\(l.total - l.done) issue](inflect: true) still open after \(target.formatted(date: .abbreviated, time: .omitted)).")))
-        }
-        if let stale = s.github?.mergedButOpen, !stale.isEmpty {
-            // Keyed by the issue list, so a newly affected issue notifies again.
-            out.append(.init(kind: .mergedButOpen, key: "merged:" + stale.joined(separator: ","),
-                             title: "\(name): " + Plural.text("^[\(stale.count) issue](inflect: true) to move forward"),
-                             body: "Merged in code, still in progress in Linear: \(stale.prefix(5).joined(separator: ", "))\(stale.count > 5 ? "…" : "")."))
         }
         return out
     }
