@@ -315,21 +315,23 @@ struct PullChip: View {
 
     var body: some View {
         Link(destination: url) {
-            HStack(spacing: 5) {
-                Image(systemName: glyph.symbol).font(.system(size: 11, weight: .bold)).foregroundStyle(glyph.tint)
+            HStack(spacing: 4) {
+                Image(systemName: glyph.symbol).font(.system(size: 10, weight: .bold)).foregroundStyle(glyph.tint)
                 if let repository {
-                    Text(GitHubRepository.short(repository)).font(.system(size: 12, weight: .medium)).foregroundStyle(Soot.muted)
+                    Text(GitHubRepository.short(repository)).font(.system(size: 11, weight: .medium)).foregroundStyle(Soot.muted)
                         .lineLimit(1)
                 }
-                Text(verbatim: "#\(number)").font(.system(size: 12, weight: .medium, design: .monospaced)).foregroundStyle(Soot.ink)
+                Text(verbatim: "#\(number)").font(.system(size: 11, weight: .medium)).foregroundStyle(Soot.ink).monospacedDigit()
                 if let run {
-                    Image(systemName: run.symbol).font(.system(size: 11, weight: .semibold)).foregroundStyle(run.tint)
+                    Image(systemName: run.symbol).font(.system(size: 10, weight: .semibold)).foregroundStyle(run.tint)
                 }
             }
             .padding(.horizontal, 8)
-            .frame(height: 26)
+            // The same quiet capsule as the row's other pills (in QA, Staging): a filled tone,
+            // no edge; a little taller, as it is the one that opens something.
+            .frame(height: 22)
         }
-        .buttonStyle(ChipButton(fill: Soot.surface))
+        .buttonStyle(ChipButton(fill: Soot.ink.opacity(0.07), edge: false))
         .help([title.map { "#\(number) \($0)" } ?? "Pull request #\(number)", repository, glyph.word, run?.word].compactMap { $0 }.joined(separator: " · ") + " · Opens on GitHub")
         .accessibilityLabel(["Pull request #\(number)", repository.map { "in \($0)" }, glyph.word, run?.word].compactMap { $0 }.joined(separator: ", "))
         .accessibilityHint("Opens on GitHub")
