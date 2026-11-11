@@ -344,7 +344,7 @@ already exists for this).
 | --- | --- | --- | --- |
 | Open a picker | Channels, Linear projects, repositories, open pull requests | Loaded on opening | Keep (budget: on opening) |
 | Create a channel or a Linear project on save | The catalogue | Created, project saved | Keep; add the created item to the catalogue |
-| Save | The project's links | See Overview and project page rows | Load that project only |
+| Save | The project's links | The project page reloads; the Overview reads that project alone, at once, when its channel, Linear project or repositories changed (`OverviewStore.relinked`, `refresh(project:)`) | Done |
 
 ### Settings
 

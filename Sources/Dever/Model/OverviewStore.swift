@@ -259,6 +259,8 @@ final class OverviewStore: ObservableObject {
     private var autoRefresh: Task<Void, Never>?
     private weak var app: AppState?
     private var following: AnyCancellable?
+    private var relinking: AnyCancellable?
+    private var linksSeen: [Project] = []
 
     /// Keeps snapshots fresh (and notifications flowing) for as long as the app runs,
     /// even with its window closed.
@@ -272,6 +274,17 @@ final class OverviewStore: ObservableObject {
             .dropFirst(2)
             .debounce(for: .milliseconds(80), scheduler: RunLoop.main)
             .sink { [weak self] in self?.rederive() }
+        // A project whose links changed (the editor saved, an import) is read again at once,
+        // alone: its row does not wait on skeletons for the next cycle.
+        linksSeen = app.projects
+        relinking = app.$projects
+            .sink { [weak self] projects in
+                guard let self else { return }
+                let changed = Self.relinked(from: self.linksSeen, to: projects)
+                self.linksSeen = projects
+                guard self.lastRefresh != nil, !changed.isEmpty else { return }
+                Task { for id in changed { await self.refresh(project: id, app) } }
+            }
         autoRefresh = Task { [weak self] in
             while !Task.isCancelled {
                 guard let self else { return }
@@ -279,6 +292,33 @@ final class OverviewStore: ObservableObject {
                 try? await Task.sleep(nanoseconds: 15 * 1_000_000_000)
             }
         }
+    }
+
+    /// The projects whose row must be read again: new ones, and those whose Slack channel,
+    /// Linear project or repositories are not what they were. A rename or a preview is not one.
+    nonisolated static func relinked(from old: [Project], to new: [Project]) -> [UUID] {
+        let before = Dictionary(old.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        return new.filter { p in
+            guard let o = before[p.id] else { return true }
+            return o.slack?.id != p.slack?.id || o.linear?.id != p.linear?.id || o.githubRepos != p.githubRepos
+                || o.usesWorkspaceRepository != p.usesWorkspaceRepository || o.githubWholeRepo != p.githubWholeRepo
+        }.map(\.id)
+    }
+
+    /// Reads one project again, behind what is on screen. The other rows are not touched.
+    func refresh(project id: UUID, _ app: AppState) async {
+        guard OverviewDemo.scene == nil else { return }
+        // A cycle in flight read the project as it was: let it finish, then read it as it is.
+        while cycling { try? await Task.sleep(nanoseconds: 200_000_000) }
+        guard let p = app.projects.first(where: { $0.id == id }) else { return }
+        let repos = Result { RepoCache(client: try app.githubClient()) }
+        let early: @Sendable (UUID, ProjectSnapshot.SlackStats) async -> Void = { [weak self] id, slack in
+            await self?.publish(slack, for: id)
+        }
+        let snapshot = await Self.load(p, app, repos, previous: snapshots[id], early: early)
+        // Removed or edited again meanwhile: the newer read wins.
+        guard app.projects.first(where: { $0.id == id }) == p else { return }
+        snapshots[id] = snapshot
     }
 
     /// Works each row's Linear and GitHub parts out again from what the stores hold, without
