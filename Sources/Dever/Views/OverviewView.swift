@@ -151,13 +151,12 @@ struct OverviewView: View {
     // MARK: Head: the title, one quiet line, the actions
 
     private var head: some View {
+        VStack(alignment: .leading, spacing: 10) {
         HStack(alignment: .top, spacing: 16) {
             VStack(alignment: .leading, spacing: 4) {
                 Text("Overview").font(.system(size: 28, weight: .semibold)).tracking(-0.8).foregroundStyle(Soot.ink)
                     .accessibilityAddTraits(.isHeader)
                 summary
-                ReleaseLine()
-                    .padding(.top, 6)
             }
             Spacer(minLength: 16)
             HStack(spacing: 8) {
@@ -183,6 +182,9 @@ struct OverviewView: View {
                 }
                 AddProjectControl(add: newProject, addMany: importFrom, showMany: $showMany)
             }
+        }
+            // Its own row, the page's full width: nothing in it has to be cut.
+            ReleaseLine()
         }
     }
 
@@ -1025,30 +1027,45 @@ enum Brief {
 // MARK: - Release line
 
 /// Where the code stands, under the title: what went to production last, what landed on
-/// staging last (with its checks), and the release waiting to go. One line, three links.
+/// staging last (with its checks), and the release waiting to go. One line, three links;
+/// hovering one shows what it is about, and which checks fail.
 private struct ReleaseLine: View {
     @EnvironmentObject var app: AppState
     @EnvironmentObject var store: OverviewStore
     @ObservedObject private var release = ReleaseStore.shared
+    /// The part whose card shows, and the pending open or close of that card.
+    @State private var shown: Part?
+    @State private var pending: Task<Void, Never>?
+
+    enum Part: Hashable { case prod, staging, next }
 
     var body: some View {
         Group {
             if let s = release.state {
                 HStack(spacing: 6) {
                     if let p = s.production {
-                        part(symbol: "checkmark.seal.fill", tint: Soot.lime, title: "Prod",
-                             detail: "\(when(p.date)) · \(p.author)", checks: nil, url: p.url,
-                             help: "Last merged into \(s.productionBranch): #\(p.number) \(p.title)")
+                        part(.prod, symbol: "checkmark.seal.fill", tint: Soot.lime, title: "Prod",
+                             detail: "\(Brief.ago(p.date)) ago · \(p.author)", checks: nil, url: p.url) {
+                            ReleaseCard(heading: "#\(p.number) \(p.title)",
+                                        line: "Merged into \(s.productionBranch) \(p.date.formatted(.relative(presentation: .named))) by \(p.author)",
+                                        checks: [], url: p.url)
+                        }
                     }
                     if let st = s.staging {
-                        part(symbol: "testtube.2", tint: Theme.chart2, title: "Staging",
-                             detail: "\(when(st.date)) · \(st.author)", checks: s.stagingChecks, url: st.url,
-                             help: "Last merged into \(s.stagingBranch ?? "staging"): #\(st.number) \(st.title)")
+                        part(.staging, symbol: "testtube.2", tint: Theme.chart2, title: "Staging",
+                             detail: "\(Brief.ago(st.date)) ago · \(st.author)", checks: s.stagingChecks, url: st.url) {
+                            ReleaseCard(heading: "#\(st.number) \(st.title)",
+                                        line: "Merged into \(s.stagingBranch ?? "staging") \(st.date.formatted(.relative(presentation: .named))) by \(st.author)",
+                                        checks: s.stagingCheckList, url: st.url)
+                        }
                     }
                     if let n = s.next {
-                        part(symbol: "arrow.up.forward.circle.fill", tint: Soot.muted, title: "Next prod",
-                             detail: "#\(n.number) · open \(Brief.ago(n.opened))", checks: n.checks, url: n.url,
-                             help: "Release pull request into \(s.productionBranch), opened by \(n.author)")
+                        part(.next, symbol: "arrow.up.forward.circle.fill", tint: Soot.muted, title: "Next prod",
+                             detail: "#\(n.number) · open \(Brief.ago(n.opened))", checks: n.checks, url: n.url) {
+                            ReleaseCard(heading: "#\(n.number) \(n.title)",
+                                        line: "Into \(s.productionBranch), opened \(n.opened.formatted(.relative(presentation: .named))) by \(n.author)",
+                                        checks: n.checkList, url: n.url)
+                        }
                     }
                     if release.failed, let at = release.loadedAt {
                         Text("as of \(at.formatted(.relative(presentation: .named)))")
@@ -1064,17 +1081,32 @@ private struct ReleaseLine: View {
         }
         .motion(Motion.ui, fade: true, value: release.state)
         .task(id: store.lastRefresh) { await release.refresh(app) }
+        .onAppear {
+            // Snapshots: DEVER_SNAPSHOT_RELEASE_CARD=prod|staging|next opens that part's card.
+            switch ProcessInfo.processInfo.environment["DEVER_SNAPSHOT_RELEASE_CARD"] {
+            case "prod": shown = .prod
+            case "staging": shown = .staging
+            case "next": shown = .next
+            default: break
+            }
+        }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Releases of \(release.state?.repository ?? "the repository")")
     }
 
-    /// Under a day: "3h ago"; older: the day.
-    private func when(_ date: Date) -> String {
-        Date().timeIntervalSince(date) < 86_400 ? "\(Brief.ago(date)) ago" : date.formatted(.dateTime.day().month(.abbreviated))
+    /// Hovering a part or its card keeps the card; leaving both closes it a moment later.
+    private func hover(_ part: Part, _ inside: Bool) {
+        pending?.cancel()
+        pending = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: inside ? 250_000_000 : 180_000_000)
+            guard !Task.isCancelled else { return }
+            Motion.run(Motion.ui, fade: true) { shown = inside ? part : (shown == part ? nil : shown) }
+        }
     }
 
-    private func part(symbol: String, tint: Color, title: String, detail: String,
-                      checks: ProjectSnapshot.PipelineState?, url: URL, help: String) -> some View {
+    private func part<Card: View>(_ id: Part, symbol: String, tint: Color, title: String, detail: String,
+                                  checks: ProjectSnapshot.PipelineState?, url: URL,
+                                  @ViewBuilder card: @escaping () -> Card) -> some View {
         HoverLink(destination: url, hoverTint: Soot.surface) {
             HStack(spacing: 6) {
                 Image(systemName: symbol).font(.system(size: 12, weight: .semibold)).foregroundStyle(tint)
@@ -1084,9 +1116,79 @@ private struct ReleaseLine: View {
                 if let checks, checks != .unknown { PipelineGlyph(state: checks) }
             }
             .lineLimit(1)
+            .fixedSize()
         }
         .simultaneousGesture(TapGesture().onEnded { release.opened() })
-        .help(help + " · Opens on GitHub")
+        .onHover { hover(id, $0) }
+        .overlay(alignment: .topLeading) {
+            if shown == id {
+                card()
+                    .onHover { hover(id, $0) }
+                    .offset(x: 0, y: 32)
+                    .transition(Motion.pop.combined(with: .offset(y: Motion.reduced ? 0 : -4)))
+            }
+        }
+        .zIndex(shown == id ? 1 : 0)
         .accessibilityLabel("\(title): \(detail)" + (checks.map { $0 == .unknown ? "" : ", checks \(PipelineGlyph.word($0))" } ?? "") + ". Opens on GitHub")
+    }
+}
+
+/// The card under a part of the release line: the pull request, one line on where and when,
+/// the checks that fail (and those still running), and the way to GitHub.
+private struct ReleaseCard: View {
+    let heading: String
+    let line: String
+    let checks: [ReleaseStore.Check]
+    let url: URL
+
+    private var failing: [ReleaseStore.Check] { checks.filter { $0.state == .failing } }
+    private var running: [ReleaseStore.Check] { checks.filter { $0.state == .running } }
+    private var passing: Int { checks.filter { $0.state == .passing }.count }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(heading).font(.system(size: 13, weight: .semibold)).foregroundStyle(Soot.ink).lineLimit(2)
+                Text(line).font(.system(size: 12)).foregroundStyle(Soot.muted)
+            }
+            if !checks.isEmpty {
+                Rectangle().fill(Soot.line).frame(height: 1)
+                VStack(alignment: .leading, spacing: 4) {
+                    ForEach((failing + running).prefix(6)) { check in
+                        HStack(spacing: 6) {
+                            PipelineGlyph(state: check.state)
+                            if let u = check.url {
+                                Link(check.name, destination: u)
+                                    .buttonStyle(TertiaryButton(tint: .ink, lift: Soot.surface, font: .system(size: 12), height: 22))
+                                    .padding(.leading, -8)
+                            } else {
+                                Text(check.name).font(.system(size: 12)).foregroundStyle(Soot.ink)
+                            }
+                        }
+                        .lineLimit(1)
+                    }
+                    if failing.count + running.count > 6 {
+                        Text("and \(failing.count + running.count - 6) more").font(.system(size: 12)).foregroundStyle(Soot.muted)
+                    }
+                    Text(summary).font(.system(size: 12)).foregroundStyle(Soot.muted)
+                }
+            }
+            ExternalLink("Open on GitHub", destination: url, lift: Soot.surface)
+                .padding(.leading, -8)
+        }
+        .padding(12)
+        .frame(width: 320, alignment: .leading)
+        .background(Soot.ground, in: RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Soot.line))
+        .shadow(color: .black.opacity(0.22), radius: 16, y: 6)
+        .fixedSize()
+    }
+
+    private var summary: String {
+        var parts: [String] = []
+        if !failing.isEmpty { parts.append("\(failing.count) failing") }
+        if !running.isEmpty { parts.append("\(running.count) running") }
+        parts.append("\(passing) passing")
+        return parts.joined(separator: " · ")
     }
 }

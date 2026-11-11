@@ -28,10 +28,20 @@ final class ReleaseStore: ObservableObject {
 
     struct Release: Equatable {
         var number: Int
+        var title: String = ""
         var author: String
         var opened: Date
         var url: URL
         var checks: ProjectSnapshot.PipelineState
+        var checkList: [Check] = []
+    }
+
+    /// One check of a commit: a workflow job or a commit status, its state, where to read it.
+    struct Check: Equatable, Identifiable {
+        var name: String
+        var state: ProjectSnapshot.PipelineState
+        var url: URL?
+        var id: String { name }
     }
 
     struct State: Equatable {
@@ -40,6 +50,7 @@ final class ReleaseStore: ObservableObject {
         var productionBranch: String
         var staging: Merge?
         var stagingChecks: ProjectSnapshot.PipelineState = .unknown
+        var stagingCheckList: [Check] = []
         var production: Merge?
         var next: Release?
     }
@@ -100,7 +111,21 @@ final class ReleaseStore: ObservableObject {
     private struct Answer: Decodable {
         struct Repo: Decodable {
             struct BranchRef: Decodable { var name: String }
-            struct Rollup: Decodable { var state: String }
+            struct Rollup: Decodable {
+                var state: String
+                struct Context: Decodable {
+                    var __typename: String
+                    var name: String?
+                    var conclusion: String?
+                    var status: String?
+                    var detailsUrl: String?
+                    var context: String?
+                    var state: String?
+                    var targetUrl: String?
+                }
+                struct Contexts: Decodable { var nodes: [Context] }
+                var contexts: Contexts?
+            }
             struct Target: Decodable { var statusCheckRollup: Rollup? }
             struct Head: Decodable { var target: Target? }
             struct Author: Decodable { var login: String }
@@ -145,8 +170,8 @@ final class ReleaseStore: ObservableObject {
           stagingRef: ref(qualifiedName: "refs/heads/staging") { target { ... on Commit { statusCheckRollup { state } } } }
           mergedMain: pullRequests(baseRefName: "main", states: MERGED, first: 6, orderBy: { field: UPDATED_AT, direction: DESC }) { nodes { \(prFields) } }
           mergedMaster: pullRequests(baseRefName: "master", states: MERGED, first: 6, orderBy: { field: UPDATED_AT, direction: DESC }) { nodes { \(prFields) } }
-          openMain: pullRequests(baseRefName: "main", states: OPEN, first: 1, orderBy: { field: CREATED_AT, direction: DESC }) { nodes { \(prFields) commits(last: 1) { nodes { commit { statusCheckRollup { state } } } } } }
-          openMaster: pullRequests(baseRefName: "master", states: OPEN, first: 1, orderBy: { field: CREATED_AT, direction: DESC }) { nodes { \(prFields) commits(last: 1) { nodes { commit { statusCheckRollup { state } } } } } }
+          openMain: pullRequests(baseRefName: "main", states: OPEN, first: 1, orderBy: { field: CREATED_AT, direction: DESC }) { nodes { \(prFields) commits(last: 1) { nodes { commit { statusCheckRollup { state contexts(first: 40) { nodes { __typename ... on CheckRun { name conclusion status detailsUrl } ... on StatusContext { context state targetUrl } } } } } } } } }
+          openMaster: pullRequests(baseRefName: "master", states: OPEN, first: 1, orderBy: { field: CREATED_AT, direction: DESC }) { nodes { \(prFields) commits(last: 1) { nodes { commit { statusCheckRollup { state contexts(first: 40) { nodes { __typename ... on CheckRun { name conclusion status detailsUrl } ... on StatusContext { context state targetUrl } } } } } } } } }
         } }
         """
         let answer = try await client.graphql(query, variables: ["owner": parts[0], "name": parts[1]], as: Answer.self)
@@ -159,16 +184,17 @@ final class ReleaseStore: ObservableObject {
         let merged = production == "main" ? repo.mergedMain : repo.mergedMaster
         state.production = latest(merged.nodes)
         if let open = (production == "main" ? repo.openMain : repo.openMaster).nodes.first, let url = URL(string: open.url) {
-            state.next = Release(number: open.number, author: open.author?.login ?? "someone",
+            let r = open.commits?.nodes.last?.commit.statusCheckRollup
+            state.next = Release(number: open.number, title: open.title, author: open.author?.login ?? "someone",
                                  opened: iso(open.createdAt) ?? Date(), url: url,
-                                 checks: rollup(open.commits?.nodes.last?.commit.statusCheckRollup))
+                                 checks: rollup(r), checkList: checks(r))
         }
         if let staging {
             // The staging branch's own merges: one more small query, only when it exists.
             let q = """
             query($owner: String!, $name: String!, $base: String!) { repository(owner: $owner, name: $name) {
               pullRequests(baseRefName: $base, states: MERGED, first: 6, orderBy: { field: UPDATED_AT, direction: DESC }) { nodes { \(prFields) } }
-              ref(qualifiedName: $base) { target { ... on Commit { statusCheckRollup { state } } } }
+              ref(qualifiedName: $base) { target { ... on Commit { statusCheckRollup { state contexts(first: 40) { nodes { __typename ... on CheckRun { name conclusion status detailsUrl } ... on StatusContext { context state targetUrl } } } } } } }
             } }
             """
             struct StagingAnswer: Decodable {
@@ -178,6 +204,7 @@ final class ReleaseStore: ObservableObject {
             let s = try await client.graphql(q, variables: ["owner": parts[0], "name": parts[1], "base": staging], as: StagingAnswer.self)
             state.staging = latest(s.repository?.pullRequests.nodes ?? [])
             state.stagingChecks = rollup(s.repository?.ref?.target?.statusCheckRollup)
+            state.stagingCheckList = checks(s.repository?.ref?.target?.statusCheckRollup)
         }
         return state
     }
@@ -197,6 +224,31 @@ final class ReleaseStore: ObservableObject {
         case "PENDING", "EXPECTED": .running
         default: .unknown
         }
+    }
+
+    /// Every check of a commit, failing first, then running, then passing.
+    private static func checks(_ r: Answer.Repo.Rollup?) -> [Check] {
+        let all: [Check] = (r?.contexts?.nodes ?? []).compactMap { c in
+            if c.__typename == "CheckRun", let name = c.name {
+                let state: ProjectSnapshot.PipelineState = switch c.conclusion {
+                case "FAILURE", "TIMED_OUT", "CANCELLED", "ACTION_REQUIRED", "STARTUP_FAILURE": .failing
+                case "SUCCESS", "NEUTRAL", "SKIPPED": .passing
+                default: c.status == "COMPLETED" ? .unknown : .running
+                }
+                return Check(name: name, state: state, url: c.detailsUrl.flatMap(URL.init(string:)))
+            }
+            if let name = c.context {
+                let state: ProjectSnapshot.PipelineState = switch c.state {
+                case "FAILURE", "ERROR": .failing
+                case "SUCCESS": .passing
+                default: .running
+                }
+                return Check(name: name, state: state, url: c.targetUrl.flatMap(URL.init(string:)))
+            }
+            return nil
+        }
+        let rank: (ProjectSnapshot.PipelineState) -> Int = { [.failing: 0, .running: 1, .passing: 2][$0] ?? 3 }
+        return all.sorted { rank($0.state) == rank($1.state) ? $0.name < $1.name : rank($0.state) < rank($1.state) }
     }
 
     private static func iso(_ s: String) -> Date? { ISO8601DateFormatter().date(from: s) }
