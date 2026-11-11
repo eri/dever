@@ -265,6 +265,7 @@ Refresh every. "Volatile" is the cadence while something is in flight.
 | Linear issue rows, blockers | 60 s | | any issue write (local, at once), activation | `updatedAt` delta |
 | Linear issue detail (open issue) | 60 s | | write, opened externally | compare `updatedAt` from the delta |
 | Team states, members | 15 min | | | |
+| Project lead, team, target date | 15 min | | | |
 | Slack members · custom emoji | 15 min · 1 h | | | disk copy |
 | Catalogues in pickers (channels, Linear projects, repositories, pull requests) | on opening the picker | | | |
 | Account identity (Settings) | on opening Settings | | connect, disconnect | |
@@ -379,7 +380,7 @@ Safest and most felt first. Each phase ships on its own and leaves the app bette
 | 1 | **Done** | `Model/LookAgain.swift`, `Views/AgeNotice.swift`, `ProjectDetailView.load / keepCurrent`, `OverviewStore.refresh`, `Support/RequestLog.swift` |
 | 2 | **Done** | `GitHubClient.repository / mergedPulls / graphql`, ETags in `GitHubClient.send` |
 | 3, step 1: GitHub | **Done** | `Model/ResourceCache.swift` (the shared helper), `Model/GitHubStore.swift`; the Overview (`RepoCache`) and the project page (`derivePulls`, `loadGitHub`) read it |
-| 3, step 2: the Overview row derived from the stores | Not started | |
+| 3, step 2: the Overview row derived from the stores | **Done** | `Model/OverviewRow.swift` (pure functions), `OverviewStore.rederive`, `IssueStore.load(maxAge:)` and `facts` |
 | 3, step 3: Slack | Not started | |
 | 4 to 6 | Not started | |
 
@@ -387,6 +388,13 @@ After step 1 of phase 3 a repository is read once for the Overview and every pro
 it (a read within 20 s serves all of them), a project whose issues and repositories are already held
 opens without a skeleton for its work panel, an open project page follows the Overview's cycle, and a
 link to github.com marks its repository dirty. Unit tests: `swift test` (`Tests/DeverTests`).
+
+After step 2 the Overview counts a project's issues from the list the project page uses (`IssueStore`,
+a delta after the first load, no limit at 250) and asks Linear only for the project's lead, team and
+target date, a quarter of an hour apart. A row's Linear and GitHub parts are worked out by the same
+functions during a cycle and between cycles: moving or taking an issue in Delivery, or a project page
+reading its repository again, changes the row at once, without a request (F6 for Linear writes, the 250
+limit of F8). Notifications are still sent from the cycle only.
 
 Measured after phase 2 on the same repository, with the app's own client code
 (`DEVER_TRACE_REQUESTS=1`): one repository costs **3 requests, 112 KB, 5.4 s** (open pull requests with

@@ -1,3 +1,4 @@
+import Combine
 import Foundation
 
 /// Cross-service snapshot of one project, as shown on the overview.
@@ -230,17 +231,49 @@ final class OverviewStore: ObservableObject {
     }
 
     private var autoRefresh: Task<Void, Never>?
+    private weak var app: AppState?
+    private var following: AnyCancellable?
 
     /// Keeps snapshots fresh (and notifications flowing) for as long as the app runs,
     /// even with its window closed.
     func startAutoRefresh(_ app: AppState) {
         guard autoRefresh == nil else { return }
+        self.app = app
+        // Between two cycles the rows follow the stores: an issue moved in Delivery, a
+        // repository a project page read again. Changes that come together count once.
+        following = IssueStore.shared.$projects.map { _ in () }
+            .merge(with: GitHubStore.shared.$revision.map { _ in () })
+            .dropFirst(2)
+            .debounce(for: .milliseconds(80), scheduler: RunLoop.main)
+            .sink { [weak self] in self?.rederive() }
         autoRefresh = Task { [weak self] in
             while !Task.isCancelled {
                 guard let self else { return }
                 if self.isStale { await self.refresh(app) }
                 try? await Task.sleep(nanoseconds: 60 * 1_000_000_000)
             }
+        }
+    }
+
+    /// Works each row's Linear and GitHub parts out again from what the stores hold, without
+    /// a request. A row whose tool is failing, or whose data the stores do not hold, is left.
+    func rederive() {
+        guard let app, !isRefreshing, OverviewDemo.scene == nil else { return }
+        let login = app.github?.login
+        for p in app.projects {
+            guard var s = snapshots[p.id], s.errors[.linear] == nil, s.errors[.github] == nil else { continue }
+            let issues = p.linear.flatMap { IssueStore.shared.projects[$0.id]?.issues }
+            if p.linear != nil, issues == nil { continue }
+            if let issues { s.linear?.count(issues) }
+            let repositories = app.repositories(for: p)
+            if s.github != nil, !repositories.isEmpty {
+                let held = repositories.compactMap { name in GitHubStore.shared.repository(name).map { (name: name, data: $0) } }
+                if held.count == repositories.count {
+                    s.github = .project(repositories: held, issues: issues, wholeRepository: app.showsWholeRepository(p), login: login)
+                }
+            }
+            if let issues, s.linear != nil { s.delivery = Delivery(issues: issues, github: s.github) }
+            snapshots[p.id] = s
         }
     }
 
@@ -327,8 +360,8 @@ final class OverviewStore: ObservableObject {
             return result
         }()
         // GitHub waits for Linear: the project's issues decide which PRs belong to it.
-        var issues: [LinearClient.ProjectSummary.Issue]?
-        switch await loadLinear(p, app) {
+        var issues: [LinearIssue]?
+        switch await loadLinear(p, app, previous: previous?.linear) {
         case .success(let v):
             s.linear = v?.stats
             issues = v?.issues
@@ -363,34 +396,24 @@ final class OverviewStore: ObservableObject {
             if s.errors.values.contains(where: \.isTransient) { s.updatedAt = previous.updatedAt }
         }
         if let issues {
-            s.delivery = Delivery(issues: issues.map { ($0.identifier, $0.state.type, $0.state.name) },
-                                  openPR: s.github?.openPRIssues ?? [],
-                                  mergedPR: s.github?.mergedPRIssues ?? [])
+            s.delivery = Delivery(issues: issues, github: s.github)
         } else if s.errors[.linear]?.isTransient == true {
             s.delivery = previous?.delivery
         }
         return s
     }
 
-    private static func loadLinear(_ p: Project, _ app: AppState)
-        async -> Result<(stats: ProjectSnapshot.LinearStats, issues: [LinearClient.ProjectSummary.Issue])?, Error> {
+    /// The project's issues, from the list every screen shares (a delta after the first
+    /// load), and its own facts. The facts are not worth failing the row for: when they
+    /// cannot be read the previous ones stay.
+    private static func loadLinear(_ p: Project, _ app: AppState, previous: ProjectSnapshot.LinearStats?)
+        async -> Result<(stats: ProjectSnapshot.LinearStats, issues: [LinearIssue])?, Error> {
         guard let id = p.linear?.id else { return .success(nil) }
         do {
-            let summary = try await app.withLinear { try await $0.projectSummary(id: id) }
-            var stats = ProjectSnapshot.LinearStats()
-            for issue in summary.issues.nodes {
-                switch issue.state.type {
-                case "canceled": continue
-                case "completed": stats.done += 1
-                case "started": stats.inProgress += 1
-                default: stats.todo += 1
-                }
-                stats.total += 1
-            }
-            stats.lead = summary.lead?.name
-            stats.team = summary.teams?.nodes.first?.name
-            stats.targetDate = summary.targetDate.flatMap(dayFormatter.date(from:))
-            return .success((stats, summary.issues.nodes))
+            async let facts = try? IssueStore.shared.facts(project: id, app: app)
+            let issues = try await IssueStore.shared.load(project: id, maxAge: RepoCache.maxAge, app: app)
+            let known = await facts ?? previous.map { LinearProjectFacts(lead: $0.lead, team: $0.team, targetDate: $0.targetDate) }
+            return .success((ProjectSnapshot.LinearStats(issues: issues, facts: known), issues))
         } catch {
             return .failure(error)
         }
@@ -443,106 +466,21 @@ final class OverviewStore: ObservableObject {
         }
     }
 
-    /// Every repository the project follows, added up; one failing call fails the whole.
+    /// Every repository the project follows, read through the store and added up; one
+    /// failing read fails the whole.
     private static func loadGitHub(_ p: Project, _ repositories: [String], _ repos: Result<RepoCache, Error>,
-                                   issues: [LinearClient.ProjectSummary.Issue]?, whole: Bool, login: String?)
+                                   issues: [LinearIssue]?, whole: Bool, login: String?)
         async -> Result<ProjectSnapshot.GitHubStats?, Error> {
         guard !repositories.isEmpty else { return .success(nil) }
-        var parts: [(repo: String, stats: ProjectSnapshot.GitHubStats)] = []
-        for repo in repositories {
-            switch await loadGitHub(p, repo: repo, repos, issues: issues, whole: whole, login: login) {
-            case .success(let stats): parts.append((repo, stats))
-            case .failure(let error): return .failure(error)
-            }
-        }
-        var combined = ProjectSnapshot.GitHubStats.combined(parts)
-        combined.repositories = repositories
-        if parts.count == 1, combined.pipeline == .failing { combined.failingRepositories = repositories }
-        return .success(combined)
-    }
-
-    private static func loadGitHub(_ p: Project, repo: String, _ repos: Result<RepoCache, Error>,
-                                   issues: [LinearClient.ProjectSummary.Issue]?, whole: Bool, login: String?)
-        async -> Result<ProjectSnapshot.GitHubStats, Error> {
         do {
             let repos = try repos.get()
-            let state = try await repos.state(repo)
-            let prs = ProjectPullRequests(pulls: state.pulls, issues: issues, wholeRepository: whole)
-            let attention = await Self.attention(prs, repo: repo, repos: repos, issues: issues, whole: whole,
-                                                 login: login)
-            if prs.scoped, let issues {
-                let merged = ProjectPullRequests(pulls: try await repos.mergedPulls(repo), issues: issues, wholeRepository: false)
-                let mergedIDs = Set(merged.matches.compactMap(\.issue))
-                // Merged in code while the ticket still says "in progress" (review states are fine).
-                let stale = issues.filter {
-                    Delivery.isBehind(stateType: $0.state.type, stateName: $0.state.name, merged: mergedIDs.contains($0.identifier))
-                }.map(\.identifier).sorted()
-                var stats = ProjectSnapshot.GitHubStats(openPRs: prs.matches.count, pipeline: prs.pipeline, scoped: true,
-                                                        mergedButOpen: stale,
-                                                        openPRIssues: Set(prs.matches.compactMap(\.issue)),
-                                                        mergedPRIssues: mergedIDs)
-                attention.apply(to: &stats)
-                return .success(stats)
-            }
-            // Unscoped: the health of the default branch, not of whichever branch ran last.
-            var stats = ProjectSnapshot.GitHubStats(openPRs: prs.matches.count,
-                                                    pipeline: .init(checks: state.defaultBranchChecks),
-                                                    branch: state.defaultBranch)
-            attention.apply(to: &stats)
-            return .success(stats)
+            var held: [(name: String, data: GitHubStore.Repository)] = []
+            for repo in repositories { held.append((repo, try await repos.repository(repo))) }
+            return .success(.project(repositories: held, issues: issues, wholeRepository: whole, login: login))
         } catch {
             return .failure(error)
         }
     }
-
-    /// What in one repository waits for you or holds the project back: the pull requests whose
-    /// review is asked of you, the one waiting longest, and the latest merge.
-    private struct Attention {
-        var reviews: [ProjectSnapshot.GitHubStats.ReviewRequest] = []
-        var longWait: (number: Int, since: Date)?
-        var lastMerged: (number: Int, author: String, date: Date)?
-
-        func apply(to stats: inout ProjectSnapshot.GitHubStats) {
-            stats.reviewRequests = reviews
-            stats.longWait = longWait
-            stats.lastMerged = lastMerged
-        }
-    }
-
-    private static func attention(_ prs: ProjectPullRequests, repo: String, repos: RepoCache,
-                                  issues: [LinearClient.ProjectSummary.Issue]?, whole: Bool, login: String?) async -> Attention {
-        var out = Attention()
-        let me = login?.lowercased()
-        for m in prs.matches {
-            let pull = m.pull
-            let updated = Self.iso(pull.updated_at) ?? Date()
-            let reviewers = pull.requested_reviewers ?? []
-            if let me, reviewers.contains(where: { $0.login.lowercased() == me }) {
-                out.reviews.append(.init(number: pull.number, title: pull.title, url: pull.html_url, issue: m.issue, date: updated))
-            }
-            if pull.draft != true, !reviewers.isEmpty, Date().timeIntervalSince(updated) > 3 * 86_400,
-               updated < (out.longWait?.since ?? .distantFuture) {
-                out.longWait = (pull.number, updated)
-            }
-        }
-        // The merges of this project only (the same matching as the open ones).
-        if let merged = try? await repos.mergedPulls(repo) {
-            let mine = ProjectPullRequests(pulls: merged, issues: issues, wholeRepository: whole).matches
-            if let last = mine.compactMap({ m in m.pull.merged_at.flatMap(Self.iso).map { (m.pull, $0) } }).max(by: { $0.1 < $1.1 }) {
-                out.lastMerged = (last.0.number, last.0.user.login, last.1)
-            }
-        }
-        return out
-    }
-
-    private static func iso(_ s: String) -> Date? { ISO8601DateFormatter().date(from: s) }
-
-    private static let dayFormatter: DateFormatter = {
-        let f = DateFormatter()
-        f.locale = Locale(identifier: "en_US_POSIX")
-        f.dateFormat = "yyyy-MM-dd"
-        return f
-    }()
 }
 
 /// Reads repositories through `GitHubStore` during one refresh: projects sharing a repository
@@ -552,12 +490,8 @@ struct RepoCache {
     /// A cycle takes what was read within this long, by itself or by a project page.
     static let maxAge: TimeInterval = 20
 
-    func state(_ repo: String) async throws -> GitHubRepositoryState {
-        try await GitHubStore.shared.load(repo, client: client, maxAge: Self.maxAge).state
-    }
-
-    func mergedPulls(_ repo: String) async throws -> [GitHubPull] {
-        try await GitHubStore.shared.load(repo, client: client, maxAge: Self.maxAge).merged
+    func repository(_ repo: String) async throws -> GitHubStore.Repository {
+        try await GitHubStore.shared.load(repo, client: client, maxAge: Self.maxAge)
     }
 }
 

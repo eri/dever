@@ -13,6 +13,8 @@ final class IssueStore: ObservableObject {
     struct ProjectIssues {
         var issues: [LinearIssue]
         var lastFullLoad: Date
+        /// The last load of any kind, full or delta.
+        var lastLoad = Date()
         /// Linear's `updatedAt` of the newest issue seen, the cursor of the next delta.
         var newest: String?
     }
@@ -38,6 +40,8 @@ final class IssueStore: ObservableObject {
     /// Rendered descriptions and comment bodies, keyed by text hash: rendering is the slow part.
     @Published private(set) var rendered: [Int: [MarkdownBlock]] = [:]
     private var teams: [String: (context: LinearTeamContext, at: Date)] = [:]
+    private var facts: [String: (facts: LinearProjectFacts, at: Date)] = [:]
+    private var listLoads: [String: Task<[LinearIssue], Error>] = [:]
     private var detailLoads: [String: Task<LinearIssueDetail, Error>] = [:]
     private var teamLoads: [String: Task<LinearTeamContext, Error>] = [:]
     private var renders: [Int: Task<[MarkdownBlock], Never>] = [:]
@@ -55,7 +59,18 @@ final class IssueStore: ObservableObject {
 
     /// Loads a project's issues: all of them the first time or after half an hour, otherwise
     /// only those changed since the last load. `force` reloads everything (the Refresh button).
-    func load(project id: String, force: Bool = false, app: AppState) async throws -> [LinearIssue] {
+    /// The list is served as it is when it was loaded within `maxAge`, and readers asking at
+    /// the same moment (the Overview's cycle and a project page) share one request.
+    func load(project id: String, force: Bool = false, maxAge: TimeInterval = 0, app: AppState) async throws -> [LinearIssue] {
+        if !force, let known = projects[id], Date().timeIntervalSince(known.lastLoad) < maxAge { return known.issues }
+        if let running = listLoads[id] { return try await running.value }
+        let task = Task { try await self.fetch(project: id, force: force, app: app) }
+        listLoads[id] = task
+        defer { listLoads[id] = nil }
+        return try await task.value
+    }
+
+    private func fetch(project id: String, force: Bool, app: AppState) async throws -> [LinearIssue] {
         let known = projects[id]
         let delta = !force && known != nil && Date().timeIntervalSince(known!.lastFullLoad) < fullReloadAfter
         let fetched = try await app.withLinear { try await $0.issues(projectID: id, updatedSince: delta ? known?.newest : nil) }
@@ -69,6 +84,14 @@ final class IssueStore: ObservableObject {
         // A changed issue invalidates its cached detail; the next visit fetches it again.
         for issue in fetched where details[issue.id]?.updatedAt != issue.updatedAt { details[issue.id] = nil }
         return list
+    }
+
+    /// The project's lead, team and target date, asked a quarter of an hour apart at most.
+    func facts(project id: String, app: AppState) async throws -> LinearProjectFacts {
+        if let hit = facts[id], Date().timeIntervalSince(hit.at) < teamTTL { return hit.facts }
+        let found = try await app.withLinear { try await $0.projectFacts(id: id) }
+        facts[id] = (found, Date())
+        return found
     }
 
     /// What the delivery plan needs beyond the rows: who is looking, and what blocks what.

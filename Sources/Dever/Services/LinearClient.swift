@@ -322,31 +322,29 @@ struct LinearClient {
         return all
     }
 
-    struct ProjectSummary: Decodable {
-        struct Person: Decodable { var name: String }
-        struct Issue: Decodable, IssueReference {
-            struct State: Decodable { var type: String; var name: String }
-            var state: State
-            var identifier: String
-            var branchName: String?
-            var attachments: Attachments?
+    /// The project's own facts for the overview: lead, team and target date. Its issues come
+    /// from `issues(projectID:)`, the one list every screen shares.
+    func projectFacts(id: String) async throws -> LinearProjectFacts {
+        struct R: Decodable {
+            struct Person: Decodable { var name: String }
+            struct Teams: Decodable { var nodes: [Person] }
+            struct P: Decodable { var targetDate: String?; var lead: Person?; var teams: Teams? }
+            var project: P
         }
-        struct Issues: Decodable { var nodes: [Issue] }
-        struct Teams: Decodable { var nodes: [Person] }
-        var targetDate: String?
-        var lead: Person?
-        var teams: Teams?
-        var issues: Issues
+        let p = try await query("""
+        query($id: String!) { project(id: $id) { targetDate lead { name } teams { nodes { name } } } }
+        """, variables: ["id": id], as: R.self).project
+        return LinearProjectFacts(lead: p.lead?.name, team: p.teams?.nodes.first?.name,
+                                  targetDate: p.targetDate.flatMap(Self.dayFormatter.date(from:)))
     }
 
-    /// Lightweight project data for the overview: lead, target date, issue states and PR links.
-    func projectSummary(id: String) async throws -> ProjectSummary {
-        struct R: Decodable { var project: ProjectSummary }
-        return try await query("""
-        query($id: String!) { project(id: $id) { targetDate lead { name } teams { nodes { name } }
-          issues(first: 250) { nodes { state { type name } identifier branchName attachments { nodes { url } } } } } }
-        """, variables: ["id": id], as: R.self).project
-    }
+    /// Linear's dates without a time: "2026-03-31".
+    private static let dayFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "yyyy-MM-dd"
+        return f
+    }()
 
     func createProject(name: String, teamIDs: [String]) async throws -> LinearProject {
         struct R: Decodable { struct C: Decodable { var project: LinearProject }; var projectCreate: C }
