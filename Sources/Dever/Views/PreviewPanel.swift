@@ -25,41 +25,44 @@ struct PreviewPanel: View {
     private var state: PreviewState? { store.state(for: project) }
     private var status: PreviewStatus? { state?.status }
 
+    /// GitHub answered with an error: the header stays, the failure row says what and offers a retry.
+    private var failure: ServiceState? {
+        if case .failed(let serviceState) = state { return serviceState }
+        return nil
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            headline
-            if project.previewPullNumber == nil {
-                nonePart
-            } else if app.github == nil {
-                if missing.count > 1 {
-                    ConnectPlaceholder(service: .github, widths: [300, 180, 240])
-                } else {
-                    ConnectPanelBody(service: .github, project: project, flow: flow)
-                }
-            } else if case .failed(let serviceState) = state {
-                ServiceFailureRow(service: .github, state: serviceState, lastLoaded: store.loadedAt[project.id],
-                                  retry: { Task { await store.load(project, app: app, force: true) } }, flow: flow)
-            } else if let status {
-                // Options unfold in place of the second line (200 ms), and fold back.
-                if optionsOpen {
-                    optionsRow.transition(Motion.rise)
-                } else {
-                    // Second line: what there is to see or know on the left, what to do on the right.
-                    ViewThatFits(in: .horizontal) {
-                        HStack(alignment: .center, spacing: 12) {
-                            secondLine(status)
-                            Spacer(minLength: 0)
-                            actions(status)
-                        }
-                        VStack(alignment: .leading, spacing: 12) {
-                            secondLine(status)
-                            actions(status)
-                        }
+            if let status, project.previewPullNumber != nil, app.github != nil, failure == nil {
+                // One line: what the preview is on the left, what to open or do on the right.
+                // Too narrow for one line, the right part drops under the header.
+                ViewThatFits(in: .horizontal) {
+                    header { HStack(spacing: 4) { lineContent(status); menu(status) } }
+                    VStack(alignment: .leading, spacing: 12) {
+                        header { menu(status) }
+                        lineContent(status)
                     }
                 }
+                // The flags unfold under the line (200 ms), and fold back.
+                if optionsOpen { optionsRow.transition(Motion.rise) }
+                if let note = status.note { noteRow(note, failed: status.phase == .failed) }
                 if let actionError { ErrorLabel(actionError).transition(Motion.rise) }
             } else {
-                skeleton.transition(.opacity)
+                header {
+                    if project.previewPullNumber != nil, app.github != nil, failure == nil { skeleton.transition(.opacity) }
+                }
+                if project.previewPullNumber == nil {
+                    nonePart
+                } else if app.github == nil {
+                    if missing.count > 1 {
+                        ConnectPlaceholder(service: .github, widths: [300, 180, 240])
+                    } else {
+                        ConnectPanelBody(service: .github, project: project, flow: flow)
+                    }
+                } else if let failure {
+                    ServiceFailureRow(service: .github, state: failure, lastLoaded: store.loadedAt[project.id],
+                                      retry: { Task { await store.load(project, app: app, force: true) } }, flow: flow)
+                }
             }
         }
         .motion(Motion.ui, value: optionsOpen)
@@ -91,17 +94,18 @@ struct PreviewPanel: View {
         }
     }
 
-    /// The panel's head: the globe, "Preview", the pull request's number as a pill (a link),
-    /// one quiet line (the pull request's title), and on the right the phase as glyph and word
-    /// and when it changed. The run, the protection and the rest live under More.
-    private var headline: some View {
+    /// The panel's head: the globe, "Preview", the pull request's number (a link), the phase as
+    /// glyph and word with its age; `trailing` is what the phase offers. The pull request's
+    /// title, the run and the protection live in the tooltip and under More.
+    private func header<T: View>(@ViewBuilder trailing: @escaping () -> T) -> some View {
         let s = status
-        return PanelHeader(symbol: "globe", title: "Preview", subtitle: subtitle, accessory: {
+        return PanelHeader(symbol: "globe", title: "Preview", accessory: {
             if let number = project.previewPullNumber {
                 HoverLink(destination: s?.pull.url ?? URL(string: "https://github.com/\(app.previewRepository(for: project) ?? "")/pull/\(number)")!) {
                     HStack(spacing: 6) {
                         IDPill(text: "#\(number)")
-                        if let state = s?.pull.state, state != .open {
+                        // Merged or closed changes what can be done; open and draft do not.
+                        if let state = s?.pull.state, state == .merged || state == .closed {
                             Text(state.word).font(.system(size: 12, weight: .medium)).foregroundStyle(Soot.muted)
                         }
                     }
@@ -110,7 +114,6 @@ struct PreviewPanel: View {
                 .accessibilityLabel(s.map { "Pull request #\($0.pull.number), \($0.pull.title), \($0.pull.state.word)" } ?? "Pull request #\(number)")
                 .accessibilityHint("Opens on GitHub")
             }
-        }, trailing: {
             if let s {
                 HStack(spacing: 6) {
                     PreviewPhaseGlyph(phase: s.phase, size: 13)
@@ -118,18 +121,13 @@ struct PreviewPanel: View {
                         .contentTransition(.opacity).motion(Motion.ui, fade: true, value: s.phase)
                     if let at = s.updatedAt {
                         Text(verbatim: "·").foregroundStyle(Soot.muted).accessibilityHidden(true)
-                        Text(timeLine(s.phase, at)).font(.system(size: 12)).foregroundStyle(Soot.muted).lineLimit(1)
+                        Text(at.formatted(.relative(presentation: .named))).font(.system(size: 12)).foregroundStyle(Soot.muted).lineLimit(1)
+                            .help("\(s.phase.busy ? "Started" : "Last change") \(at.formatted(date: .abbreviated, time: .shortened))")
                     }
                 }
+                .fixedSize()
             }
-        })
-    }
-
-    /// The quiet line under the title: the pull request followed, or what the block is for.
-    private var subtitle: String {
-        if project.previewPullNumber == nil { return "A pull request's environment, from here" }
-        if let s = status { return PullTitle.split(s.pull.title).title }
-        return app.previewRepository(for: project).map(GitHubRepository.short) ?? "Pull request"
+        }, trailing: trailing)
     }
 
     // MARK: No preview
@@ -143,18 +141,32 @@ struct PreviewPanel: View {
                    quietHelp: "Hides this panel; pick a pull request later in Edit project to bring it back")
     }
 
+    /// What the phase offers, at the right of the line: the products to open when live, the
+    /// step when a run is going, the one lime action when there is nothing deployed.
     @ViewBuilder
-    private func secondLine(_ s: PreviewStatus) -> some View {
-        if s.phase == .live { targetChips(s) }
-        if s.phase.busy { progress(s) }
-        if let note = s.note { noteRow(note, failed: s.phase == .failed) }
-    }
-
-    private func timeLine(_ phase: PreviewStatus.Phase, _ at: Date) -> String {
-        let when = at.formatted(.relative(presentation: .named))
-        switch phase {
-        case .deploying, .updating, .deleting: return "since \(when)"
-        case .live, .failed, .deleted, .notDeployed: return "updated \(when)"
+    private func lineContent(_ s: PreviewStatus) -> some View {
+        if sending {
+            Text("Sending…").font(.system(size: 13)).foregroundStyle(Soot.muted)
+        } else if s.phase.busy {
+            progress(s)
+        } else if s.pull.state == .merged || s.pull.state == .closed {
+            // A closed pull request takes no command: say so instead of greying a button.
+            Text("The pull request is \(s.pull.state.word.lowercased()). Change it from More.")
+                .font(.system(size: 13)).foregroundStyle(Soot.muted)
+        } else if s.phase == .live {
+            // The products the workflow deployed, as plain links: a mark only when one is down.
+            HStack(spacing: 2) {
+                ForEach(PreviewProduct.allCases.filter { $0.isPresent(in: s) }) { product in
+                    ProductLink(product: product, status: s)
+                }
+            }
+        } else {
+            // One click posts the plain command; the flags wait under More.
+            Button("Deploy preview") {
+                Task { await send { try await store.deploy(project, app: app, options: options) } }
+            }
+            .buttonStyle(PrimaryButton())
+            .help("Posts \(options.command) on the pull request; about ten minutes")
         }
     }
 
@@ -172,16 +184,6 @@ struct PreviewPanel: View {
         .accessibilityLabel("\(s.phase.word). \(s.run?.step ?? "Waiting for the workflow")")
     }
 
-    /// The products the workflow deployed, one chip each: the chip opens the product and its
-    /// glyph says whether the product and its API answer.
-    private func targetChips(_ s: PreviewStatus) -> some View {
-        FlowRow(spacing: 6) {
-            ForEach(PreviewProduct.allCases.filter { $0.isPresent(in: s) }) { product in
-                ProductChip(product: product, status: s)
-            }
-        }
-    }
-
     private func noteRow(_ note: String, failed: Bool) -> some View {
         HStack(alignment: .top, spacing: 8) {
             Image(systemName: failed ? "exclamationmark.circle.fill" : "info.circle")
@@ -195,30 +197,10 @@ struct PreviewPanel: View {
 
     // MARK: Actions
 
-    /// One lime action for the phase, the rest quiet or behind "More".
-    @ViewBuilder
-    private func actions(_ s: PreviewStatus) -> some View {
+    /// Everything that is not the phase's one action: redeploy, protect, delete, the links.
+    private func menu(_ s: PreviewStatus) -> some View {
         let canCommand = s.pull.state == .open || s.pull.state == .draft
-        HStack(spacing: 8) {
-            if !canCommand, !s.phase.busy {
-                // A closed pull request takes no command: say so instead of greying a button.
-                Text("The pull request is \(s.pull.state.word.lowercased()): nothing to deploy. Pick another one from More.")
-                    .font(.system(size: 13)).foregroundStyle(Soot.muted)
-            } else {
-                switch s.phase {
-                case .notDeployed, .deleted, .failed:
-                    // One click posts the plain command; the flags wait under More.
-                    Button(sending ? "Sending…" : "Deploy preview") {
-                        Task { await send { try await store.deploy(project, app: app, options: options) } }
-                    }
-                    .buttonStyle(PrimaryButton()).disabled(sending)
-                    .help("Posts \(options.command) on the pull request; about ten minutes")
-                case .live, .deploying, .updating, .deleting:
-                    // The preview is there or on its way: nothing presses for attention.
-                    if sending { Text("Sending…").font(.system(size: 13)).foregroundStyle(Soot.muted) }
-                }
-            }
-            Menu {
+        return Menu {
                 if !s.phase.busy, canCommand, s.phase != .live {
                     Button("Deploy with options…") { optionsOpen = true }
                 }
@@ -244,15 +226,14 @@ struct PreviewPanel: View {
             } label: {
                 Label("More", systemImage: "ellipsis").labelStyle(.iconOnly)
                     .font(.system(size: 13, weight: .bold))
-                    .frame(width: 36, height: 36)
+                    .frame(width: 32, height: 32)
             }
             .menuStyle(.button)
-            .buttonStyle(MenuTriggerButton())
+            .buttonStyle(MenuTriggerButton(edge: false))
             .menuIndicator(.hidden)
             .fixedSize()
             .help("More: redeploy, protect, delete, open on GitHub, change the pull request")
             .accessibilityLabel("More preview actions")
-        }
     }
 
     /// The `/preview` flags, one row, then the command itself before it is sent.
@@ -300,13 +281,9 @@ struct PreviewPanel: View {
     }
 
     private var skeleton: some View {
-        HStack(spacing: 6) {
-            ForEach(0..<3, id: \.self) { _ in Skeleton(width: 92, height: 30, radius: 15) }
-            Spacer()
-            Skeleton(width: 120, height: 36, radius: Soot.radius)
-        }
-        .accessibilityElement()
-        .accessibilityLabel("Loading the preview")
+        Skeleton(width: 220, height: 20, radius: 6)
+            .accessibilityElement()
+            .accessibilityLabel("Loading the preview")
     }
 }
 
@@ -360,8 +337,9 @@ enum PreviewProduct: String, CaseIterable, Identifiable {
     func isPresent(in s: PreviewStatus) -> Bool { s.targets[front] != nil || s.targets[api] != nil }
 }
 
-/// One product as a chip: a click opens its front; the glyph folds in the API's health.
-private struct ProductChip: View {
+/// One product as a link: a click opens its front. Nothing but the name when it answers
+/// (the phase already says "Live"); a mark and a word when the front or its API does not.
+private struct ProductLink: View {
     let product: PreviewProduct
     let status: PreviewStatus
 
@@ -371,30 +349,24 @@ private struct ProductChip: View {
         PreviewTarget.url(status.targets[product.front] != nil ? product.front : product.api, pull: status.pull.number)
     }
 
-    /// Shape and word together: a check, a cross for the front, a warning for the API only.
-    private var mark: (symbol: String, tint: Color, word: String) {
+    /// Shape and word together: a cross for the front, a warning for the API only.
+    private var problem: (symbol: String, tint: Color, word: String)? {
         if frontUp == false { return ("xmark.circle.fill", Theme.negative, "down") }
         if apiUp == false { return ("exclamationmark.triangle.fill", Theme.chart3, "API down") }
-        if frontUp == nil && apiUp == nil { return ("circle.dotted", Soot.muted, "checking") }
-        return ("checkmark.circle.fill", Theme.positive, "up")
+        return nil
     }
 
     var body: some View {
-        let mark = mark
-        Link(destination: url) {
-            HStack(spacing: 6) {
-                Image(systemName: mark.symbol).foregroundStyle(mark.tint)
-                Text(product.label).foregroundStyle(Soot.ink)
-                if mark.word.hasSuffix("down") { Text(mark.word).foregroundStyle(Soot.muted) }
-                Image(systemName: "arrow.up.right").font(.system(size: 10, weight: .bold)).foregroundStyle(Soot.muted)
+        let problem = problem
+        ExternalLink(destination: url, tint: .ink, lift: Soot.ground) {
+            HStack(spacing: 5) {
+                if let problem { Image(systemName: problem.symbol).foregroundStyle(problem.tint).accessibilityHidden(true) }
+                Text(product.label)
+                if let problem { Text(problem.word).fontWeight(.regular).foregroundStyle(Soot.muted) }
             }
-            .font(.system(size: 13, weight: .semibold))
-            .padding(.horizontal, 10)
-            .frame(height: 30)
         }
-        .buttonStyle(ChipButton(fill: Soot.surface))
         .help(detail)
-        .accessibilityLabel("\(product.label), \(mark.word)")
+        .accessibilityLabel("\(product.label), \(problem?.word ?? (frontUp == nil && apiUp == nil ? "checking" : "up"))")
         .accessibilityHint("Opens in the browser")
     }
 

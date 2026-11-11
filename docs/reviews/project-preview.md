@@ -126,3 +126,21 @@ run, the shield, "Update preview" and "Copy app URL" are noise next to the produ
 | LOW | Layout | Deploy | "Deploy preview" opened the flags row first | One click posts `/preview`; "Deploy with options…" in More opens the flags | The common deploy has no flags; the row was a step in front of every deploy |
 
 Captures: `…/scratchpad/shots7/{live,failed}/project-{dark,light}.png`. Verdict: Approve.
+
+## Revision 4 (user feedback: the set state still weighs too much; one line)
+
+The live panel said one thing ("the preview is live, here are three links") on two rows, with four green
+checks, the pull request's title back under the name, and four outlined controls.
+
+| Severity | Domain | Location | Before | After | Why |
+| --- | --- | --- | --- | --- | --- |
+| MEDIUM | Layout | Panel | Header, then a row of chips and the More button | One line: globe, "Preview", the number, the phase and its age on the left; the products, the step or "Deploy preview" and More on the right. The right part drops under the header only when the line does not fit | One piece of information, one line; the panel is about a third of its height |
+| MEDIUM | Colors | Product chips | A green check on each chip, beside the green check of "Live" | The name alone when the product answers; a cross and "down", or a warning and "API down", when it does not | The phase already says live; a mark that only repeats it hides the one that says something is wrong |
+| MEDIUM | Layout | Product chips, More | Three outlined capsules and an outlined More button | Plain links (`ExternalLink`, ink) and a borderless More | The outlines outweighed the words they held |
+| LOW | Writing | Header | The pull request's title as a subtitle, "Draft" beside the number, "updated 5 days ago" | No subtitle; the state word only for merged or closed; "5 days ago" | The title and "Draft" change nothing here (both stay in the number's tooltip); the age needs no verb next to the phase |
+| LOW | Layout | Phase and age | At the far right, away from the name | Beside the number | The state reads with what it is the state of |
+
+Kept on a second line: the failure note (it explains the lime button above it), the deploy options, and the
+invitation when no pull request is linked.
+
+Captures: `…/scratchpad/shots8/{live,deploying,failed,notdeployed,none}/project-{dark,light}.png`. Verdict: Approve.
