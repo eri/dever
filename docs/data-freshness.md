@@ -264,7 +264,7 @@ Refresh every. "Volatile" is the cadence while something is in flight.
 | Slack channel: edits, reactions, reply counts of what is shown | 60 s | | reaction or reply made here (local, at once) | latest page |
 | Slack catch-up (generated on the Mac from the unread messages already in `SlackStore`) | follows the unread messages: rewritten when one arrives, dropped when the channel is read | | a new unread message, the read cursor, the model becoming ready, its switch | no request: derived, in memory (`IntelligenceStore`) |
 | Summary of a long Slack message (generated on the Mac from the message already in `SlackStore`) | follows the message: rewritten when it is edited | | the message entering the rail, an edit, the model becoming ready, its switch | no request: derived, in memory (`IntelligenceStore`) |
-| Slack read cursor, unread, mentions | 20 s | | mark read (local, at once), activation | `conversations.info` |
+| Slack read cursor, unread, mentions | 20 s | | mark read (local, at once), activation. A cursor moved back in Slack ("Mark unread") wins over what was read here, except in the 10 s after a move made here | `conversations.info` |
 | Thread replies (open thread) | 20 s | | reply sent | `conversations.replies` |
 | Linear issue rows, blockers | 60 s | | any issue write (local, at once), activation | `updatedAt` delta |
 | Linear issue detail (open issue) | 60 s | | write, opened externally | compare `updatedAt` from the delta |

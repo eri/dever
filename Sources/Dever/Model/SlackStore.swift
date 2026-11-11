@@ -17,6 +17,13 @@ final class SlackStore: ObservableObject {
         var lastRead: String?
         /// The newest message that has been on screen in the room, on its way to the cursor.
         var seenUpTo: String?
+        /// The cursor as Slack last gave it, to tell a cursor that has not caught up with what
+        /// was read here from one that was moved back in Slack ("Mark unread").
+        var reportedCursor: String?
+        /// When the cursor was last moved from here: for a few seconds Slack may still answer
+        /// with the one before.
+        var movedHereAt: Date?
+        static let catchUpGrace: TimeInterval = 10
         /// The last complete read: the latest page, the cursor and the names. Nil until the
         /// first one ends, and a page waits for it before showing the channel.
         var fetchedAt: Date?
@@ -44,9 +51,27 @@ final class SlackStore: ObservableObject {
         }
 
         /// Slack's cursor as just read. Whatever was seen here since keeps precedence over a
-        /// cursor that has not caught up yet.
-        mutating func cursor(fromSlack cursor: String) {
-            lastRead = seenUpTo.map { SlackTS.later($0, cursor) } ?? cursor
+        /// cursor that has not caught up yet. A cursor older than the one Slack gave before was
+        /// moved back there ("Mark unread"): it wins, and what was seen here starts again from it.
+        mutating func cursor(fromSlack cursor: String, now: Date = Date()) {
+            let older = reportedCursor.map { cursor != $0 && SlackTS.isAtOrBefore(cursor, $0) } ?? false
+            // Just after a move made here, an older cursor is Slack not having caught up.
+            if older, let at = movedHereAt, now.timeIntervalSince(at) < Self.catchUpGrace { return }
+            let movedBack = older
+            reportedCursor = cursor
+            if movedBack {
+                lastRead = cursor
+                seenUpTo = nil
+            } else {
+                lastRead = seenUpTo.map { SlackTS.later($0, cursor) } ?? cursor
+            }
+        }
+
+        /// The cursor was moved to `ts` from here.
+        mutating func moveCursor(to ts: String, now: Date = Date()) {
+            lastRead = ts
+            reportedCursor = ts
+            movedHereAt = now
         }
 
         /// A message was on screen. True when it is newer than anything seen before.
@@ -179,8 +204,9 @@ final class SlackStore: ObservableObject {
     /// A message was on screen in the room. True when it is newer than anything seen before.
     func seen(_ id: String, _ ts: String) -> Bool { channels[id]?.seen(ts) ?? false }
 
-    /// The cursor was moved to `ts`, here.
-    func setLastRead(_ id: String, _ ts: String) { channels[id]?.lastRead = ts }
+    /// The cursor was moved to `ts`, here, and Slack is told so: from now on an older cursor
+    /// coming from Slack is one that was moved back there.
+    func setLastRead(_ id: String, _ ts: String) { channels[id]?.moveCursor(to: ts) }
 
     /// The viewer added or removed a reaction: that message changes, nothing is read again.
     func react(_ id: String, ts: String, name: String, on: Bool, user: String?) {

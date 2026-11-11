@@ -88,6 +88,41 @@ final class SlackChannelTests: XCTestCase {
         XCTAssertEqual(fresh.lastRead, "4.0")
     }
 
+    func testACursorMovedBackInSlackWins() {
+        var channel = SlackStore.Channel()
+        channel.cursor(fromSlack: "4.0")
+        _ = channel.seen("9.0")
+        channel.cursor(fromSlack: "4.0")                   // Slack has not caught up: what was seen stays
+        XCTAssertEqual(channel.lastRead, "9.0")
+        channel.cursor(fromSlack: "9.0")                   // it has
+        channel.cursor(fromSlack: "6.0")                   // "Mark unread" in Slack, from message 7
+        XCTAssertEqual(channel.lastRead, "6.0")
+        XCTAssertNil(channel.seenUpTo)
+        XCTAssertNil(channel.cursorToPush, "nothing here pushes the cursor forward again")
+        _ = channel.seen("8.0")                            // read again here
+        XCTAssertEqual(channel.cursorToPush, "8.0")
+    }
+
+    func testMarkUnreadInSlackRightAfterReadingHereWins() {
+        var channel = SlackStore.Channel()
+        channel.cursor(fromSlack: "4.0")
+        _ = channel.seen("9.0")
+        let then = Date(timeIntervalSince1970: 1_000)
+        channel.moveCursor(to: "9.0", now: then)           // pushed to Slack from here
+        channel.cursor(fromSlack: "4.0", now: then.addingTimeInterval(2))   // Slack has not caught up yet
+        XCTAssertEqual(channel.lastRead, "9.0")
+        channel.cursor(fromSlack: "6.0", now: then.addingTimeInterval(30))  // "Mark unread" there, later
+        XCTAssertEqual(channel.lastRead, "6.0")
+    }
+
+    func testACursorMovedBackBeforeSlackCaughtUpStillWins() {
+        var channel = SlackStore.Channel()
+        channel.cursor(fromSlack: "4.0")
+        _ = channel.seen("9.0")
+        channel.cursor(fromSlack: "2.0")                   // older than anything Slack gave: moved back there
+        XCTAssertEqual(channel.lastRead, "2.0")
+    }
+
     func testMarkAllReadGoesPastTheNewestThreadReply() {
         var channel = SlackStore.Channel()
         XCTAssertNil(channel.readAllTarget)
