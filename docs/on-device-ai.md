@@ -122,6 +122,9 @@ the parts already decided.
 - **Content:** first, only if something is asked of the user, their actions as a short to-do list (two
   at most, each starting with a verb: "Vérifier le front avant midi"), each leading to its message; never
   a question, never "you". Then one or two sentences on the rest. No headings.
+- **No example sentence in the instructions:** one given to show the tone ("The QA of the feature is
+  complete…") came back in the catch-up of a channel that never spoke of QA. Examples are kept to the
+  form of an action, where the check below catches a copy.
 - **An action is checked, not trusted:** the model lists a reminder to all as readily as a request to
   one, and confuses who asks with who is asked. An action is shown only when the message it rests on
   names the user, with an @ or by a word of their name (`CatchUp.names`). A request made with "tu" alone

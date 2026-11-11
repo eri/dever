@@ -417,6 +417,8 @@ final class RealModelTests: XCTestCase {
         let text = try await CatchUp.write(.init(lines: lines, reader: "Sam", language: "English"))
         for s in text.sentences { print(s.forYou ? " → " : "   ", s.text, "[\(s.source ?? "-")]") }
         XCTAssertFalse(text.sentences.contains { $0.forYou })
+        // An example sentence in the instructions came back as if the channel had said it.
+        XCTAssertFalse(text.sentences.contains { $0.text.contains("QA") || $0.text.contains("bugs") })
     }
 }
 
