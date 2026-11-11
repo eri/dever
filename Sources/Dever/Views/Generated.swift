@@ -124,7 +124,6 @@ struct SummarisedMessage: View {
 /// Under a long message while its summary is being written: the sparkle breathes and the word
 /// says what is happening, so the swap to the block is expected. Still under Reduce Motion.
 struct SummarisingLine: View {
-    var label = "Summarising"
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
@@ -137,7 +136,7 @@ struct SummarisingLine: View {
                     .foregroundStyle(Soot.lime)
                     .opacity(0.45 + 0.55 * wave)
                     .scaleEffect(0.9 + 0.15 * wave)
-                Text(label).font(.system(size: 11, weight: .semibold))
+                Text("Summarising").font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(Soot.muted)
                     .opacity(0.6 + 0.4 * wave)
             }

@@ -36,16 +36,6 @@ protocol LanguageModel: Sendable {
     func respond(instructions: String, prompt: String, maximumTokens: Int?) async throws -> String
     /// One message shortened: what kind of message it is, and its point in a sentence.
     func summarise(instructions: String, prompt: String) async throws -> MessageSummaryAnswer
-    /// One message as an entry for an issue tracker.
-    func issueDraft(instructions: String, prompt: String) async throws -> IssueDraftAnswer
-}
-
-/// What the model proposes for an issue.
-struct IssueDraftAnswer: Equatable, Sendable {
-    var title: String
-    var description: String
-    /// "urgent", "high", "medium", "low" or "none".
-    var priority: String
 }
 
 /// What the model says of one message.
@@ -64,17 +54,6 @@ private struct MessageSummaryShape {
     @Guide(description: "Request: the author asks someone to do, send, check, fix or decide something. Question: the author asks for an answer or an opinion. Problem: a bug, a failure, a delay or a risk is reported and no one in particular is asked. Update: only when nothing is asked and no bug, failure, delay or risk is reported, such as progress, news, a decision, a welcome",
            .anyOf(["Request", "Question", "Problem", "Update"]))
     var kind: String
-}
-
-@available(macOS 26.0, *)
-@Generable
-private struct IssueDraftShape {
-    @Guide(description: "The work to do, as an action that starts with a verb. Ten words at most, no final period")
-    var title: String
-    @Guide(description: "Two or three short sentences: what is wrong or wanted, where, and what was observed. Only what the message says")
-    var description: String
-    @Guide(description: "none unless the message itself says how urgent or blocking it is", .anyOf(["none", "urgent", "high", "medium", "low"]))
-    var priority: String
 }
 
 #endif
@@ -138,19 +117,6 @@ struct SystemLanguageModelClient: LanguageModel {
             let shape = try await session.respond(to: prompt, generating: MessageSummaryShape.self,
                                                   options: GenerationOptions(maximumResponseTokens: 100)).content
             return MessageSummaryAnswer(kind: shape.kind, summary: shape.summary)
-        }
-        #endif
-        throw IntelligenceError.unavailable
-    }
-
-    func issueDraft(instructions: String, prompt: String) async throws -> IssueDraftAnswer {
-        #if canImport(FoundationModels)
-        if #available(macOS 26.0, *) {
-            guard SystemLanguageModel.default.availability == .available else { throw IntelligenceError.unavailable }
-            let session = LanguageModelSession(instructions: instructions)
-            let shape = try await session.respond(to: prompt, generating: IssueDraftShape.self,
-                                                  options: GenerationOptions(maximumResponseTokens: 250)).content
-            return IssueDraftAnswer(title: shape.title, description: shape.description, priority: shape.priority)
         }
         #endif
         throw IntelligenceError.unavailable

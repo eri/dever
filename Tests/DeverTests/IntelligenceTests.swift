@@ -19,12 +19,6 @@ private final class FakeModel: LanguageModel, @unchecked Sendable {
         return "answer to \(prompt)"
     }
 
-    var draft = IssueDraftAnswer(title: "Fix the thing", description: "It is broken.", priority: "none")
-    func issueDraft(instructions: String, prompt: String) async throws -> IssueDraftAnswer {
-        lock.withLock { order.append(prompt) }
-        return draft
-    }
-
     var summary = MessageSummaryAnswer(kind: "Update", summary: "A summary.")
     func summarise(instructions: String, prompt: String) async throws -> MessageSummaryAnswer {
         lock.withLock { order.append(prompt) }
@@ -311,88 +305,3 @@ extension RealModelTests {
 }
 
 
-
-final class IssueDraftTests: XCTestCase {
-    private let input = IssueDraft.Input(author: "Kyryl", text: "The tips list isn't refreshed after a language change.", language: "English")
-
-    func testWithoutTheModelTheMessageIsTheDescription() {
-        XCTAssertEqual(IssueDraft.plain(input), .init(title: "", description: input.text, priority: 0))
-    }
-
-    func testTheTitleIsTidiedAndThePriorityMapped() throws {
-        let answer = IssueDraftAnswer(title: "\"refresh the tips list after a language change.\"\n",
-                                      description: " The list keeps the previous language. ", priority: "High")
-        let fields = try XCTUnwrap(IssueDraft.fields(from: answer, input: input))
-        XCTAssertEqual(fields, .init(title: "Refresh the tips list after a language change",
-                                     description: "The list keeps the previous language.", priority: 0),
-                       "the message has no word for urgency: the priority is the user's to set")
-        let blocking = IssueDraft.Input(author: "Robin", text: "L'écran de facturation plante, c'est bloquant pour demain.", language: "English")
-        XCTAssertEqual(IssueDraft.fields(from: answer, input: blocking)?.priority, 2)
-        XCTAssertEqual(["urgent", "high", "medium", "low", "none", "whatever"].map(IssueDraft.priority), [1, 2, 3, 4, 0, 0])
-    }
-
-    func testNoTitleIsNoDraftAndAnEmptyDescriptionKeepsTheMessage() throws {
-        XCTAssertNil(IssueDraft.fields(from: .init(title: " . ", description: "Something.", priority: "none"), input: input))
-        let fields = try XCTUnwrap(IssueDraft.fields(from: .init(title: "Fix it", description: "", priority: "none"), input: input))
-        XCTAssertEqual(fields.description, input.text)
-        let long = try XCTUnwrap(IssueDraft.fields(from: .init(title: String(repeating: "word ", count: 40), description: "x", priority: "none"), input: input))
-        XCTAssertLessThanOrEqual(long.title.count, IssueDraft.longestTitle)
-    }
-
-    func testTheDescriptionSentToLinearSaysWhereItCameFrom() {
-        let link = URL(string: "https://example.slack.com/archives/C1/p1")
-        XCTAssertEqual(IssueDraft.description("The list is stale. ", author: "Kyryl", permalink: link),
-                       "The list is stale.\n\nFrom [Kyryl's message in Slack](https://example.slack.com/archives/C1/p1)")
-        XCTAssertEqual(IssueDraft.description("The list is stale.", author: "Kyryl", permalink: nil), "The list is stale.")
-        XCTAssertEqual(IssueDraft.description(" ", author: "Kyryl", permalink: link), "From [Kyryl's message in Slack](https://example.slack.com/archives/C1/p1)")
-    }
-
-    func testWriteAsksTheModelOnce() async throws {
-        let model = FakeModel()
-        let fields = try await IssueDraft.write(input, with: Intelligence(model: model))
-        XCTAssertEqual(fields.title, "Fix the thing")
-        XCTAssertEqual(model.order.count, 1)
-    }
-}
-
-@MainActor
-final class IssueStoreCreateTests: XCTestCase {
-    private func issue(_ id: String, updatedAt: String) -> LinearIssue {
-        LinearIssue(id: id, identifier: "ABC-\(id)", title: "T\(id)", url: "https://linear.example/\(id)", updatedAt: updatedAt,
-                    state: .init(id: "s", name: "Todo", type: "unstarted", color: nil))
-    }
-
-    func testANewIssueGoesFirstInAProjectAlreadyRead() {
-        let store = IssueStore()
-        store.adopt([issue("1", updatedAt: "2026-01-01T00:00:00.000Z")], project: "P")
-        store.insert(issue("2", updatedAt: "2026-02-01T00:00:00.000Z"), project: "P")
-        XCTAssertEqual(store.issues(project: "P").map(\.id), ["2", "1"])
-        XCTAssertEqual(store.projects["P"]?.newest, "2026-02-01T00:00:00.000Z")
-        store.insert(issue("2", updatedAt: "2026-02-01T00:00:00.000Z"), project: "P")
-        XCTAssertEqual(store.issues(project: "P").count, 2, "the same issue is not listed twice")
-    }
-
-    func testAProjectNotReadYetStaysUnread() {
-        let store = IssueStore()
-        store.insert(issue("1", updatedAt: "2026-01-01T00:00:00.000Z"), project: "P")
-        XCTAssertNil(store.projects["P"])
-    }
-}
-
-extension RealModelTests {
-    func testIssueDraftFromAMessage() async throws {
-        try XCTSkipUnless(ProcessInfo.processInfo.environment["DEVER_TEST_REAL_MODEL"] == "1", "needs the system model")
-        let messages = [
-            ("Kyryl", "SUP-931: the tips list isn't refreshed after a language change, learners see and open tips in the previous language. Seen on preview PR-4714 in the web extension. It should be fixed before the release.", "English"),
-            ("Robin", "Confirmé, la migration ne remplit pas plan_id pour les comptes créés avant mars, du coup l'écran de facturation plante pour eux. C'est bloquant pour la livraison de demain.", "English"),
-            ("Estelle", "Could someone send me 2 or 3 screenshots of the AI Tips feature in the web extension before tomorrow morning? The tip page and the success screen would be perfect.", "English"),
-        ]
-        for (author, text, language) in messages {
-            let start = Date()
-            let fields = try await IssueDraft.write(.init(author: author, text: text, language: language))
-            print("issue in \(String(format: "%.1f", Date().timeIntervalSince(start))) s: [\(LinearPriority.label(fields.priority))] \(fields.title)\n   \(fields.description)")
-            XCTAssertFalse(fields.title.isEmpty)
-            XCTAssertLessThanOrEqual(fields.title.count, IssueDraft.longestTitle)
-        }
-    }
-}
