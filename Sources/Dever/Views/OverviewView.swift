@@ -1178,8 +1178,10 @@ private struct ReleaseCard: View {
         }
         .padding(12)
         .frame(width: 320, alignment: .leading)
-        // The arrow over the card itself: only its links show the pointing hand.
-        .background(CursorArea(cursor: .arrow))
+        // The card floats over the rows: its links claim the cursor after its own arrow, and
+        // the arrow after the rows underneath, so only the links show the pointing hand.
+        .cursorPriority(2)
+        .background(CursorArea(cursor: .arrow, priority: 1))
         .background(Soot.ground, in: RoundedRectangle(cornerRadius: 12))
         .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Soot.line))
         .shadow(color: .black.opacity(0.22), radius: 16, y: 6)

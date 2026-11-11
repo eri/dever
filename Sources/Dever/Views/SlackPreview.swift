@@ -273,11 +273,17 @@ class YieldingTextView: NSTextView {
 
 /// A cursor for the area of a view, through AppKit's cursor rects: reliable where
 /// pushing cursors on hover is not. Clicks pass through.
+///
+/// Areas drawn over others (a card floating over a list) still receive the moves of the
+/// areas under them, so each claim waits a little longer the higher its priority: the area
+/// in front sets the cursor last. The priority comes from `cursorPriority(_:)`.
 struct CursorArea: NSViewRepresentable {
     let cursor: NSCursor
+    var priority: Int? = nil
 
     final class CursorView: NSView {
         var cursor: NSCursor = .arrow
+        var priority = 0
         override func hitTest(_ point: NSPoint) -> NSView? { nil }
         override func resetCursorRects() { addCursorRect(bounds, cursor: cursor) }
 
@@ -292,7 +298,7 @@ struct CursorArea: NSViewRepresentable {
         override func mouseEntered(with event: NSEvent) { claim() }
         override func mouseMoved(with event: NSEvent) { claim() }
         private func claim() {
-            DispatchQueue.main.async { [weak self] in
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.012 * Double(priority)) { [weak self] in
                 guard let self, let window = self.window,
                       self.bounds.contains(self.convert(window.mouseLocationOutsideOfEventStream, from: nil)) else { return }
                 self.cursor.set()
@@ -303,11 +309,13 @@ struct CursorArea: NSViewRepresentable {
     func makeNSView(context: Context) -> CursorView {
         let view = CursorView()
         view.cursor = cursor
+        view.priority = priority ?? context.environment.cursorPriority
         return view
     }
 
     func updateNSView(_ view: CursorView, context: Context) {
         view.cursor = cursor
+        view.priority = priority ?? context.environment.cursorPriority
         view.window?.invalidateCursorRects(for: view)
     }
 }
@@ -448,4 +456,20 @@ struct QuickLookPreview: NSViewRepresentable {
     func updateNSView(_ view: QLPreviewView, context: Context) {
         if (view.previewItem as? URL) != url { view.previewItem = url as QLPreviewItem }
     }
+}
+
+private struct CursorPriorityKey: EnvironmentKey { static let defaultValue = 0 }
+
+extension EnvironmentValues {
+    /// How late the cursor areas inside a view claim the cursor: 0 for the page, more for
+    /// what floats over it.
+    var cursorPriority: Int {
+        get { self[CursorPriorityKey.self] }
+        set { self[CursorPriorityKey.self] = newValue }
+    }
+}
+
+extension View {
+    /// Marks a floating surface: its cursor areas win over those of the page under it.
+    func cursorPriority(_ priority: Int) -> some View { environment(\.cursorPriority, priority) }
 }
