@@ -19,6 +19,12 @@ private final class FakeModel: LanguageModel, @unchecked Sendable {
         return "answer to \(prompt)"
     }
 
+    var reply = "I'll look at it."
+    func replyDraft(instructions: String, prompt: String) async throws -> String {
+        lock.withLock { order.append(prompt) }
+        return reply
+    }
+
     var summary = MessageSummaryAnswer(kind: "Update", summary: "A summary.")
     func summarise(instructions: String, prompt: String) async throws -> MessageSummaryAnswer {
         lock.withLock { order.append(prompt) }
@@ -305,3 +311,71 @@ extension RealModelTests {
 }
 
 
+
+final class ReplyDraftTests: XCTestCase {
+    private let users = ["U1": SlackUser(id: "U1", name: "Alex", avatar: nil, isBot: false),
+                         "U2": SlackUser(id: "U2", name: "Sam Rivers", avatar: nil, isBot: false)]
+    private func message(_ ts: String, _ user: String, _ text: String) -> SlackMessage { SlackMessage(ts: ts, user: user, text: text) }
+
+    func testTheThreadIsReadOldestFirstWithNamesAndItsLanguage() throws {
+        let parent = message("1", "U1", "Le déploiement de la preview est cassé depuis hier soir.")
+        let replies = [message("2", "U2", "Je regarde."), message("3", "U1", "<@U2> tu peux aussi vérifier la facturation ?")]
+        let input = try XCTUnwrap(ReplyDraft.input(parent: parent, replies: replies, users: users, me: "U2"))
+        XCTAssertEqual(input.lines.map(\.author), ["Alex", "Sam Rivers", "Alex"])
+        XCTAssertEqual(input.lines.last?.text, "@Sam Rivers tu peux aussi vérifier la facturation ?")
+        XCTAssertEqual(input.reader, "Sam Rivers")
+        XCTAssertEqual(input.language, "French")
+    }
+
+    func testNothingToAnswerWhenTheLastWordIsTheUsers() {
+        let parent = message("1", "U1", "Tu peux regarder le front ?")
+        XCTAssertNil(ReplyDraft.input(parent: parent, replies: [message("2", "U2", "Je regarde ce matin.")], users: users, me: "U2"))
+        XCTAssertNotNil(ReplyDraft.input(parent: parent, replies: [], users: users, me: "U2"))
+        XCTAssertNil(ReplyDraft.input(parent: message("1", "U1", ""), replies: [], users: users, me: "U2"))
+    }
+
+    func testTheReplyIsTidiedAndASpeechIsDropped() {
+        XCTAssertEqual(ReplyDraft.text(from: "Sam: \"Je regarde ça ce matin.\"\n", reader: "Sam Rivers"), "Je regarde ça ce matin.")
+        XCTAssertEqual(ReplyDraft.text(from: "Note: je regarde.", reader: "Sam Rivers"), "Note: je regarde.", "a colon that is not after the reader's name stays")
+        XCTAssertNil(ReplyDraft.text(from: " ", reader: "Sam Rivers"))
+        XCTAssertNil(ReplyDraft.text(from: String(repeating: "Je regarde. ", count: 60), reader: "Sam Rivers"))
+    }
+
+    func testTheParentIsAlwaysReadWithTheNewestRepliesThatFit() async throws {
+        let model = FakeModel()
+        let line = ReplyDraft.Line(author: "Alex", text: String(repeating: "mot ", count: 75))   // about 100 tokens
+        let input = ReplyDraft.Input(lines: [.init(author: "Alex", text: "PARENT")] + Array(repeating: line, count: 9) + [.init(author: "Alex", text: "LAST")],
+                                     reader: "Sam", language: "English")
+        model.contextSize = TextBudget.estimate(ReplyDraft.instructions(input)) + 200 + 350
+        _ = try await ReplyDraft.write(input, with: Intelligence(model: model))
+        let prompt = try XCTUnwrap(model.order.last)
+        XCTAssertTrue(prompt.hasPrefix("Alex: PARENT"))
+        XCTAssertTrue(prompt.hasSuffix("Alex: LAST"))
+        XCTAssertLessThan(prompt.components(separatedBy: "\n").count, 11, "the oldest replies were left out")
+    }
+}
+
+extension RealModelTests {
+    func testReplyDraftInAFrenchThread() async throws {
+        try XCTSkipUnless(ProcessInfo.processInfo.environment["DEVER_TEST_REAL_MODEL"] == "1", "needs the system model")
+        let threads: [[(String, String)]] = [
+            [("Alex", "Le déploiement de la preview est cassé depuis hier soir, la page de paiement renvoie une 500."),
+             ("Robin", "Confirmé, la migration ne remplit pas plan_id pour les comptes créés avant mars."),
+             ("Alex", "Sam tu peux regarder le front ? C'est toi qui as fait l'écran de facturation."),
+             ("Alex", "On a besoin de ta réponse avant midi pour savoir si on livre aujourd'hui.")],
+            [("Estelle", "Hey team, could someone send me 2 or 3 screenshots of the AI Tips feature before tomorrow morning?"),
+             ("Marco", "Sam, you have the preview open, can you take them?")],
+            [("Charlie", "Do we keep the CSV export in this release, or do we move it to the next one? Sam, what do you think?")],
+        ]
+        for thread in threads {
+            let lines = thread.map { ReplyDraft.Line(author: $0.0, text: $0.1) }
+            let language = Locale(identifier: "en_US").localizedString(forLanguageCode: Intelligence.language(of: lines.map(\.text).joined(separator: " ")) ?? "en") ?? "English"
+            for _ in 1...2 {
+                let start = Date()
+                let text = try await ReplyDraft.write(.init(lines: lines, reader: "Sam", language: language))
+                print("reply (\(language)) in \(String(format: "%.1f", Date().timeIntervalSince(start))) s: \(text)")
+                XCTAssertLessThanOrEqual(text.count, ReplyDraft.longest)
+            }
+        }
+    }
+}

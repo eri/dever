@@ -185,6 +185,8 @@ final class ComposerModel: ObservableObject {
     @Published var marks: Set<SlackCompose.Mark> = []
     @Published var list: SlackCompose.ListKind?
     @Published var isEmpty = true
+    /// What is in the field, in plain text: tells a draft the Mac wrote from one typed over.
+    @Published var plain = ""
     @Published var height: CGFloat = 18
     @Published var focused = false
 }
@@ -233,6 +235,13 @@ final class ComposerTextView: YieldingTextView {
             sample.setAttributes(attrs, range: r)
         }
         textStorage?.setAttributedString(sample)
+    }
+
+    /// Puts a draft in the field as if it had been typed: ⌘Z takes it out again.
+    func insertDraft(_ text: String) {
+        window?.makeFirstResponder(self)
+        insertText(NSAttributedString(string: text, attributes: Self.base),
+                   replacementRange: NSRange(location: 0, length: textStorage?.length ?? 0))
     }
 
     func clear() {
@@ -426,6 +435,7 @@ final class ComposerTextView: YieldingTextView {
             if model.marks != marks { model.marks = marks }
             if model.list != list { model.list = list }
             if model.isEmpty != empty { model.isEmpty = empty }
+            if model.plain != self.string { model.plain = self.string }
             if abs(model.height - height) > 0.5 { model.height = height }
             if let focused, model.focused != focused { model.focused = focused }
         }
@@ -478,7 +488,14 @@ struct ReplyComposer: View {
     /// Posts the draft; `true` clears the box.
     let send: (SlackDraft) async -> Bool
     let cancel: () -> Void
+    /// Writes a reply from the thread, on the Mac; nil when no draft is offered here.
+    var draft: (() async -> String?)? = nil
     @StateObject private var model = ComposerModel()
+    /// The Mac is writing a draft.
+    @State private var drafting = false
+    /// The draft the Mac wrote, while the field still holds it untouched.
+    @State private var drafted: String?
+    private var isDraft: Bool { drafted != nil && model.plain == drafted }
 
     private static let marks: [(SlackCompose.Mark, String, String)] = [
         (.bold, "bold", "Bold (⌘B)"), (.italic, "italic", "Italic (⌘I)"),
@@ -488,7 +505,9 @@ struct ReplyComposer: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             ZStack(alignment: .topLeading) {
-                if model.isEmpty {
+                if drafting {
+                    SummarisingLine(label: "Writing a draft").frame(height: 18)
+                } else if model.isEmpty {
                     Text("Reply in thread").font(.system(size: 13)).foregroundStyle(Soot.muted)
                         .allowsHitTesting(false).accessibilityHidden(true)
                 }
@@ -508,6 +527,19 @@ struct ReplyComposer: View {
                 tool("list.bullet", "Bulleted list", on: model.list == .bullet) { model.view?.toggleList(.bullet) }
                 tool("list.number", "Numbered list", on: model.list == .ordered) { model.view?.toggleList(.ordered) }
                 Spacer(minLength: 8)
+                if isDraft {
+                    // Until the first change the text is the Mac's, and says so; then it is the user's.
+                    HStack(spacing: 4) {
+                        GeneratedMark(size: 10)
+                        Text("Draft").font(.system(size: 11, weight: .semibold)).foregroundStyle(Soot.muted)
+                    }
+                    .padding(.trailing, 6)
+                    .transition(.opacity)
+                } else if draft != nil, model.isEmpty, !drafting {
+                    tool("sparkles", "Draft a reply from the thread", on: false, action: writeDraft)
+                        .padding(.trailing, 2)
+                        .transition(.opacity)
+                }
                 Button(action: submit) {
                     Text("Send").font(.system(size: 12, weight: .semibold))
                         .foregroundStyle(model.isEmpty || sending ? Soot.muted : Soot.limeInk)
@@ -539,6 +571,19 @@ struct ReplyComposer: View {
         .help(label)
         .accessibilityLabel(label)
         .accessibilityAddTraits(on ? .isSelected : [])
+    }
+
+    /// Asks for a draft and puts it in the field, unless the user has started to type meanwhile.
+    private func writeDraft() {
+        guard let draft, !drafting else { return }
+        Motion.run(Motion.ui, fade: true) { drafting = true }
+        Task {
+            let text = await draft()
+            Motion.run(Motion.ui, fade: true) { drafting = false }
+            guard let text, model.isEmpty, let view = model.view else { return }
+            drafted = text
+            view.insertDraft(text)
+        }
     }
 
     private func submit() {
