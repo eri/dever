@@ -487,33 +487,34 @@ struct ProjectEditorSheet: View {
         }
     }
 
-    /// A list to pick one thing from: search, rows, an optional "show every" at the end.
+    /// A list to pick one thing from: a search, light rows under hairlines, "show every" at the end.
     private func listPage(title: String, rows: [PickerItem], selection: Binding<String?>,
                           more: (() -> Void)?, loading: Bool = false, search: Bool = true) -> some View {
         StepPage(title: title) {
             if catalog.loading || loading {
                 skeletonRows
             } else {
-                VStack(alignment: .leading, spacing: 16) {
+                VStack(alignment: .leading, spacing: 12) {
                     if search { searchField("Search") }
                     ScrollView {
-                        LazyVStack(spacing: 6) {
+                        LazyVStack(spacing: 0) {
                             ForEach(filtered(rows)) { item in
-                                PickRow(item: item, selected: selection.wrappedValue == item.id) {
+                                ListRow(item: item, selected: selection.wrappedValue == item.id) {
                                     Motion.run(Motion.ui) { selection.wrappedValue = item.id }
                                 }
                             }
                             noMatch(rows)
                             if let more, query.isEmpty {
                                 Button("Show every channel", action: more)
-                                    .buttonStyle(SecondaryButton())
-                                    .frame(maxWidth: .infinity)
-                                    .padding(.top, 4)
+                                    .buttonStyle(TertiaryButton(tint: .lime, lift: Soot.surface, font: .system(size: 13, weight: .semibold)))
+                                    .padding(.top, 8)
                             }
                         }
                     }
+                    .scrollIndicators(.hidden)
                     .frame(maxHeight: .infinity)
                 }
+                .frame(maxWidth: 440)
             }
         } buttons: {
             continueButton(ok: catalog.loading || loading || selection.wrappedValue != nil)
@@ -716,10 +717,10 @@ struct ProjectEditorSheet: View {
             .filter { !channelsNarrowed || (fitsPrefix($0) && $0.is_member == true) || $0.id == project.slack?.id }
             .sorted { ($0.is_member == true ? 0 : 1, $0.name) < ($1.is_member == true ? 0 : 1, $1.name) }
             .map { ch in
-                let members = ch.num_members.map { Plural.text("^[\($0) member](inflect: true)") }
-                let subtitle = [ch.is_member == true ? "You're in it" : nil, members].compactMap { $0 }.joined(separator: " · ")
-                return PickerItem(id: ch.id, title: "#\(ch.name)", subtitle: subtitle.isEmpty ? nil : subtitle,
-                                  symbol: ch.is_private == true ? "lock" : nil)
+                PickerItem(id: ch.id, title: "#\(ch.name)",
+                           subtitle: ch.is_member == true ? nil : "Not in it",
+                           symbol: ch.is_private == true ? "lock" : nil,
+                           aside: ch.num_members.map { Plural.text("^[\($0) member](inflect: true)") })
             }
         linearRows = availableLinear.map {
             PickerItem(id: $0.id, title: $0.name, subtitle: $0.teams?.nodes.map(\.name).joined(separator: ", "))
@@ -816,6 +817,40 @@ private struct PickRow: View {
             .overlay(RoundedRectangle(cornerRadius: Soot.fieldRadius).strokeBorder(selected ? Soot.lime : .clear, lineWidth: 1.5))
             }
             .buttonStyle(RowButton(lift: .tone, radius: Soot.fieldRadius))
+        .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+}
+
+/// One line to pick, under a hairline: a ring, the name, a quiet note, a figure on the right.
+/// Lighter than `PickRow`: no card, so a long list breathes.
+private struct ListRow: View {
+    let item: PickerItem
+    let selected: Bool
+    let pick: () -> Void
+
+    var body: some View {
+        Button(action: pick) {
+            HStack(spacing: 12) {
+                CheckCircle(on: selected)
+                if let symbol = item.symbol {
+                    Image(systemName: symbol).font(.system(size: 11, weight: .semibold)).foregroundStyle(Soot.muted).frame(width: 14)
+                }
+                Text(item.title).font(.system(size: 14, weight: selected ? .semibold : .medium))
+                    .foregroundStyle(Soot.ink).lineLimit(1)
+                if let subtitle = item.subtitle {
+                    Text(subtitle).font(.system(size: 12)).foregroundStyle(Soot.muted).lineLimit(1)
+                }
+                Spacer(minLength: 12)
+                if let aside = item.aside {
+                    Text(aside).font(.system(size: 12)).foregroundStyle(Soot.muted).lineLimit(1)
+                }
+            }
+            .padding(.horizontal, 12)
+            .frame(height: 44)
+            .overlay(alignment: .bottom) { Rectangle().fill(Soot.line).frame(height: 1).padding(.leading, 42) }
+        }
+        .buttonStyle(RowButton(lift: .surface, radius: Soot.radius))
+        .accessibilityLabel([item.title, item.subtitle, item.aside].compactMap { $0 }.joined(separator: ", "))
         .accessibilityAddTraits(selected ? .isSelected : [])
     }
 }

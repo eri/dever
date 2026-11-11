@@ -729,6 +729,8 @@ struct PickerItem: Identifiable, Hashable {
     let title: String
     var subtitle: String? = nil
     var symbol: String? = nil
+    /// A figure for the right edge of a row (a member count).
+    var aside: String? = nil
 }
 
 /// A field that opens a searchable list: type to filter, click or press Return to choose.
