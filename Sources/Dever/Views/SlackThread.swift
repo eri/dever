@@ -613,11 +613,40 @@ struct SlackThreadView: View {
 
     /// The rail shows this message as its summary: a long one, with "Long messages" switched on.
     private func inPlace(_ message: SlackMessage, wide: Bool) -> Bool {
-        !wide && MessageSummary.isLong(message) && IntelligenceStatus.shared.offers(.messageSummary)
+        !wide && IntelligenceStatus.shared.offers(.messageSummary) && MessageSummary.isSummarised(message, users: users)
+    }
+
+    /// Where the summary of a message the rail shows in place stands.
+    private enum SummaryState: Equatable {
+        case none
+        /// Asked for, or about to be (the page asks for the rail's messages as soon as it has them).
+        case writing(GeneratedText?)
+        case written(GeneratedText)
+    }
+
+    private func summaryState(_ message: SlackMessage, wide: Bool) -> SummaryState {
+        guard let channelID, inPlace(message, wide: wide) else { return .none }
+        let subject = MessageSummary.subject(channel: channelID, ts: message.ts)
+        if intelligence.isSilent(subject) { return .none }
+        if intelligence.isPending(subject) { return .writing(intelligence.text(subject)) }
+        if let text = intelligence.text(subject) { return .written(text) }
+        // No entry yet: its place is held only where the page will ask for it.
+        return railMessages == nil ? .none : .writing(nil)
     }
 
     private func railList(wide: Bool, shown: Int, visible: [SlackMessage]) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
+        let states = Dictionary(visible.map { ($0.ts, summaryState($0, wide: wide)) }, uniquingKeysWith: { a, _ in a })
+        // One summary is written at a time, the newest first: that one says it is being written.
+        let writingNow = visible.last { if case .writing = states[$0.ts] { true } else { false } }?.ts
+        // What moves the rail when a summary lands, is given up or is rewritten.
+        let landed = visible.compactMap { m -> String? in
+            switch states[m.ts] {
+            case .writing(let old): "\(m.ts):w\(old == nil ? "" : "+")"
+            case .written(let text): "\(m.ts):\(text.sentences.first?.text.count ?? 0)"
+            default: nil
+            }
+        }.joined(separator: ",")
+        return VStack(alignment: .leading, spacing: 0) {
             if wide, hasEarlier || messages.count > shown {
                 Group {
                     if loadingEarlier {
@@ -652,8 +681,8 @@ struct SlackThreadView: View {
                                read: readUpTo.map { SlackTS.isAtOrBefore(m.ts, $0) } ?? true,
                                newReplies: readUpTo.map { r in m.latest_reply.map { !SlackTS.isAtOrBefore($0, r) } ?? false } ?? false,
                                permalink: permalink(m),
-                               summary: inPlace(m, wide: wide) ? channelID.flatMap { intelligence.text(MessageSummary.subject(channel: $0, ts: m.ts)) } : nil,
-                               summarising: inPlace(m, wide: wide) && (channelID.map { intelligence.isWriting(MessageSummary.subject(channel: $0, ts: m.ts)) } ?? false),
+                               summary: summaryText(states[m.ts]), summarising: isWriting(states[m.ts]),
+                               summarisingNow: writingNow == m.ts,
                                actions: actions, openThread: wide ? { setThread($0) } : nil, openWide: openWide)
                         .padding(.top, grouped ? 2 : (newDay ? 0 : (wide ? 18 : 14)))
                         .id(m.ts)
@@ -672,6 +701,22 @@ struct SlackThreadView: View {
                 .help("Read the whole conversation (⌘⇧E)")
             }
         }
+        // The rows under a summary follow it when its height changes (a sentence a line longer
+        // or shorter than the place held, a summary given up). Nothing moves under Reduce Motion;
+        // the block dissolves by itself.
+        .motion(Motion.move, value: landed)
+    }
+
+    private func summaryText(_ state: SummaryState?) -> GeneratedText? {
+        switch state {
+        case .writing(let text): text
+        case .written(let text): text
+        default: nil
+        }
+    }
+
+    private func isWriting(_ state: SummaryState?) -> Bool {
+        if case .writing = state { true } else { false }
     }
 
     private func permalink(_ m: SlackMessage) -> URL? {
@@ -1318,9 +1363,14 @@ private struct MessageRow: View {
     let permalink: URL?
     /// The rail only: the message's summary, shown in its place until "Show original".
     var summary: GeneratedText? = nil
-    /// The summary is being written: the message shows meanwhile, with a line that says so.
+    /// The rail only: a summary is wanted and not written yet (or a newer one, after an edit).
+    /// Its block holds the place meanwhile.
     var summarising = false
+    /// The model is on this one now.
+    var summarisingNow = false
     @State private var showOriginal = false
+    /// The summary's block stands in the place of the message.
+    private var inBlock: Bool { (summary != nil || summarising) && !showOriginal }
     let actions: SlackMessageActions
     /// In the wide view the thread opens in a pane beside the list instead of inline.
     var openThread: ((SlackMessage) -> Void)? = nil
@@ -1381,27 +1431,32 @@ private struct MessageRow: View {
                     }
                 }
                 Group {
-                    if let summary, !showOriginal {
-                        SummarisedMessage(text: summary, forYou: MessageSummary.isForReader(message, kind: summary.kind, me: me, users: users))
-                            .padding(.top, 2).transition(Motion.pop)
+                    if inBlock {
+                        SummarisedMessage(text: summary, excerpt: MessageSummary.excerpt(message, users: users),
+                                          writing: summarising, active: summarisingNow,
+                                          forYou: MessageSummary.isForReader(message, kind: summary?.kind, me: me, users: users))
+                            .padding(.top, 2).transition(.opacity)
                     } else {
                         MessageBody(message: message, users: users, channels: channels, expanded: wide ? .constant(true) : $expanded)
                             .transition(.opacity)
-                        if summarising { SummarisingLine().padding(.top, 2).transition(.opacity) }
                     }
                 }
-                .motion(Motion.move, value: summary != nil && !showOriginal)
-                .motion(Motion.ui, fade: true, value: summarising)
-                MessageExtras(message: message, channels: channels, users: users, showCards: summary == nil || showOriginal)
+                // The toggle moves the row in one transaction (below); under Reduce Motion
+                // nothing moves and this is the dissolve that stays.
+                .dissolveWhenReduced(value: inBlock)
+                MessageExtras(message: message, channels: channels, users: users, showCards: !inBlock)
                 if !reactions.isEmpty {
                     ReactionPills(reactions: reactions, me: me, customEmoji: customEmoji, users: users) { toggle($0) }
                 }
                 HStack(spacing: 12) {
-                    if summary != nil {
-                        // The original in full, or back to its summary.
+                    if summary != nil || summarising {
+                        // The original in full, or back to its summary: the row, the link
+                        // previews and the rows under it move together.
                         Button(showOriginal ? "Show summary" : "Show original") {
-                            showOriginal.toggle()
-                            expanded = showOriginal
+                            Motion.run(Motion.move) {
+                                showOriginal.toggle()
+                                expanded = showOriginal
+                            }
                         }
                             .buttonStyle(TertiaryButton(tint: .muted, lift: Soot.surface, font: .system(size: 12, weight: .semibold)))
                             .padding(.leading, -8)
@@ -1474,6 +1529,9 @@ private struct MessageRow: View {
         .onHover { hovering = $0 }
         .onAppear { reactions = message.reactions ?? [] }
         .onChange(of: message.reactions) { _, new in reactions = new ?? [] }
+        // A message opened with "Show more" before a summary was wanted stays open: nothing is
+        // taken from under the reader.
+        .onChange(of: summary != nil || summarising) { _, on in if on, expanded { showOriginal = true } }
         .accessibilityElement(children: .contain)
     }
 

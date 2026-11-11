@@ -49,6 +49,13 @@ extension View {
         modifier(MotionModifier(animation: animation, fade: fade, value: value))
     }
 
+    /// A dissolve that stays when the move around it is off: under Reduce Motion the views under
+    /// this fade on `value` (200 ms) while their layout changes at once. Otherwise it adds
+    /// nothing, and the transaction that moves them (`Motion.run`, a `.motion` above) fades them.
+    func dissolveWhenReduced<V: Equatable>(value: V) -> some View {
+        modifier(DissolveWhenReduced(value: value))
+    }
+
     /// A number that rolls to its new value instead of swapping (counters that refresh).
     func rollingNumber<V: Equatable>(_ value: V) -> some View {
         modifier(RollingNumber(value: value))
@@ -68,6 +75,16 @@ private struct MotionModifier<V: Equatable>: ViewModifier {
 
     func body(content: Content) -> some View {
         content.animation(reduceMotion && !fade ? nil : animation, value: value)
+    }
+}
+
+private struct DissolveWhenReduced<V: Equatable>: ViewModifier {
+    let value: V
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    func body(content: Content) -> some View {
+        // Not `.animation(nil, value:)` when motion is on: that would switch the outer one off.
+        if reduceMotion { content.animation(Motion.ui, value: value) } else { content }
     }
 }
 

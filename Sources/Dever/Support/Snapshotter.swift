@@ -10,7 +10,7 @@ enum Snapshotter {
         ProcessInfo.processInfo.environment["DEVER_SNAPSHOT_DIR"].map { URL(fileURLWithPath: $0, isDirectory: true) }
     }
 
-    static func run(in dir: URL, projects: [Project]) async {
+    static func run(in dir: URL, projects: [Project], app: AppState) async {
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         var screens: [(String, SidebarItem)] = [("overview", .overview)]
         // DEVER_SNAPSHOT_PROJECT=<index> picks another project than the first.
@@ -186,6 +186,36 @@ enum Snapshotter {
                 }
                 window.orderOut(nil)
             }
+        }
+        // DEVER_SNAPSHOT_SUMMARIES=1 (with DEVER_SNAPSHOT_INTELLIGENCE=available): a rail of made-up
+        // long messages whose summaries land 1.5 s apart. summaries-{theme}-waiting.png, six
+        // frames 60 ms apart around the first arrival (-landing-0…5), then -landed.png.
+        if ProcessInfo.processInfo.environment["DEVER_SNAPSHOT_SUMMARIES"] == "1", IntelligenceStatus.snapshotOverride != nil {
+            for (themeName, appearance) in [("dark", NSAppearance.Name.darkAqua), ("light", .aqua)] {
+                SummaryRailScene.play()
+                let host = NSHostingView(rootView: SummaryRailScene().environmentObject(app))
+                host.frame = NSRect(origin: .zero, size: NSSize(width: 420, height: host.fittingSize.height + 120))
+                let window = NSWindow(contentRect: host.frame, styleMask: [.borderless], backing: .buffered, defer: false)
+                window.appearance = NSAppearance(named: appearance)
+                window.contentView = host
+                window.orderFront(nil)
+                func shot(_ name: String) {
+                    guard let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) else { return }
+                    host.cacheDisplay(in: host.bounds, to: rep)
+                    try? rep.representation(using: .png, properties: [:])?.write(to: dir.appendingPathComponent("summaries-\(themeName)-\(name).png"))
+                }
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                shot("waiting")
+                try? await Task.sleep(nanoseconds: 480_000_000)
+                for i in 0..<6 {
+                    shot("landing-\(i)")
+                    try? await Task.sleep(nanoseconds: 60_000_000)
+                }
+                try? await Task.sleep(nanoseconds: 6_000_000_000)
+                shot("landed")
+                window.orderOut(nil)
+            }
+            IntelligenceStore.shared.drop(.messageSummary)
         }
         NSApp.terminate(nil)
     }

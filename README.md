@@ -90,7 +90,8 @@ repository), `DEVER_SNAPSHOT_REPOS=owner/a,owner/b` gives the first project thos
 (nothing is written back). `DEVER_SNAPSHOT_SCROLL_END=1` adds each main screen scrolled to its end (`settings-dark-end.png` shows the Repositories section).
 On-device intelligence: `DEVER_SNAPSHOT_INTELLIGENCE=available|notReady|off|unsupported` runs as if the Mac's model were in
 that state and shows every feature's interface (Settings › Intelligence included); with `DEVER_SNAPSHOT_GALLERY=1` it adds
-`generated-{dark,light}.png`, generated text in each of its states.
+`generated-{dark,light}.png`, generated text in each of its states, and with `DEVER_SNAPSHOT_SUMMARIES=1`
+`summaries-{dark,light}-{waiting,landing-0…5,landed}.png`: a rail of made-up long messages whose summaries land one after the other.
 Nothing is written back in these runs.
 
 ## Onboarding

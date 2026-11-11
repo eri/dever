@@ -78,8 +78,9 @@ Consequences for the design, true whatever the measurements say:
 6. **Raw data first.** A generated text is added above or beside what it describes; the messages, the
    description and the comments stay where they are, readable at once, and never wait for the model.
    One exception, decided on the first real use: in the rail, where a long message is already cut at
-   four lines, its summary takes the place of the cut (5.7). The message shows first and is replaced
-   when the summary is ready; "Show original" brings it back in full; the room always shows messages.
+   four lines, its summary takes the place of the cut (5.7). The block is there from the start, with
+   the first two lines of the message in it until the sentence is written; "Show original" gives the
+   message in full at any moment, written or not; the room always shows messages.
 7. **Skeletons, not spinners,** and a generated text never makes content move when it arrives: its
    place is reserved.
 
@@ -97,7 +98,10 @@ A detected mention uses `@` with the sparkle, where a Slack mention uses `@` alo
 
 A summary that stands in the place of a message (5.7) is the one generated text in a block of its own
 (`SummarisedMessage`: ground tone, hairline edge, the sparkle and the kind of message), so that it is
-never taken for the message.
+never taken for the message. The block holds its place before the summary exists: "Summarising" at its
+head and the start of the message in muted ink, at the height the sentence will take, so that nothing
+in the rail moves when it lands (rule 7). The sparkle breathes, in lime, on the one summary the model
+is writing and nowhere else; VoiceOver hears "Summary, Request, asked of you: …", the caveat as the hint.
 
 ```
 ✦ → Your answer on the front end is awaited before noon.   ↗
@@ -188,8 +192,19 @@ time; a bolder one would speak for the user. Writing on the user's behalf is not
 
 - **Where:** the Slack rail, in the place of each message it would cut ("Show more", over 240
   characters). Not in the room, not for short messages.
-- **When:** by itself, for the messages the rail shows, the newest first, one at a time. The original shows until the summary is ready, with a line under it ("Summarising", the
-  sparkle breathing) so that the swap is expected; then the block takes its place.
+- **When:** by itself, for the messages the rail shows, the newest first, one at a time. The block is
+  in the message's place at once: "Summarising" at its head and the first two lines of the message,
+  muted, where the sentence will be. Only the one being written has a breathing sparkle; the others
+  wait, still. When the sentence lands the excerpt fades out (150 ms) and the sentence and its kind
+  fade in (200 ms) in the same frame: the rail does not move, or by one line when the sentence takes
+  three, and then the rows under it follow on `Motion.move`. Under Reduce Motion the sparkle is still
+  and the swap is a dissolve. The first form (the cut message, a "Summarising" line under it, then
+  the block) moved the rail at every arrival: see [reviews/message-summaries.md](reviews/message-summaries.md).
+- **Given up:** when the model has nothing to show, the block gives the place back to the message,
+  cut at four lines as before.
+- **Never over what is being read:** a message opened with "Show more" before its summary was wanted
+  stays open, with "Show summary" under it. An edited message keeps its old sentence under
+  "Summarising" until the new one lands.
 - **What:** the kind of message at the head of the block and one sentence of at most 20 words that
   stands on its own: who or what it is about, then what is asked, wrong, decided or announced. Names,
   numbers and ticket identifiers kept. Guided generation; the kind is chosen after the sentence.
@@ -201,7 +216,8 @@ time; a bolder one would speak for the user. Writing on the user's behalf is not
   wrong, slow, failing, late or to fix, and no one in particular is asked), **Update** (the rest:
   progress, news, a decision, a welcome). The first three show in ink, Update muted. "Decision", "Warning"
   and "Info" were tried first: the model filed almost everything under Decision, and Info said nothing. Never more than 180 characters: whole sentences are kept
-  as far as they fit. "Show original" opens the message in full, "Show summary" goes back.
+  as far as they fit. "Show original" opens the message in full, "Show summary" goes back: one movement
+  for the row, its link previews and the rows under it.
 - **Folded with it:** the link previews of the message, which come back with the original. Pictures,
   files, reactions and the thread link stay under the summary.
 - **Not shown:** a summary that is not clearly shorter than the message (over 70% of its length), whose
@@ -250,7 +266,8 @@ Pipelines
 - **The invitation:** one quiet line at the top of the Slack rail, the first time only, when the Mac
   could run the model but it is off or not ready: what Dever would do here (shorten long messages) and
   a link to System Settings. Dismissed once, never shown again.
-- **Slow:** skeleton lines in the reserved place; the content under it is usable at once.
+- **Slow:** skeleton lines in the reserved place; the content under it is usable at once. A long
+  message's block holds its place with the start of the message; "Show original" does not wait.
 - **Failing** (refusal, guardrail, context exceeded, rate limit, unsupported language): rule 4. The
   place closes without a message; the next change of the input may try again, the same input does not.
 - Availability is observed (`SystemLanguageModel` is `Observable`): features appear when the model
@@ -273,7 +290,10 @@ Pipelines
 - Snapshots: `DEVER_SNAPSHOT_INTELLIGENCE=available|notReady|off|unsupported` stands in for the system's
   answer and shows every feature's interface, built or not, so captures need neither the model nor the
   network. With `DEVER_SNAPSHOT_GALLERY=1` it also writes `generated-{dark,light}.png`: the marks, a
-  text being written, a written one, the invitation.
+  text being written, a written one, the summary block in each state, the invitation. With
+  `DEVER_SNAPSHOT_SUMMARIES=1` it plays a rail of made-up long messages whose summaries land 1.5 s
+  apart (`SummaryRailScene`) and writes `summaries-{dark,light}-waiting.png`, six frames around the
+  first arrival (`-landing-0…5`) and `-landed.png`.
 - `IntelligenceFeature.built` lists the features that exist. A feature not in it has no switch, no
   interface and no invitation, and Settings › Intelligence is not listed while the set is empty: the
   ground can ship before any feature does.

@@ -126,6 +126,22 @@ final class IntelligenceStoreTests: XCTestCase {
         XCTAssertFalse(store.isWriting(subject))
     }
 
+    func testAPlaceKnowsWhetherItsTextIsPendingOrGivenUp() async {
+        let store = IntelligenceStore()
+        store.isOn = { _ in true }
+        XCTAssertFalse(store.isPending(subject))
+        store.want(subject, version: "1") { GeneratedText(sentences: [.init(text: "one")]) }
+        XCTAssertTrue(store.isPending(subject))
+        await store.settle()
+        XCTAssertFalse(store.isPending(subject))
+        XCTAssertFalse(store.isSilent(subject))
+        store.want(subject, version: "2") { throw IntelligenceError.unavailable }
+        XCTAssertTrue(store.isPending(subject), "pending over the older text too: the block says it is rewritten")
+        await store.settle()
+        XCTAssertTrue(store.isSilent(subject), "silence gives the place back to the message")
+        XCTAssertFalse(store.isPending(subject))
+    }
+
     func testOlderTextStaysWhileTheNewerIsWritten() async {
         let store = IntelligenceStore()
         store.isOn = { _ in true }
@@ -221,6 +237,25 @@ final class MessageSummaryTests: XCTestCase {
         let input = MessageSummary.input(SlackMessage(ts: "3", user: "U1", text: long), users: users, languageCode: { _ in "fr" })
         XCTAssertEqual(input?.author, "Alex")
         XCTAssertEqual(input?.language, "French")
+    }
+
+    func testThePlaceIsHeldOnlyForAMessageThatWillBeSummarised() {
+        let message = SlackMessage(ts: "1", user: "U1", text: long)
+        XCTAssertTrue(MessageSummary.isSummarised(message, users: users))
+        XCTAssertNotNil(MessageSummary.input(message, users: users, languageCode: { _ in "fr" }))
+        // Long as Slack sends it, short once its link is read as its label: no summary, no held place.
+        let link = SlackMessage(ts: "2", user: "U1", text: "Le rapport : <https://example.com/\(String(repeating: "a", count: 260))|ici>")
+        XCTAssertTrue(MessageSummary.isLong(link))
+        XCTAssertFalse(MessageSummary.isSummarised(link, users: users))
+        XCTAssertNil(MessageSummary.input(link, users: users, languageCode: { _ in "fr" }))
+        XCTAssertFalse(MessageSummary.isSummarised(SlackMessage(ts: "3", user: "U1", text: "Ok pour moi."), users: users))
+    }
+
+    func testTheExcerptIsTheMessagesOwnWordsWithoutItsMarks() {
+        let message = SlackMessage(ts: "1", user: "U1", text: "*Rapport* de `QA` pour <@U1>\nsuite\n" + String(repeating: "mot ", count: 200))
+        let excerpt = MessageSummary.excerpt(message, users: users)
+        XCTAssertTrue(excerpt.hasPrefix("Rapport de QA pour @Alex suite mot"))
+        XCTAssertEqual(excerpt.count, 400)
     }
 
     func testAnEditedMessageIsAnotherVersion() throws {

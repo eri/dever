@@ -126,7 +126,7 @@ struct ContentView: View {
             }
         }
         .task {
-            if let dir = Snapshotter.directory { await Snapshotter.run(in: dir, projects: app.projects) }
+            if let dir = Snapshotter.directory { await Snapshotter.run(in: dir, projects: app.projects, app: app) }
         }
         .onReceive(NotificationCenter.default.publisher(for: .showSheet)) { note in
             importSource = nil; showNew = false; githubSheet = false

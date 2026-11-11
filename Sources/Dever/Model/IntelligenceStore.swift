@@ -184,6 +184,12 @@ final class IntelligenceStore: ObservableObject {
         return entry.writing && entry.text == nil
     }
 
+    /// A text is being written, whether or not an older one shows meanwhile.
+    func isPending(_ subject: Subject) -> Bool { entries[subject]?.writing ?? false }
+
+    /// The model was asked and had nothing to say: the place shows what it showed before.
+    func isSilent(_ subject: Subject) -> Bool { entries[subject]?.silent ?? false }
+
     /// Makes sure the subject has a text for `version`, writing one with `write` when it has not.
     /// Does nothing when that version is already written, being written, or was met with silence.
     func want(_ subject: Subject, version: String,
