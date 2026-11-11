@@ -41,7 +41,7 @@ repository.
 | Question | Finding |
 | --- | --- |
 | Is the framework there? | Yes. `FoundationModels` is in the SDK; `SystemLanguageModel`, `LanguageModelSession`, guided generation (`@Generable`), streaming. Introduced in macOS 26.0; `tokenCount(for:)` in 26.4; `contextSize` back-deployed to 26.0. |
-| Is the model usable on this Mac? | **Not yet.** `SystemLanguageModel.default.availability` is `.unavailable(.modelNotReady)`: Apple Intelligence is switched on, the model assets are not downloaded (17 GB free on the disk). `contextSize` reads 0 in that state. |
+| Is the model usable on this Mac? | **Not yet.** `SystemLanguageModel.default.availability` is `.unavailable(.modelNotReady)`: Apple Intelligence is switched on, the model assets are absent. The system logs give the cause: storage is judged sufficient, but Siri's language (French) differs from the Mac's first language (English), which the system reports as `selectedSiriLanguageIneligible`; it then asks for no model asset at all. The public API still answers `modelNotReady`, so that reason does not always mean "downloading". `contextSize` reads 0 in that state. |
 | Languages | `supportedLanguages` lists French (France and Canada), English, German, Spanish, Italian, Portuguese, Dutch, Danish, Norwegian, Swedish, Turkish, Vietnamese, Japanese, Korean, Chinese. `supportsLocale` is true for `fr_FR` and `en_US`. |
 | Context size | **Not measured.** Apple documents 4,096 tokens for the session, instructions and answer included; to be read from `contextSize` once the model is ready. |
 | Speed on a Slack thread | **Not measured.** The probe (a 16-message French thread: plain summary, structured digest, issue draft, reply draft, pipeline log) is ready to run again. |
@@ -216,7 +216,7 @@ Pipelines
 | --- | --- | --- |
 | macOS before 26, or a Mac that can never run it (`deviceNotEligible`) | nothing | the page does not exist |
 | Apple Intelligence off (`appleIntelligenceNotEnabled`) | nothing, plus the invitation once | the reason in one sentence, "Open System Settings ↗" |
-| Model not downloaded yet (`modelNotReady`) | nothing, plus the invitation once | "Apple Intelligence is still downloading its model. Dever will use it when ready." |
+| Model not there (`modelNotReady`: downloading, or held back by the system, for instance when Siri's language and the Mac's differ) | nothing, plus the invitation once | "Apple Intelligence is not ready on this Mac yet. Dever will use it when it is.", "Open System Settings ↗". Never "downloading": the API does not say why. |
 | Available | features on | as section 6 |
 
 - **The invitation:** one quiet line at the top of the Slack rail, the first time only, when the Mac
