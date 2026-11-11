@@ -64,4 +64,4 @@ role in every state to `buttons-dark.png` / `buttons-light.png`.
 - Commit messages carry no tool attribution and no `Co-Authored-By` trailer.
 - Names fetched at runtime (workspaces, channels, repositories, people) are data: never in code, fixtures or docs.
 - `swift test` passes before a push; a change to a store or to how data is matched or derived comes with a test in `Tests/DeverTests`.
-- Build with `./scripts/build-app.sh`; screenshots without the network: see "Screenshots for development" in the README.
+- Build with `./scripts/build-app.sh`; screenshots without the network: see "Screenshots for development" in [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md).
