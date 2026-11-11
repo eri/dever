@@ -128,6 +128,23 @@ enum Snapshotter {
                 capture(to: dir.appendingPathComponent("issue-\(themeName)-end.png"))
             }
         }
+        if ProcessInfo.processInfo.environment["DEVER_SNAPSHOT_RAIL"] == "1" {
+            // The first project tile's tooltip, then its menu, on the Overview, in both modes.
+            for (themeName, appearance) in [("dark", NSAppearance.Name.darkAqua), ("light", .aqua)] {
+                NSApp.appearance = NSAppearance(named: appearance)
+                NotificationCenter.default.post(name: .showScreen, object: SidebarItem.overview)
+                try? await Task.sleep(nanoseconds: 2_000_000_000)
+                NotificationCenter.default.post(name: .showRailTip, object: nil)
+                try? await Task.sleep(nanoseconds: 800_000_000)
+                capture(to: dir.appendingPathComponent("rail-tip-\(themeName).png"))
+                NotificationCenter.default.post(name: .showRailTip, object: "none")
+                NotificationCenter.default.post(name: .showRailMenu, object: nil)
+                try? await Task.sleep(nanoseconds: 800_000_000)
+                capture(to: dir.appendingPathComponent("rail-menu-\(themeName).png"))
+                NotificationCenter.default.post(name: .showRailMenu, object: "none")
+                try? await Task.sleep(nanoseconds: 500_000_000)
+            }
+        }
         if ProcessInfo.processInfo.environment["DEVER_SNAPSHOT_SHEETS"] == "1" {
             // Sheets are captured dark unless DEVER_SNAPSHOT_SHEET_THEME=light.
             let light = ProcessInfo.processInfo.environment["DEVER_SNAPSHOT_SHEET_THEME"] == "light"
@@ -278,4 +295,8 @@ extension Notification.Name {
     static let showOnboarding = Notification.Name("dever.showOnboarding")
     /// Toggles the project page's wide Slack view (snapshots).
     static let toggleSlackWide = Notification.Name("dever.toggleSlackWide")
+    /// Opens the first project tile's menu in the rail, or closes it with "none" (snapshots).
+    static let showRailMenu = Notification.Name("dever.showRailMenu")
+    /// Shows the first project tile's tooltip, or hides it with "none" (snapshots).
+    static let showRailTip = Notification.Name("dever.showRailTip")
 }

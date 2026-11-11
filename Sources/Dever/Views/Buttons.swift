@@ -537,6 +537,17 @@ struct ButtonGallery: View {
                     }
                     .buttonStyle(MenuTriggerButton())
                 }
+                row("Tooltip") { TipCard(title: "AI Tips", detail: "3 unread · 1 for you") }
+                row("Menu row") {
+                    MenuPanelRow(symbol: "pin", title: "Pin to top") {}
+                        .frame(width: 210)
+                        .padding(6).background(Soot.ground, in: RoundedRectangle(cornerRadius: 12))
+                }
+                row("Menu row · destructive") {
+                    MenuPanelRow(symbol: "trash", title: "Remove from Dever…", destructive: true) {}
+                        .frame(width: 210)
+                        .padding(6).background(Soot.ground, in: RoundedRectangle(cornerRadius: 12))
+                }
                 row("Primary segment") {
                     HStack(spacing: 0) {
                         Button {} label: {
@@ -654,5 +665,236 @@ extension View {
         background(GeometryReader { geo in
             Color.clear.preference(key: MenuInsideFramesKey.self, value: [geo.frame(in: .global)])
         })
+    }
+}
+
+// MARK: - Tooltips in the app's own style
+
+/// What a hovered view asks the window to show beside it.
+struct TipRequest {
+    let title: String
+    let detail: String?
+    let anchor: Anchor<CGRect>
+}
+
+private struct TipKey: PreferenceKey {
+    static var defaultValue: TipRequest? = nil
+    static func reduce(value: inout TipRequest?, nextValue: () -> TipRequest?) { value = nextValue() ?? value }
+}
+
+/// A tooltip beside the view after a short hover (300 ms), drawn by the nearest `tipHost()` in
+/// the app's own style instead of the system's slow yellow one. `forced` shows it at once
+/// (snapshots). The view keeps its accessible name: the tip is for the pointer.
+private struct SootTip: ViewModifier {
+    let title: String
+    let detail: String?
+    let forced: Bool
+    @State private var hovering = false
+    @State private var shown = false
+    @State private var delay: Task<Void, Never>?
+
+    func body(content: Content) -> some View {
+        content
+            .onHover { inside in
+                hovering = inside
+                delay?.cancel()
+                if inside {
+                    delay = Task { @MainActor in
+                        try? await Task.sleep(nanoseconds: 300_000_000)
+                        if !Task.isCancelled, hovering { shown = true }
+                    }
+                } else {
+                    shown = false
+                }
+            }
+            .onDisappear { delay?.cancel(); shown = false }
+            .anchorPreference(key: TipKey.self, value: .bounds) { anchor in
+                shown || forced ? TipRequest(title: title, detail: detail, anchor: anchor) : nil
+            }
+    }
+}
+
+/// The tip itself: a surface card with a title and one quiet line.
+struct TipCard: View {
+    let title: String
+    var detail: String? = nil
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(title).font(.system(size: 13, weight: .medium)).foregroundStyle(Soot.ink)
+            if let detail { Text(detail).font(.system(size: 12)).foregroundStyle(Soot.muted) }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
+        .background(Soot.surface, in: RoundedRectangle(cornerRadius: Soot.radius))
+        .overlay(RoundedRectangle(cornerRadius: Soot.radius).strokeBorder(Soot.line))
+        .shadow(color: .black.opacity(0.22), radius: 12, y: 4)
+        .fixedSize()
+        .accessibilityHidden(true)
+    }
+}
+
+private struct TipHost: ViewModifier {
+    func body(content: Content) -> some View {
+        content.overlayPreferenceValue(TipKey.self) { request in
+            GeometryReader { geo in
+                if let request {
+                    let bounds = geo[request.anchor]
+                    // Beside the view, centred on it; the card may be taller than the view.
+                    TipCard(title: request.title, detail: request.detail)
+                        .frame(height: bounds.height)
+                        .offset(x: bounds.maxX + 8, y: bounds.minY)
+                        .transition(.opacity)
+                }
+            }
+            .motion(Motion.ui, fade: true, value: request?.title)
+            .allowsHitTesting(false)
+        }
+    }
+}
+
+extension View {
+    /// A tooltip in the app's style, shown beside the view by the enclosing `tipHost()`.
+    func sootTip(_ title: String, detail: String? = nil, forced: Bool = false) -> some View {
+        modifier(SootTip(title: title, detail: detail, forced: forced))
+    }
+
+    /// Draws the tips its descendants ask for, beside them, over everything in this view.
+    func tipHost() -> some View { modifier(TipHost()) }
+}
+
+// MARK: - Right click
+
+/// Runs `action` on a right click (or a control-click) inside the view, the way a context
+/// menu opens; the click goes no further.
+private struct RightClick: ViewModifier {
+    let action: () -> Void
+    @State private var frame: CGRect = .zero
+    @State private var monitor: Any?
+
+    func body(content: Content) -> some View {
+        content
+            .background(GeometryReader { geo in
+                Color.clear.onAppear { frame = geo.frame(in: .global) }
+                    .onChange(of: geo.frame(in: .global)) { _, new in frame = new }
+            })
+            .onAppear(perform: install)
+            .onDisappear(perform: remove)
+    }
+
+    private func install() {
+        guard monitor == nil else { return }
+        monitor = NSEvent.addLocalMonitorForEvents(matching: [.rightMouseDown, .leftMouseDown]) { event in
+            guard event.type == .rightMouseDown || event.modifierFlags.contains(.control),
+                  let window = event.window, window.isKeyWindow, let content = window.contentView else { return event }
+            let local = content.convert(event.locationInWindow, from: nil)
+            let point = CGPoint(x: local.x, y: content.isFlipped ? local.y : content.bounds.height - local.y)
+            guard frame.contains(point) else { return event }
+            DispatchQueue.main.async(execute: action)
+            return nil
+        }
+    }
+
+    private func remove() {
+        if let monitor { NSEvent.removeMonitor(monitor) }
+        monitor = nil
+    }
+}
+
+extension View {
+    func onRightClick(perform action: @escaping () -> Void) -> some View { modifier(RightClick(action: action)) }
+}
+
+// MARK: - Menu panel
+
+/// The frame of an in-window menu (the Add project menu, a tile's context menu): ground,
+/// a hairline, a soft shadow. Pair with `closesOnOutsideClick` / `keepsMenuOpen`.
+struct MenuPanel<Content: View>: View {
+    var width: CGFloat = 260
+    var label: String
+    @ViewBuilder var content: () -> Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) { content() }
+            .padding(6)
+            .frame(width: width)
+            .background(Soot.ground, in: RoundedRectangle(cornerRadius: 12))
+            .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Soot.line))
+            .shadow(color: .black.opacity(0.28), radius: 18, y: 8)
+            .keepsMenuOpen()
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel(label)
+    }
+}
+
+/// A heading inside a menu panel: what the menu is about, in two short lines.
+struct MenuPanelHead: View {
+    let title: String
+    var detail: String? = nil
+    var body: some View {
+        VStack(alignment: .leading, spacing: 1) {
+            Text(title).font(.system(size: 13, weight: .semibold)).foregroundStyle(Soot.ink).lineLimit(1)
+            if let detail { Text(detail).font(.system(size: 12)).foregroundStyle(Soot.muted).lineLimit(1) }
+        }
+        .padding(.horizontal, 10)
+        .padding(.top, 6)
+        .padding(.bottom, 6)
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isHeader)
+    }
+}
+
+/// A hairline between groups of a menu panel.
+struct MenuPanelDivider: View {
+    var body: some View { Rectangle().fill(Soot.line).frame(height: 1).padding(.horizontal, 6).padding(.vertical, 3) }
+}
+
+/// One action of a menu panel: a glyph (or a tool's logo), a title, an optional quiet line.
+/// `url` makes it a link that opens outside (↗); `destructive` paints it in the negative tone.
+struct MenuPanelRow: View {
+    var symbol: String? = nil
+    var service: ServiceKind? = nil
+    let title: String
+    var detail: String? = nil
+    var url: URL? = nil
+    var destructive = false
+    var action: () -> Void = {}
+
+    var body: some View {
+        if let url {
+            Link(destination: url) { face }
+                .buttonStyle(RowButton(lift: .surface, radius: Soot.radius))
+                .accessibilityLabel(detail.map { "\(title). \($0)" } ?? title)
+                .accessibilityHint("Opens outside Dever")
+        } else {
+            Button(action: action) { face }
+                .buttonStyle(RowButton(lift: .surface, radius: Soot.radius))
+                .accessibilityLabel(detail.map { "\(title). \($0)" } ?? title)
+        }
+    }
+
+    private var tint: Color { destructive ? Theme.pillNegative.ink : Soot.ink }
+
+    private var face: some View {
+        HStack(spacing: 10) {
+            Group {
+                if let service { BrandLogo(service: service, size: 13).foregroundStyle(tint) }
+                else if let symbol { Image(systemName: symbol).font(.system(size: 12, weight: .semibold)).foregroundStyle(tint) }
+            }
+            .frame(width: 26, height: 26)
+            .background(Soot.surface, in: RoundedRectangle(cornerRadius: 7))
+            .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(title).font(.system(size: 13, weight: .medium)).foregroundStyle(tint).lineLimit(1)
+                if let detail { Text(detail).font(.system(size: 11)).foregroundStyle(Soot.muted).lineLimit(1) }
+            }
+            Spacer(minLength: 8)
+            if url != nil {
+                Image(systemName: "arrow.up.right").font(.system(size: 11, weight: .semibold)).foregroundStyle(Soot.muted)
+                    .accessibilityHidden(true)
+            }
+        }
+        .padding(.horizontal, 8)
+        .frame(height: detail == nil ? 36 : 44)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }

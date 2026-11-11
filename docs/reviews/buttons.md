@@ -83,11 +83,17 @@ has N H P D F ✋ through its style unless noted.
 ### Views/ContentView.swift (the rail)
 | Line | Element | Before | Role now |
 |---|---|---|---|
-| 184 | Overview tile | PressButton + FocusOutline: N P F, selected | Icon (`fill: nil`, radius 10) + hover tone |
-| 205 | Project tiles (initials) | PressButton + FocusOutline: N P F, selected, context menu | Icon (`fill: nil`, radius 12) |
-| 238 | User / Settings tile | PressButton + FocusOutline | Icon (`fill: nil`, circle) |
-| 259 | "+" add project | PressButton, no focus ring | Icon (`fill: nil`, radius 10) |
-| 139–143, 231–233 | confirmation dialog and context-menu items | system | system (unchanged) |
+| — | Overview tile | PressButton + FocusOutline: N P F, selected | Icon (`fill: nil`, radius 10) + hover tone; `sootTip("Overview")` |
+| — | Project tiles (initials) | PressButton + FocusOutline: N P F, selected, system context menu | Icon (`fill: nil`, radius 12); `sootTip(name, detail: health · unread · for you)`; right click / control click / ⌥↩ open the in-window `RailMenu` (`MenuPanel`); VoiceOver gets Edit, Pin/Unpin and Remove as actions on the tile |
+| — | `RailMenu` rows: Open, Edit project, Pin/Unpin, Open in Slack ↗, Open in Linear ↗, Pull requests on GitHub ↗, Remove from Dever… | system `contextMenu` (Edit links…, Remove from Dever…) | `MenuPanelRow` (row role, surface lift; links carry ↗; Remove in the negative tone, same confirmation dialog as the editor's Remove project) |
+| — | User / Settings tile | PressButton + FocusOutline | Icon (`fill: nil`, circle); `sootTip(name, detail: accounts hint)` |
+| — | "+" add project | PressButton, no focus ring | Icon (`fill: nil`, radius 10); `sootTip("Add a project", "⌘N")` |
+| — | Dever mark | `.help` | `sootTip("Dever", detail: workspace)` (not a button) |
+| — | confirmation dialog | system | system (unchanged) |
+
+Tooltips: `sootTip` shows the app's own `TipCard` beside the view after 300 ms, drawn by the
+`tipHost()` on the main view so the rail's scroll clip never cuts it; the gallery shows the card.
+The rail capture: `DEVER_SNAPSHOT_RAIL=1` → `rail-tip-{dark,light}.png`, `rail-menu-{dark,light}.png`.
 
 ### Views/OverviewView.swift
 | Line | Element | Before | Role now |

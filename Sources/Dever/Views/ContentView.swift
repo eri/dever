@@ -22,6 +22,12 @@ struct ContentView: View {
     @AppStorage(Appearance.key) private var appearance = Appearance.system.rawValue
     @State private var showOnboarding = false
     @State private var githubSheet = false
+    /// The project whose rail menu is open (a right click, a control click, ⌥↩ on its tile).
+    @State private var menuProject: Project?
+    /// Snapshots: the tile whose tooltip is shown without a pointer.
+    @State private var forcedTip: UUID?
+    /// The open menu's height, to keep it inside the window when its tile sits low.
+    @State private var menuHeight: CGFloat = 0
 
     var body: some View {
         Group {
@@ -98,7 +104,20 @@ struct ContentView: View {
         }
         .onChange(of: selection) { _, value in
             path = NavigationPath()
+            menuProject = nil
             if case .project(let id) = value { Preferences.lastProjectID = id }
+        }
+        // The rail's tooltips and the tile menu are drawn here, over the whole window, so the
+        // rail's own clip (its scroll view) never cuts them.
+        .tipHost()
+        .overlayPreferenceValue(RailMenuKey.self) { railMenuOverlay($0) }
+        .closesOnOutsideClick(menuProject != nil) { Motion.run(Motion.ui, fade: true) { menuProject = nil } }
+        .onReceive(NotificationCenter.default.publisher(for: .showRailMenu)) { note in
+            // Snapshots: opens the first project's menu (or closes it with "none").
+            menuProject = (note.object as? String) == "none" ? nil : app.projects.first
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .showRailTip)) { note in
+            forcedTip = (note.object as? String) == "none" ? nil : app.projects.first?.id
         }
         .onReceive(NotificationCenter.default.publisher(for: .openIssue)) { note in
             if let route = note.object as? IssueRoute { path.append(route) }
@@ -166,6 +185,26 @@ struct ContentView: View {
         }
     }
 
+    /// The open tile's menu, hung beside the tile and kept inside the window.
+    @ViewBuilder
+    private func railMenuOverlay(_ anchor: Anchor<CGRect>?) -> some View {
+        GeometryReader { geo in
+            if let anchor, let project = menuProject {
+                let bounds = geo[anchor]
+                RailMenu(project: project, isCurrent: selection == .project(project.id),
+                         unread: store.snapshots[project.id]?.slack?.unread,
+                         open: { selection = .project(project.id); menuProject = nil },
+                         edit: { menuProject = nil; editing = project },
+                         remove: { menuProject = nil; removing = project },
+                         close: { menuProject = nil })
+                         .background(GeometryReader { m in Color.clear.onAppear { menuHeight = m.size.height } })
+                         .offset(x: bounds.maxX + 8, y: min(bounds.minY, max(12, geo.size.height - menuHeight - 12)))
+                         .transition(Motion.pop)
+            }
+        }
+        .motion(Motion.ui, value: menuProject?.id)
+    }
+
     // MARK: Rail
 
     /// A slim rail instead of a sidebar: the projects are a handful of tiles, so they don't
@@ -175,7 +214,8 @@ struct ContentView: View {
             DeverMark().frame(width: 22, height: 22)
                 .padding(.top, 12)
                 .padding(.bottom, 14)
-                .help("Dever · \(scope)")
+                .sootTip("Dever", detail: scope)
+                .accessibilityLabel("Dever, \(scope)")
             railButton(symbol: "square.grid.2x2", label: "Overview", item: .overview)
             Rectangle().fill(Theme.border).frame(width: 28, height: 1).padding(.vertical, 8)
             ScrollView(showsIndicators: false) {
@@ -210,7 +250,7 @@ struct ContentView: View {
                 .motion(Motion.quick, fade: true, value: on)
         }
         .buttonStyle(IconButton(fill: nil, radius: 10))
-        .help(label)
+        .sootTip(label)
         .accessibilityLabel(label)
         .accessibilityAddTraits(on ? .isSelected : [])
     }
@@ -218,10 +258,30 @@ struct ContentView: View {
     /// A project as its initials on its own tint, with a dot when it needs attention.
     private func projectTile(_ p: Project) -> some View {
         let status = p.status(store.snapshots[p.id])
-        let item = SidebarItem.project(p.id)
-        let on = selection == item
+        let on = selection == .project(p.id)
+        let detail = tileDetail(p, status)
+        return tileButton(p, status: status, on: on)
+            .sootTip(p.name, detail: detail, forced: forcedTip == p.id)
+            // The menu: a right click or a control click on the tile, ⌥↩ while it has the focus;
+            // VoiceOver gets the same actions on the tile itself.
+            .onRightClick { Motion.run(Motion.ui) { menuProject = p } }
+            .onKeyPress(phases: .down) { press in
+                guard press.key == .return, press.modifiers.contains(.option) else { return .ignored }
+                Motion.run(Motion.ui) { menuProject = p }
+                return .handled
+            }
+            .anchorPreference(key: RailMenuKey.self, value: .bounds) { menuProject?.id == p.id ? $0 : nil }
+            .accessibilityLabel("\(p.name), \(detail)")
+            .accessibilityHint("Opens the project. Option Return for its menu")
+            .accessibilityAddTraits(on ? .isSelected : [])
+            .accessibilityAction(named: "Edit project") { editing = p }
+            .accessibilityAction(named: p.favorite == true ? "Unpin from top" : "Pin to top") { app.setFavorite(p, p.favorite != true) }
+            .accessibilityAction(named: "Remove from Dever") { removing = p }
+    }
+
+    private func tileButton(_ p: Project, status: ProjectStatus, on: Bool) -> some View {
         let initials = p.name.split(separator: " ").prefix(2).compactMap(\.first).map(String.init).joined().uppercased()
-        return Button { selection = item } label: {
+        return Button { selection = .project(p.id) } label: {
             Text(initials.isEmpty ? "?" : initials)
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(Color.black.opacity(0.75))
@@ -240,15 +300,8 @@ struct ContentView: View {
                 .motion(Motion.quick, fade: true, value: on)
         }
         .buttonStyle(IconButton(fill: nil, radius: 12))
-        .help("\(p.name) — \(status.label)")
-        .accessibilityLabel("\(p.name), \(status.label)")
-        .accessibilityAddTraits(on ? .isSelected : [])
-        .contextMenu {
-            Button("Edit links…") { editing = p }
-            Divider()
-            Button("Remove from Dever…", role: .destructive) { removing = p }
+        .keepsMenuOpen()
         }
-    }
 
     /// You, opening Settings; a dot while an account still needs connecting.
     private var userTile: some View {
@@ -269,7 +322,7 @@ struct ContentView: View {
                 .motion(Motion.quick, fade: true, value: on)
         }
         .buttonStyle(IconButton(fill: nil))
-        .help(accountsHint.map { "Settings — \($0)" } ?? "Settings")
+        .sootTip(name, detail: accountsHint ?? "Settings")
         .accessibilityLabel(accountsHint.map { "Settings, \($0)" } ?? "Settings")
         .accessibilityAddTraits(on ? .isSelected : [])
     }
@@ -280,8 +333,22 @@ struct ContentView: View {
         }
         .buttonStyle(IconButton(fill: nil, radius: 10))
         .keyboardShortcut("n")
-        .help("Add a project")
+        .sootTip("Add a project", detail: "⌘N")
         .accessibilityLabel("Add project")
+    }
+
+    /// The second line of a tile's tooltip: its health, then what waits in Slack when the store knows.
+    private func tileDetail(_ p: Project, _ status: ProjectStatus) -> String {
+        var parts = [status.label]
+        if let snapshot = store.snapshots[p.id] {
+            if let slack = snapshot.slack, let unread = slack.unread, unread > 0 {
+                parts.append("\(slack.unreadCapped ? "200+" : "\(unread)") unread")
+            }
+            // The same things the Overview lists under the project.
+            let waiting = snapshot.waiting(channel: p.slack?.name, channelID: p.slack?.id).count
+            if waiting > 0 { parts.append("\(waiting) for you") }
+        }
+        return parts.joined(separator: " · ")
     }
 
     private var missingAccounts: Int {
@@ -339,5 +406,61 @@ private extension View {
         } else {
             self
         }
+    }
+}
+
+/// Where the open tile sits, so the menu can hang beside it.
+private struct RailMenuKey: PreferenceKey {
+    static var defaultValue: Anchor<CGRect>? = nil
+    static func reduce(value: inout Anchor<CGRect>?, nextValue: () -> Anchor<CGRect>?) { value = nextValue() ?? value }
+}
+
+/// A project tile's menu, in the app's own panel: open, edit, pin, the tools it links, and
+/// last, in the negative tone, removing it from Dever (the confirmation stays the same).
+private struct RailMenu: View {
+    @EnvironmentObject var app: AppState
+    let project: Project
+    let isCurrent: Bool
+    let unread: Int?
+    let open: () -> Void
+    let edit: () -> Void
+    let remove: () -> Void
+    let close: () -> Void
+
+    private var slackURL: URL? {
+        guard let channel = project.slack, let slack = app.slack else { return nil }
+        return URL(string: "https://\(slack.domain).slack.com/archives/\(channel.id)")
+    }
+    private var linearURL: URL? { project.linear.flatMap { URL(string: $0.url) } }
+    private var githubURL: URL? {
+        let repos = app.repositories(for: project)
+        if repos.count == 1, let repo = repos.first { return URL(string: "https://github.com/\(repo)/pulls") }
+        if repos.count > 1 {
+            let query = "is:open is:pr " + repos.map { "repo:\($0)" }.joined(separator: " ")
+            return URL(string: "https://github.com/pulls?q=" + (query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""))
+        }
+        return nil
+    }
+
+    var body: some View {
+        MenuPanel(label: "\(project.name) menu") {
+            MenuPanelHead(title: project.name, detail: unread.map { $0 > 0 ? "\($0) unread in Slack" : "Nothing unread" })
+            if !isCurrent { MenuPanelRow(symbol: "arrow.right", title: "Open", action: open) }
+            MenuPanelRow(symbol: "slider.horizontal.3", title: "Edit project", action: edit)
+            MenuPanelRow(symbol: project.favorite == true ? "pin.slash" : "pin",
+                         title: project.favorite == true ? "Unpin from top" : "Pin to top") {
+                app.setFavorite(project, project.favorite != true)
+                close()
+            }
+            if slackURL != nil || linearURL != nil || githubURL != nil {
+                MenuPanelDivider()
+                if let url = slackURL { MenuPanelRow(service: .slack, title: "Open in Slack", url: url) }
+                if let url = linearURL { MenuPanelRow(service: .linear, title: "Open in Linear", url: url) }
+                if let url = githubURL { MenuPanelRow(service: .github, title: "Pull requests on GitHub", url: url) }
+            }
+            MenuPanelDivider()
+            MenuPanelRow(symbol: "trash", title: "Remove from Dever…", destructive: true, action: remove)
+        }
+        .onExitCommand(perform: close)
     }
 }

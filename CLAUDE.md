@@ -47,6 +47,8 @@ the hover tone, the press, the lime focus ring, the pointing hand, the disabled 
 | a row or tile that opens something | `RowButton(lift: .ground / .surface / .tone / .none)` |
 | a trigger that opens a menu or a popover | `MenuTriggerButton(open:)`; a SwiftUI `Menu` gets `.menuStyle(.button)` + this style + `.menuIndicator(.hidden)` |
 | an action that removes something, outside a system dialog | `DestructiveButton()` |
+| a tooltip on a glyph or a tile | `.sootTip(title, detail:)` under a `tipHost()` (the app's own card, 300 ms), never `.help` alone on something custom |
+| a menu that opens inside the window (Add project ⌄, a tile's right click) | `MenuPanel` + `MenuPanelHead` / `MenuPanelRow` / `MenuPanelDivider`, `closesOnOutsideClick`, `onRightClick`; never `.contextMenu` or a system `Menu` for the app's own actions |
 
 Never write, on a button or a link: `.buttonStyle(.plain)`, `PressButton()`, `.handCursor()`,
 `.onHover` to tint it, `FocusOutline`, or a font and a colour that stand in for a role. If no
