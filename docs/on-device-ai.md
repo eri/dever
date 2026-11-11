@@ -156,22 +156,13 @@ for urgency. Dever still has no issue creation.
 
 ### 5.4 Draft a reply
 
-- **Where:** the thread composer, in the thread pane and under a message of the rail. A sparkle button
-  beside "Send", shown when the field is empty and the last word of the thread is not the user's.
+- **Where:** the thread composer. A sparkle button, shown when the field is empty.
 - **What:** one click writes a reply in the field from the thread alone, in the thread's language and
-  tone: one or two short sentences. "Writing a draft" shows in the field meanwhile; if the user has
-  started to type before it lands, the draft is dropped.
-- **A draft, visibly:** "✦ Draft" sits beside "Send" until the first change; from then the text is the
-  user's. It is inserted as if typed, so ⌘Z takes it out. Nothing is sent before Return.
-- **Commits to nothing:** the instructions forbid any date, deadline, fact or decision the thread does
-  not hold; asked to do something, the draft says the user will look and come back. The price is a
-  bland draft: to "what do you think?" it answers the same, the model is not given an opinion to hold.
-- **Not put in the field:** an empty answer, one longer than 400 characters, a reply signed with a name
-  (the name is cut when it only prefixes the reply).
-- **Too long:** the first message of the thread and the newest replies that fit.
-- **Reads:** the thread already shown (`SlackStore` threads). Nothing kept: a draft is written on a
-  click and lives in the field. No network request.
-- **Measured:** 1.1 to 3.0 s.
+  tone. The field shows "✦ draft" until the first edit; ⌘Z empties it. Nothing is sent before Return.
+- **Known risk, accepted:** the model takes a position for the user ("yes, I'll look at it"). The draft
+  must stay visibly a draft, and the prompt keeps it short and commits to nothing the thread does not
+  support.
+- **Too long:** the parent and the newest replies that fit.
 
 ### 5.5 Issue summary
 
@@ -299,7 +290,7 @@ Pipelines
 | 0. Ground | **Done.** `Intelligence` service and availability gating, `IntelligenceStore`, the mark and the generated block, Settings › Intelligence, the one-time invitation, snapshot states, tests, measurements (section 2). | |
 | 1. Slack catch-up | **Dropped** after four forms on real channels (5.1). | 0 |
 | 1b. Long messages | **Built:** 5.7, with kinds and the arrow for what is asked of the user, tuned on real channels. | 0 |
-| 2. Writing | Issue from a message: **dropped** (5.3). Reply draft: **built** (5.4). **Left:** the onboarding line "never posts on your behalf". | 0 |
+| 2. Writing | Issue from a message: **dropped** (5.3). Reply draft (5.4): next. | 0 |
 | 3. Issue summary | 5.5. | 0 |
 | 4. Pipeline failure | job and log reads, then 5.6. | 0 |
 

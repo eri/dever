@@ -36,8 +36,6 @@ protocol LanguageModel: Sendable {
     func respond(instructions: String, prompt: String, maximumTokens: Int?) async throws -> String
     /// One message shortened: what kind of message it is, and its point in a sentence.
     func summarise(instructions: String, prompt: String) async throws -> MessageSummaryAnswer
-    /// The reply the user could send in a thread.
-    func replyDraft(instructions: String, prompt: String) async throws -> String
 }
 
 /// What the model says of one message.
@@ -56,13 +54,6 @@ private struct MessageSummaryShape {
     @Guide(description: "Request: the author asks someone to do, send, check, fix or decide something. Question: the author asks for an answer or an opinion. Problem: a bug, a failure, a delay or a risk is reported and no one in particular is asked. Update: only when nothing is asked and no bug, failure, delay or risk is reported, such as progress, news, a decision, a welcome",
            .anyOf(["Request", "Question", "Problem", "Update"]))
     var kind: String
-}
-
-@available(macOS 26.0, *)
-@Generable
-private struct ReplyDraftShape {
-    @Guide(description: "The reply, as the reader would write it themselves: one or two short sentences, first person, no greeting, no name, no promise the thread does not support")
-    var reply: String
 }
 
 #endif
@@ -126,18 +117,6 @@ struct SystemLanguageModelClient: LanguageModel {
             let shape = try await session.respond(to: prompt, generating: MessageSummaryShape.self,
                                                   options: GenerationOptions(maximumResponseTokens: 100)).content
             return MessageSummaryAnswer(kind: shape.kind, summary: shape.summary)
-        }
-        #endif
-        throw IntelligenceError.unavailable
-    }
-
-    func replyDraft(instructions: String, prompt: String) async throws -> String {
-        #if canImport(FoundationModels)
-        if #available(macOS 26.0, *) {
-            guard SystemLanguageModel.default.availability == .available else { throw IntelligenceError.unavailable }
-            let session = LanguageModelSession(instructions: instructions)
-            return try await session.respond(to: prompt, generating: ReplyDraftShape.self,
-                                             options: GenerationOptions(maximumResponseTokens: 150)).content.reply
         }
         #endif
         throw IntelligenceError.unavailable

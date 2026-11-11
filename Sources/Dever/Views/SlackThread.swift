@@ -1239,8 +1239,7 @@ private struct ThreadPane: View {
             .transition(.opacity)
             .motion(Motion.ui, fade: true, value: parent.ts)
             }
-            ReplyComposer(sending: sending, autofocus: false, fill: Soot.surface, send: { await send($0) }, cancel: {},
-                          draft: ReplyDraft.offer(parent: parent, replies: replies ?? [], users: users, me: app.slack?.userID))
+            ReplyComposer(sending: sending, autofocus: false, fill: Soot.surface, send: { await send($0) }, cancel: {})
                 .id(parent.ts)
         }
         .padding(18)
@@ -1445,8 +1444,7 @@ private struct MessageRow: View {
                     ThreadReplies(replies: thread, failed: threadFailed, users: users, channels: channels, customEmoji: customEmoji, actions: actions)
                 }
                 if replying, openThread == nil {
-                    ReplyComposer(sending: sending, send: { await send($0) }, cancel: { replying = false },
-                                  draft: ReplyDraft.offer(parent: message, replies: thread ?? [], users: users, me: me))
+                    ReplyComposer(sending: sending, send: { await send($0) }, cancel: { replying = false })
                 }
             }
         }
