@@ -107,10 +107,6 @@ struct DigestBlock: View {
                         .help("Show the message")
                         .transition(.opacity)
                 }
-                if digest.items.isEmpty, digest.pending > 0 {
-                    Skeleton(height: 12).frame(height: 20)
-                    Skeleton(width: 180, height: 12).frame(height: 20)
-                }
                 foot
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -139,15 +135,12 @@ struct DigestBlock: View {
 
     @ViewBuilder
     private var foot: some View {
-        let parts = [digest.more > 0 && !digest.items.isEmpty ? "+ \(digest.more) more" : nil,
-                     digest.items.isEmpty && digest.pending == 0 ? "Nothing open in \(digest.more) unread messages" : nil,
-                     digest.covers.map(CatchUp.coverage)].compactMap { $0 }
-        if !parts.isEmpty || (digest.pending > 0 && !digest.items.isEmpty) {
+        if digest.covers != nil || digest.pending > 0 {
             HStack(spacing: 10) {
-                if !parts.isEmpty {
-                    Text(parts.joined(separator: " · ")).font(.system(size: 11)).foregroundStyle(Soot.muted)
+                if let covers = digest.covers {
+                    Text(CatchUp.coverage(covers)).font(.system(size: 11)).foregroundStyle(Soot.muted)
                 }
-                if digest.pending > 0, !digest.items.isEmpty { SummarisingLine() }
+                if digest.pending > 0 { SummarisingLine() }
             }
             .padding(.top, 4)
         }

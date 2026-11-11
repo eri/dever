@@ -873,7 +873,7 @@ struct ProjectDetailView: View {
     private var digest: CatchUp.Digest? {
         guard intelligenceStatus.offers(.catchUp) else { return nil }
         return CatchUp.digest(messages: messages, lastRead: lastRead, hasEarlier: hasEarlier, firstUnread: countedFirstUnread,
-                              users: users, me: app.slack?.userID, summary: { messageSummary($0) })
+                              shown: Set(railPlan.messages.map(\.ts)), users: users, me: app.slack?.userID, summary: { messageSummary($0) })
     }
 
     /// The oldest unread message the Overview counted, unless it stopped counting (200 and more).

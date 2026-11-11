@@ -269,8 +269,18 @@ final class CatchUpTests: XCTestCase {
         XCTAssertTrue(digest.items.isEmpty)
         XCTAssertEqual(digest.pending, 3)
         XCTAssertEqual(digest.more, 5)
-        XCTAssertFalse(digest.isEmpty, "the block shows its skeleton")
-        XCTAssertTrue(try XCTUnwrap(self.digest(messages(8))).items.isEmpty)
+        XCTAssertTrue(digest.isEmpty, "nothing to point at yet: no block")
+    }
+
+    func testWhatTheRailShowsIsNotListedAgainUnlessItIsForTheReader() throws {
+        var list = messages(10)
+        list[0].text = "Sam, peux-tu relire la PR ?"             // message 10, shown in the rail, for the reader
+        let shown: Set<String> = ["10.000000", "9.000000", "8.000000"]
+        let digest = try XCTUnwrap(CatchUp.digest(messages: list, lastRead: "0.500000", hasEarlier: false, shown: shown,
+                                                  users: users, me: "U2") { m in
+            ["10.000000", "9.000000", "2.000000"].contains(m.ts) ? self.written(m.ts == "10.000000" ? "Request" : "Problem") : self.written("Update")
+        })
+        XCTAssertEqual(digest.items.map(\.ts), ["10.000000", "2.000000"], "message 9 is on screen under the block")
     }
 
     func testUnreadOlderThanWhatIsLoadedIsSaid() throws {

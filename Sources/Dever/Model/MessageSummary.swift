@@ -55,7 +55,8 @@ enum MessageSummary {
         You shorten one message from a team chat for someone who has not read the channel.
         Give its point in one full sentence of at most 20 words, in \(input.language) whatever language the message is in, then say what kind of message it is. The sentence must stand on its own: name who or what it is about (the feature, the ticket, the person), then what is asked, wrong, decided or announced.
         Do not list what the message lists: give the outcome. Keep names, numbers and ticket identifiers exactly as written. Use only what the message says, and do not make a statement stronger than the message does. No greeting, no opinion, no "this message", no formatting marks.
-        The kind says what the message expects of its readers. Request: someone is asked to do, send, check, fix or decide something. Question: an answer or an opinion is asked for. Problem: a bug, a failure, a delay or a risk is reported, without asking anyone in particular. Update: the rest, such as progress, news, a decision, a welcome. When the message says something is wrong, slow, failing, late or to fix, it is a Problem, never an Update.
+        The kind says what the message expects of its readers. Request: someone is asked to do, send, check, fix or decide something. Question: an answer or an opinion is asked for. Problem: a bug, a failure, a delay or a risk is reported, without asking anyone in particular. Update: the rest, such as progress, news, a decision, a welcome. A reported bug, failure, delay or risk is a Problem, never an Update.
+        The sentence says what the message says, in its own terms: name the bug, the delay or the request itself, never a general phrase about it.
         """
     }
 

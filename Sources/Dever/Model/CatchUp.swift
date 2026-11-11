@@ -1,8 +1,8 @@
 import Foundation
 import os
 
-// The Slack catch-up (docs/on-device-ai.md, 5.1): above the unread messages of the rail, the open
-// matters among them. Nothing here is written by the model: the list is put together from the
+// The Slack catch-up (docs/on-device-ai.md, 5.1): above the unread messages of the rail, what is
+// asked of the reader and the open matters the rail does not show. Nothing here is written by the model: the list is put together from the
 // summaries of the messages (5.7), which the model writes well one at a time. Asked to sum up a
 // whole channel it was vague or wrong, however it was asked.
 
@@ -42,14 +42,19 @@ enum CatchUp {
         var pending: Int
         /// Unread messages older than what is loaded exist: the list says what it covers.
         var covers: Int?
-        var isEmpty: Bool { items.isEmpty && pending == 0 }
+        /// Nothing to point at: no block, rather than one that says so.
+        var isEmpty: Bool { items.isEmpty }
     }
 
     /// The catch-up of a channel, or nil when there is none to show: no read cursor, or fewer
     /// unread messages than the threshold. `messages` is newest first. `firstUnread` is the oldest
     /// unread message the Overview counted, when it knows: with it, a page whose every loaded
     /// message is unread can still tell that nothing older is.
+    /// `shown` are the messages the rail displays under the block, each with its own summary: an
+    /// open matter among them is listed only when it is for the reader, the list would otherwise
+    /// say twice what is on screen.
     static func digest(messages: [SlackMessage], lastRead: String?, hasEarlier: Bool, firstUnread: String? = nil,
+                       shown: Set<String> = [],
                        users: [String: SlackUser], me: String?, summary: (SlackMessage) -> Summary) -> Digest? {
         guard let lastRead, let oldest = messages.last else { return nil }
         let unread = messages.filter { !SlackTS.isAtOrBefore($0.ts, lastRead) && !$0.isSystem && !($0.text ?? "").isEmpty }
@@ -73,7 +78,7 @@ enum CatchUp {
             }
         }
         // The reader's first, then the others, each group newest first (as `unread` is).
-        let items = Array((open.filter(\.forYou) + open.filter { !$0.forYou }).prefix(longest))
+        let items = Array((open.filter(\.forYou) + open.filter { !$0.forYou && !shown.contains($0.ts) }).prefix(longest))
         return Digest(items: items, more: unread.count - items.count - pending, pending: pending,
                       covers: hasEarlier && !reachesTheCursor ? unread.count : nil)
     }

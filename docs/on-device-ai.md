@@ -118,11 +118,13 @@ the parts already decided.
 - **Where:** top of the Slack rail of the project page, above the unread messages.
 - **When:** by itself when the channel holds at least 6 unread messages (`CatchUp.threshold`). Below
   that, nothing: reading three messages is faster than reading about them.
-- **What:** the open matters among the unread messages, one line each, three at most: the kind
-  (Request, Question or Problem) and the summary of one message (5.7). First the requests and questions
-  in a message that names the user, with an @ or by a word of their name (`CatchUp.names`), marked with
-  an arrow; then the others, newest first. A click opens the room on the message. Under them, a count of
-  the rest ("+ 9 more"). Updates are never listed.
+- **What:** what the rail does not already say, one line each, three at most: the kind (Request,
+  Question or Problem) and the summary of one message (5.7). First the requests and questions in a
+  message that names the user, with an @ or by a word of their name (`CatchUp.names`), marked with an
+  arrow; then the open matters among the unread messages the rail does not display (it shows eight),
+  newest first. A click opens the room on the message. Updates are never listed.
+- **No doubles, no empty block:** a message displayed under the block, with its own summary, is not
+  listed again unless it is for the user. With nothing to point at there is no block at all.
 - **Not written by the model.** Three ways of having it sum up the channel were tried on real channels
   and dropped: free text in two labelled lines (malformed one time in two), guided generation over the
   raw messages (vague or false, an example of the instructions repeated as if the channel had said it,
@@ -131,8 +133,8 @@ the parts already decided.
   those summaries: nothing in it can be wrong that is not wrong in the summary one click away.
 - **Every unread message gets a kind.** A long one through its summary; a short one (40 to 240
   characters) keeps its own words and only its kind is asked for; under 40 characters nothing is asked.
-- **Loading:** two skeleton lines until the first open matter is known, then the lines come in as the
-  summaries land (newest first), "Summarising" beside the count while some are still being written.
+- **Loading:** no skeleton, since most channels end with nothing to list: the block appears with its
+  first line, and "Summarising" shows under the lines while summaries are still being written.
 - **More unread than what is loaded:** the list covers what is loaded and says so: "Covers the last 15
   unread messages". The Overview's oldest counted unread message tells whether anything older is unread.
 - **Reads:** `SlackStore` messages of the channel, `lastRead`, user names, and the message summaries in
@@ -223,6 +225,9 @@ Someone speaks of the user, or asks something of them, without a Slack mention.
   files, reactions and the thread link stay under the summary.
 - **Not shown:** a summary that is not clearly shorter than the message (over 70% of its length), whose
   first sentence alone passes the limit, or that is empty or refused.
+- **Wording of the instructions is copied:** "something is wrong", used to define a Problem, came back
+  as the summary of a QA report ("…validation: something is wrong."). The kinds are defined with nouns
+  (a bug, a failure, a delay, a risk) and the sentence must name the bug or the request itself.
 - **Wording matters:** asked for a "blocked" case or for a telegraphic style, the model wrote "SUP-931
   blocks the release" of a message that said nothing blocked. The instructions ask for full sentences
   and for no statement stronger than the message's.
