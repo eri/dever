@@ -46,6 +46,9 @@ struct GeneratedBlock: View {
                 VStack(alignment: .leading, spacing: 4) {
                     if let text {
                         ForEach(text.sentences) { sentence in line(sentence) }
+                        if let note = text.note {
+                            Text(note).font(.system(size: 11)).foregroundStyle(Soot.muted).padding(.top, 2)
+                        }
                     } else {
                         Skeleton(height: 12).frame(height: 18)
                         Skeleton(width: 180, height: 12).frame(height: 18)

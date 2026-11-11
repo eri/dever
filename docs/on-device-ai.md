@@ -72,9 +72,10 @@ Consequences for the design, true whatever the measurements say:
 3. **Everything stays on the Mac.** Only the system model. No online AI service, no Slack, Linear or
    GitHub content sent anywhere else, no generated text written to disk (memory only). The wording in
    the app: "Runs on this Mac. Nothing leaves it."
-4. **Silent rather than inventive.** Too little material, input too long for the model, a refusal, a
-   guardrail or an error: no generated text at all and no error message; the screen is the one of today.
+4. **Silent rather than inventive.** Too little material, a refusal, a guardrail or an error: no generated text at all and no error message; the screen is the one of today.
    No system notification is ever built from generated text or triggered by a model's judgement.
+   An input too long to read whole is read in part only where the feature says which part and the
+   text says what it covers; otherwise it is silence too.
 5. **Always marked, always traceable** (section 4).
 6. **Raw data first.** A generated text is added above or beside what it describes; the messages, the
    description and the comments stay where they are, readable at once, and never wait for the model.
@@ -116,9 +117,12 @@ the parts already decided.
   English when Settings says so.
 - **Loading:** two skeleton lines beside the sparkle, then the whole text fades in. No word-by-word
   streaming. While newer messages are being summarised the previous text stays.
-- **Too long:** no catch-up (rule 4) when the unread messages do not all fit the context, or when some
-  of them are older than what `SlackStore` has loaded (20 messages): a catch-up of a part would pass for
-  one of the whole. One message counts for at most 600 characters. Chunked summarising is an open point.
+- **More unread than can be read:** the common case on a busy channel (decided after the first real
+  try, where the unread reached a week back and 15 messages were loaded). The catch-up reads the newest
+  unread messages that are loaded and fit the context, and says so under its sentences: "Covers the
+  last 15 unread messages". That line is a fact about the input, written by Dever, not by the model.
+  Fewer than 3 messages fitting: no catch-up. One message counts for at most 600 characters. The
+  Overview's oldest counted unread message tells whether anything older than the loaded page is unread.
 - **How:** the unread messages go to the model numbered, with the reader's name; guided generation
   holds the answer to a shape (`CatchUpAnswer`: whether something is asked, what and in which message,
   then one or two other points with their message). `CatchUp.text(from:)` ties the sentences to their
@@ -273,9 +277,11 @@ in section 5) in the same change.
 ## 10. Open points
 
 - **Thresholds.** 6 unread messages and 1,500 characters are starting points, to adjust on real channels.
-- **Long catch-ups.** The days with the most unread are the ones where a catch-up helps most and the
-  ones least likely to fit 4,096 tokens. Summarising in chunks and then summarising the chunks is
-  possible but multiplies the time; decide after measuring.
+- **Long catch-ups.** Settled for now by reading the newest unread and saying what is covered (5.1).
+  Loading older unread messages and summarising in chunks stays possible; measured cost is 5 to 8 s per
+  chunk of 2,000 to 3,500 tokens.
+- **Why nothing shows.** `log show --predicate 'subsystem == "io.github.eri.dever" AND category == "intelligence"'`
+  gives the reason for each catch-up written or not: counts and causes, never a message's words.
 - **Threads.** The catch-up reads the channel's unread messages, not the new replies inside threads
   (only opened threads are loaded). A busy thread is where decisions are made; loading unread replies
   for the catch-up costs one request per thread and needs its own budget row.

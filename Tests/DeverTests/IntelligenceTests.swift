@@ -232,10 +232,42 @@ final class CatchUpTests: XCTestCase {
         XCTAssertEqual(input.language, "French")
     }
 
-    func testNothingWhenUnreadMessagesAreOlderThanWhatIsLoaded() {
-        XCTAssertNil(input(messages(10), lastRead: "0.500000", hasEarlier: true))
-        XCTAssertNotNil(input(messages(10), lastRead: "0.500000", hasEarlier: false))
-        XCTAssertNotNil(input(messages(10), lastRead: "1.000000", hasEarlier: true))
+    func testUnreadOlderThanWhatIsLoadedIsSaidNotHidden() throws {
+        XCTAssertTrue(try XCTUnwrap(input(messages(10), lastRead: "0.500000", hasEarlier: true)).olderUnread)
+        XCTAssertFalse(try XCTUnwrap(input(messages(10), lastRead: "0.500000", hasEarlier: false)).olderUnread)
+        XCTAssertFalse(try XCTUnwrap(input(messages(10), lastRead: "1.000000", hasEarlier: true)).olderUnread)
+    }
+
+    func testEveryLoadedMessageUnreadIsEverythingWhenTheOverviewCountedNoOlderOne() throws {
+        func counted(_ firstUnread: String?) throws -> Bool {
+            try XCTUnwrap(CatchUp.input(messages: messages(10), lastRead: "0.500000", hasEarlier: true, firstUnread: firstUnread,
+                                        users: users, me: "U2", languageCode: { _ in "fr" })).olderUnread
+        }
+        XCTAssertFalse(try counted("1.000000"), "the oldest unread is the oldest loaded")
+        XCTAssertTrue(try counted("0.700000"), "an unread message older than what is loaded")
+        XCTAssertTrue(try counted(nil))
+    }
+
+    func testAPartialCatchUpSaysWhatItCovers() async throws {
+        let model = FakeModel()
+        model.answer = .init(asked: nil, rest: [.init(sentence: "Billing is broken", message: 1)])
+        let text = try await CatchUp.write(.init(lines: lines, reader: "Sam", language: "English", olderUnread: true),
+                                           with: Intelligence(model: model))
+        XCTAssertEqual(text.note, "Covers the last 6 unread messages")
+        let whole = try await CatchUp.write(.init(lines: lines, reader: "Sam", language: "English"), with: Intelligence(model: model))
+        XCTAssertNil(whole.note)
+    }
+
+    func testOnlyTheNewestThatFitAreReadAndNumberedFromOne() async throws {
+        let model = FakeModel()
+        // Room for the instructions, the answer and about four of ten 300-character messages.
+        model.contextSize = TextBudget.estimate(CatchUp.instructions(.init(lines: [], reader: "Sam", language: "English"))) + TextBudget.answerReserve + 450
+        model.answer = .init(asked: nil, rest: [.init(sentence: "The newest kept", message: 4), .init(sentence: "The oldest kept", message: 1)])
+        let ten = (1...10).map { CatchUp.Line(ts: "\($0)", author: "Alex", text: String(repeating: "mot ", count: 75)) }
+        let text = try await CatchUp.write(.init(lines: ten, reader: "Sam", language: "English"), with: Intelligence(model: model))
+        XCTAssertEqual(text.sentences.map(\.source), ["10", "7"])
+        XCTAssertEqual(text.note, "Covers the last 4 unread messages")
+        XCTAssertTrue(model.order.last?.hasPrefix("[1] Alex:") ?? false)
     }
 
     func testSystemAndEmptyMessagesDoNotCount() {

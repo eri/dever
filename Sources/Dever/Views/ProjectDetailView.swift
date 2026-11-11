@@ -876,17 +876,27 @@ struct ProjectDetailView: View {
         project.slack.map { .init(feature: .catchUp, id: $0.id) }
     }
 
+    /// The oldest unread message the Overview counted, unless it stopped counting (200 and more).
+    private var countedFirstUnread: String? {
+        guard let slack = store.snapshots[project.id]?.slack, !slack.unreadCapped else { return nil }
+        return slack.firstUnreadTS
+    }
+
     /// Changes when the unread messages, the cursor or the model's readiness do.
     private var catchUpTrigger: String {
-        "\(project.slack?.id ?? "")|\(lastRead ?? "")|\(messages.first?.ts ?? "")|\(messages.count)|\(intelligenceStatus.offers(.catchUp))"
+        "\(project.slack?.id ?? "")|\(lastRead ?? "")|\(messages.first?.ts ?? "")|\(messages.count)|\(intelligenceStatus.offers(.catchUp))|\(countedFirstUnread ?? "")"
     }
 
     /// Asks the store for a catch-up of the unread messages when there are enough of them, and
     /// drops the previous one when there is nothing left to catch up on. No network request.
     private func refreshCatchUp() {
         guard let subject = catchUpSubject else { catchUp = nil; return }
+        if !intelligenceStatus.offers(.catchUp) {
+            CatchUp.log.notice("catch-up: not offered, model \(intelligenceStatus.availability.rawValue, privacy: .public), switch \(IntelligencePreferences.isOn(.catchUp))")
+        }
         let input = !intelligenceStatus.offers(.catchUp) ? nil : CatchUp.input(
-            messages: messages, lastRead: lastRead, hasEarlier: hasEarlier, users: users, me: app.slack?.userID,
+            messages: messages, lastRead: lastRead, hasEarlier: hasEarlier, firstUnread: countedFirstUnread,
+            users: users, me: app.slack?.userID,
             languageCode: { IntelligencePreferences.language(forSummaryOf: $0) })
         catchUp = input
         if let input {

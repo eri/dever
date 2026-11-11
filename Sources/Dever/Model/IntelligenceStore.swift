@@ -140,6 +140,9 @@ struct GeneratedText: Equatable, Sendable {
         var id: String { text }
     }
     var sentences: [Sentence]
+    /// What the text covers when it is not everything ("Covers the last 15 unread messages").
+    /// A fact about the input, written by Dever, not by the model.
+    var note: String? = nil
     var isEmpty: Bool { sentences.allSatisfy { $0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty } }
 }
 
