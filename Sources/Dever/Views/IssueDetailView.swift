@@ -27,6 +27,8 @@ struct IssueDetailView: View {
     @State private var linksJump = 0
     @State private var linksHighlighted = false
     @State private var labelsExpanded = false
+    /// The description opens on its first lines: Dever is for triage, Linear for reading.
+    @State private var descriptionExpanded = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private let measure: CGFloat = 680   // about 70 characters at 15pt, padding included
@@ -532,7 +534,7 @@ struct IssueDetailView: View {
         if let text = d.description, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             Group {
                 if let blocks {
-                    MarkdownView(blocks: blocks).transition(.opacity)
+                    foldedDescription(blocks).transition(.opacity)
                 } else {
                     VStack(alignment: .leading, spacing: 10) {
                         Skeleton(height: 12); Skeleton(width: 420, height: 12); Skeleton(width: 360, height: 12)
@@ -544,6 +546,60 @@ struct IssueDetailView: View {
             .motion(Motion.ui, fade: true, value: blocks == nil)
         } else {
             Text("No description").font(.system(size: 14)).foregroundStyle(Soot.muted)
+        }
+    }
+
+    /// Folded height: about six lines of body text, enough to tell what the issue is about.
+    private let foldHeight: CGFloat = 168
+
+    /// The description, cut to its first lines with a fade and a way to open the rest.
+    /// Short ones (a few lines, no picture) show whole, with no control.
+    @ViewBuilder
+    private func foldedDescription(_ blocks: [MarkdownBlock]) -> some View {
+        let length = blocks.reduce(0) { $0 + $1.text.characters.count }
+        let hasImage = blocks.contains { if case .image = $0.kind { true } else { false } }
+        let short = !hasImage && blocks.count <= 4 && length <= 420
+        if short {
+            MarkdownView(blocks: blocks)
+        } else {
+            // Folded, only the opening blocks are laid out at all (a few hundred characters), so
+            // nothing below the fade exists to spill out; the height cap then trims the last one.
+            let opening: [MarkdownBlock] = {
+                var used = 0
+                var out: [MarkdownBlock] = []
+                for b in blocks {
+                    if case .image = b.kind { break }
+                    out.append(b)
+                    used += b.text.characters.count
+                    if used > 320 || out.count >= 4 { break }
+                }
+                return out
+            }()
+            VStack(alignment: .leading, spacing: 8) {
+                MarkdownView(blocks: descriptionExpanded ? blocks : opening)
+                    .frame(maxHeight: descriptionExpanded ? nil : foldHeight, alignment: .top)
+                    .clipShape(Rectangle())
+                    .overlay(alignment: .bottom) {
+                        if !descriptionExpanded {
+                            LinearGradient(colors: [Soot.surface.opacity(0), Soot.surface], startPoint: .top, endPoint: .bottom)
+                                .frame(height: 56)
+                                .allowsHitTesting(false)
+                                .accessibilityHidden(true)
+                        }
+                    }
+                Button {
+                    descriptionExpanded.toggle()
+                } label: {
+                    HStack(spacing: 5) {
+                        Text(descriptionExpanded ? "Show less" : "Show full description")
+                        Image(systemName: descriptionExpanded ? "chevron.up" : "chevron.down").font(.system(size: 10, weight: .bold))
+                    }
+                }
+                .buttonStyle(TertiaryButton(tint: .lime, lift: Soot.ground))
+                .padding(.leading, -8)
+                .accessibilityHint(descriptionExpanded ? "Folds the description to its first lines" : "Shows the whole description")
+            }
+            .motion(Motion.ui, value: descriptionExpanded)
         }
     }
 
@@ -825,6 +881,7 @@ struct IssueDetailView: View {
     }
 
     private func load() async {
+        descriptionExpanded = false
         error = nil
         if let cached = store.cachedDetail(route.issueID), route.updatedAt == nil || cached.updatedAt == route.updatedAt {
             detail = cached
