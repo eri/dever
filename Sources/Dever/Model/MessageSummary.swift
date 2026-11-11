@@ -9,6 +9,8 @@ enum MessageSummary {
     static let minimumLength = 240
     /// Longest summary worth showing, as a share of the original: past it, the original reads as fast.
     static let longestShare = 0.7
+    /// And in characters: a summary is two lines of the rail, three at most, whatever the message.
+    static let longest = 180
 
     struct Input: Equatable, Sendable {
         let author: String
@@ -30,7 +32,9 @@ enum MessageSummary {
     /// The input for a message, or nil when it is not one the rail cuts.
     static func input(_ message: SlackMessage, users: [String: SlackUser], languageCode: (String) -> String) -> Input? {
         guard isLong(message) else { return nil }
+        // Slack's marks for bold and code are noise to the model, and it copies them out.
         let text = SlackPlain.text(message.text ?? "", users: users)
+            .replacingOccurrences(of: "*", with: "").replacingOccurrences(of: "`", with: "")
         guard text.count > minimumLength else { return nil }
         let language = Locale(identifier: "en_US").localizedString(forLanguageCode: languageCode(text)) ?? "English"
         return Input(author: message.user.flatMap { users[$0]?.name } ?? "Someone", text: text, language: language)
@@ -39,16 +43,24 @@ enum MessageSummary {
     static func instructions(_ input: Input) -> String {
         """
         You shorten one message from a team chat for someone who will read it later.
-        Write one or two short sentences, in \(input.language) whatever language the message is in. Say what the message announces, asks or decides, starting with the point itself.
-        Keep names, numbers and identifiers such as ticket numbers exactly as written. Use only what the message says. No greeting, no opinion, no "this message".
+        Write one sentence of at most 20 words, in \(input.language) whatever language the message is in: the one thing to remember, what the message announces, asks or decides. A second short sentence only when the message asks for something. Full sentences with their verbs; do not make a statement stronger than the message does.
+        Do not list what the message lists: give the outcome and the count. Keep names, numbers and ticket identifiers exactly as written. Use only what the message says. No greeting, no opinion, no "this message", no formatting marks.
         """
     }
 
     /// The model's sentences as shown, or nil when they are not worth the place of the original:
     /// empty, or nearly as long as it.
     static func text(from answer: String, original: String) -> GeneratedText? {
-        let summary = answer.split(whereSeparator: \.isNewline).joined(separator: " ")
+        let plain = answer.replacingOccurrences(of: "*", with: "").replacingOccurrences(of: "`", with: "")
+            .split(whereSeparator: \.isNewline).joined(separator: " ")
             .trimmingCharacters(in: .whitespacesAndNewlines)
+        // Whole sentences only, as many as fit: a summary cut mid-sentence reads as a broken one.
+        var summary = ""
+        plain.enumerateSubstrings(in: plain.startIndex..., options: .bySentences) { sentence, _, _, stop in
+            guard let sentence else { return }
+            if summary.count + sentence.count > longest + 1 { stop = true } else { summary += sentence }
+        }
+        summary = summary.trimmingCharacters(in: .whitespaces)
         guard summary.count > 2, Double(summary.count) <= Double(original.count) * longestShare else { return nil }
         return GeneratedText(sentences: [.init(text: summary)])
     }
@@ -66,7 +78,7 @@ enum MessageSummary {
                 prompt = String(prompt.prefix(prompt.count * room / tokens * 9 / 10))
             }
             do {
-                let answer = try await model.respond(instructions: instructions, prompt: prompt, maximumTokens: 120)
+                let answer = try await model.respond(instructions: instructions, prompt: prompt, maximumTokens: 80)
                 guard let text = text(from: answer, original: input.text) else {
                     CatchUp.log.notice("message summary: silent, nothing shorter than the \(input.text.count) characters of the message")
                     throw IntelligenceError.unavailable
@@ -82,6 +94,6 @@ enum MessageSummary {
 
     /// A made-up summary for captures (`DEVER_SNAPSHOT_INTELLIGENCE`).
     static let sample = GeneratedText(sentences: [
-        .init(text: "Final QA report: all 24 criteria tested on the preview. Three bugs are left, on refresh, flicker and sync.")
+        .init(text: "Final QA report: 21 of 24 criteria pass on the preview. SUP-931 is to fix before the release.")
     ])
 }

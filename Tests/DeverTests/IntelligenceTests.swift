@@ -429,10 +429,19 @@ final class MessageSummaryTests: XCTestCase {
     }
 
     func testASummaryNearlyAsLongAsTheMessageIsNotShown() {
-        XCTAssertNil(MessageSummary.text(from: String(long.prefix(400)), original: long))
+        XCTAssertNil(MessageSummary.text(from: String(long.prefix(230)), original: String(long.prefix(241))))
         XCTAssertNil(MessageSummary.text(from: "  ", original: long))
-        XCTAssertEqual(MessageSummary.text(from: "Le rapport couvre\ntous les critères.", original: long)?.sentences.map(\.text),
+        XCTAssertEqual(MessageSummary.text(from: "Le *rapport* couvre\ntous les critères.", original: long)?.sentences.map(\.text),
                        ["Le rapport couvre tous les critères."])
+    }
+
+    func testASummaryIsCutAtAWholeSentenceUnderTheLimit() {
+        let original = String(repeating: long, count: 6)
+        let first = "Le rapport de QA est terminé et vingt et un critères sur vingt-quatre passent sur la preview."
+        let second = "SUP-931 est à corriger avant la mise en production, les deux autres peuvent attendre."
+        let third = "Le détail complet des cas de test est dans le canvas du canal."
+        XCTAssertEqual(MessageSummary.text(from: "\(first) \(second) \(third)", original: original)?.sentences.map(\.text), ["\(first) \(second)"])
+        XCTAssertNil(MessageSummary.text(from: String(repeating: "mot ", count: 80), original: original), "one endless sentence")
     }
 
     func testSubjectsAreOnePerMessage() {
@@ -451,7 +460,7 @@ extension RealModelTests {
             let start = Date()
             let text = try await MessageSummary.write(.init(author: "Kyryl", text: report, language: language))
             print("summary (\(language)) in \(String(format: "%.1f", Date().timeIntervalSince(start))) s: \(text.sentences.first?.text ?? "")")
-            XCTAssertLessThan(text.sentences.first?.text.count ?? .max, report.count * 7 / 10)
+            XCTAssertLessThanOrEqual(text.sentences.first?.text.count ?? .max, MessageSummary.longest)
         }
     }
 }

@@ -215,13 +215,19 @@ Someone speaks of the user, or asks something of them, without a Slack mention.
   characters). Not in the room, not for short messages.
 - **When:** by itself, for the messages the rail shows, the newest first, one at a time behind the
   catch-up. The original shows until the summary is ready, then fades to the block.
-- **What:** one or two sentences, names, numbers and ticket identifiers kept. "Show original" opens the
-  message in full, "Show summary" goes back. Attachments, reactions and the thread link stay under it.
-- **Not shown:** a summary that is not clearly shorter than the message (over 70% of its length), or
-  empty, or refused.
+- **What:** one sentence of at most 20 words, a second only when the message asks for something;
+  names, numbers and ticket identifiers kept. Never more than 180 characters: whole sentences are kept
+  as far as they fit. "Show original" opens the message in full, "Show summary" goes back.
+- **Folded with it:** the link previews of the message, which come back with the original. Pictures,
+  files, reactions and the thread link stay under the summary.
+- **Not shown:** a summary that is not clearly shorter than the message (over 70% of its length), whose
+  first sentence alone passes the limit, or that is empty or refused.
+- **Wording matters:** asked for a "blocked" case or for a telegraphic style, the model wrote "SUP-931
+  blocks the release" of a message that said nothing blocked. The instructions ask for full sentences
+  and for no statement stronger than the message's.
 - **Reads:** the message already in `SlackStore`. Derived data keyed by channel, message and text (an
   edit is another version), in `IntelligenceStore`, memory only. No network request.
-- **Measured:** 2 to 3 s for a 700-character report.
+- **Measured:** 1.2 to 2.7 s for a 700-character report.
 
 ## 6. Settings › Intelligence
 

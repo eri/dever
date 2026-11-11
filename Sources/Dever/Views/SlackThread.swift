@@ -1381,7 +1381,7 @@ private struct MessageRow: View {
                     }
                 }
                 .motion(Motion.ui, fade: true, value: summary != nil && !showOriginal)
-                MessageExtras(message: message, channels: channels, users: users)
+                MessageExtras(message: message, channels: channels, users: users, showCards: summary == nil || showOriginal)
                 if !reactions.isEmpty {
                     ReactionPills(reactions: reactions, me: me, customEmoji: customEmoji, users: users) { toggle($0) }
                 }
@@ -1799,10 +1799,12 @@ private struct MessageExtras: View {
     let message: SlackMessage
     var channels: [String: String] = [:]
     var users: [String: SlackUser] = [:]
+    /// Link previews: folded with the message while its summary stands in its place.
+    var showCards = true
 
     var body: some View {
         let files = message.files ?? []
-        let cards = (message.attachments ?? []).filter { !$0.isEmpty }
+        let cards = showCards ? (message.attachments ?? []).filter { !$0.isEmpty } : []
         if !files.isEmpty || !cards.isEmpty {
             VStack(alignment: .leading, spacing: 6) {
                 ForEach(files) { file in
