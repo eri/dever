@@ -41,14 +41,16 @@ enum MessageSummary {
     }
 
     /// The kinds a message can be, as shown at the head of its summary.
-    static let kinds = ["Request", "Warning", "Decision", "Info"]
+    static let kinds = ["Request", "Question", "Problem", "Update"]
+    /// The kinds that call for someone: shown in ink, the others muted.
+    static let pressing: Set<String> = ["Request", "Question", "Problem"]
 
     static func instructions(_ input: Input) -> String {
         """
         You shorten one message from a team chat for someone who has not read the channel.
         Give its point in one full sentence of at most 20 words, in \(input.language) whatever language the message is in, then say what kind of message it is. The sentence must stand on its own: name who or what it is about (the feature, the ticket, the person), then what is asked, wrong, decided or announced.
         Do not list what the message lists: give the outcome. Keep names, numbers and ticket identifiers exactly as written. Use only what the message says, and do not make a statement stronger than the message does. No greeting, no opinion, no "this message", no formatting marks.
-        The kind: Request when the author asks someone to do, send, check, answer or decide something; Warning when the author reports a bug, a failure, a delay or a risk; Decision only when the author states a choice already made; Info for the rest. A message that asks the team to decide is a Request, not a Decision.
+        The kind says what the message expects of its readers. Request: someone is asked to do, send, check, fix or decide something. Question: an answer or an opinion is asked for. Problem: a bug, a failure, a delay or a risk is reported, without asking anyone in particular. Update: the rest, such as progress, news, a decision, a welcome. When the message says something is wrong, slow, failing, late or to fix, it is a Problem, never an Update.
         """
     }
 
@@ -71,12 +73,8 @@ enum MessageSummary {
         summary = summary.trimmingCharacters(in: .whitespaces)
         guard summary.count > 2, Double(summary.count) <= Double(original.count) * longestShare else { return nil }
         summary = summary.prefix(1).uppercased() + summary.dropFirst()
-        var kind = kinds.first { $0.lowercased() == answer.kind.lowercased() }
-        // "We should decide whether…" asks for a decision; the model files it under Decision.
-        if kind == "Decision", summary.range(of: #"\b(decide|décider|should|whether)\b"#, options: [.regularExpression, .caseInsensitive]) != nil {
-            kind = "Request"
-        }
-        return GeneratedText(sentences: [.init(text: summary)], kind: kind)
+        return GeneratedText(sentences: [.init(text: summary)],
+                             kind: kinds.first { $0.lowercased() == answer.kind.lowercased() })
     }
 
     /// Asks the model, behind anything on screen that waits for it. A message longer than the
@@ -109,5 +107,5 @@ enum MessageSummary {
     /// A made-up summary for captures (`DEVER_SNAPSHOT_INTELLIGENCE`).
     static let sample = GeneratedText(sentences: [
         .init(text: "The final QA report of AI Tips passes 21 of 24 criteria; SUP-931 is to fix before the release.")
-    ], kind: "Warning")
+    ], kind: "Problem")
 }

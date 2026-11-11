@@ -33,7 +33,12 @@ enum CatchUp {
         /// Unread messages older than `lines` exist and are not loaded: the catch-up says what it
         /// covers instead of passing for one of everything.
         var olderUnread = false
-        var version: String { "\(lines.first?.ts ?? "")-\(lines.last?.ts ?? "")-\(lines.count)-\(language)-\(olderUnread)" }
+        /// Long messages whose summary is still being written: the catch-up waits for them, it
+        /// reads summaries far better than it reads long messages.
+        var awaiting = 0
+        var version: String {
+            "\(lines.first?.ts ?? "")-\(lines.last?.ts ?? "")-\(lines.count)-\(language)-\(olderUnread)-\(lines.map(\.text).joined().hashValue)"
+        }
     }
 
     /// The input for a channel, or nil when there is no catch-up to write: no read cursor, or
@@ -41,8 +46,19 @@ enum CatchUp {
     /// reach further back than what is loaded, the input says so (`olderUnread`).
     /// `firstUnread` is the oldest unread message the Overview counted, when it knows: with it, a
     /// page whose every loaded message is unread can still tell that nothing older is.
+    /// What the store holds for a long message's summary.
+    enum Summary: Equatable {
+        /// Not a message that gets one, or none could be written: its own words are read.
+        case none
+        case pending
+        case ready(GeneratedText)
+    }
+
+    /// `summary` gives, for a message, the summary written for it: a long message is read through
+    /// it ("Request: …"), which the model handles far better than the message itself.
     static func input(messages: [SlackMessage], lastRead: String?, hasEarlier: Bool, firstUnread: String? = nil,
-                      users: [String: SlackUser], me: String?, languageCode: (String) -> String) -> Input? {
+                      users: [String: SlackUser], me: String?, languageCode: (String) -> String,
+                      summary: (SlackMessage) -> Summary = { _ in .none }) -> Input? {
         let reader = me.flatMap { users[$0]?.name } ?? ""
         guard let lastRead, let oldest = messages.last else {
             log.notice("catch-up: none, no read cursor or no message (\(messages.count) loaded)")
@@ -51,12 +67,21 @@ enum CatchUp {
         let reachesTheCursor = SlackTS.isAtOrBefore(oldest.ts, lastRead)
             || (firstUnread.map { SlackTS.isAtOrBefore(oldest.ts, $0) } ?? false)
         let olderUnread = hasEarlier && !reachesTheCursor
+        var awaiting = 0
         let lines: [Line] = messages.reversed().compactMap { m in
             guard !SlackTS.isAtOrBefore(m.ts, lastRead), !m.isSystem else { return nil }
             let text = SlackPlain.text(m.text ?? "", users: users)
             guard !text.isEmpty else { return nil }
+            var read = String(text.prefix(messageLimit))
+            switch summary(m) {
+            case .ready(let written):
+                let sentence = written.sentences.map(\.text).joined(separator: " ")
+                read = written.kind.map { "\($0): \(sentence)" } ?? sentence
+            case .pending: awaiting += 1
+            case .none: break
+            }
             return Line(ts: m.ts, author: m.user.flatMap { users[$0]?.name } ?? "Someone",
-                        text: String(text.prefix(messageLimit)),
+                        text: read,
                         namesReader: me.map { (m.text ?? "").contains("<@\($0)") } ?? false || names(text, reader: reader))
         }
         guard lines.count >= threshold else {
@@ -66,7 +91,7 @@ enum CatchUp {
         let code = languageCode(lines.map(\.text).joined(separator: "\n"))
         let language = Locale(identifier: "en_US").localizedString(forLanguageCode: code) ?? "English"
         return Input(lines: lines, reader: reader.isEmpty ? "the reader" : reader, language: language,
-                     olderUnread: olderUnread)
+                     olderUnread: olderUnread, awaiting: awaiting)
     }
 
     /// Fewest messages worth a catch-up when the context cannot hold them all.
@@ -77,9 +102,9 @@ enum CatchUp {
 
     static func instructions(_ input: Input) -> String {
         """
-        You help \(input.reader) catch up on a team chat channel they have not read. The messages are numbered. \(input.reader) is the reader.
-        List what \(input.reader) has to do, if anything, then the one or two most important other things that were said or decided. Do not repeat what \(input.reader) has to do in the rest.
-        Something is asked of \(input.reader) when a message tells or asks them to do, check, review or answer something. That includes a message written to someone else that says \(input.reader) should, must or could do it ("\(input.reader) should look at it", "il faudrait que \(input.reader) regarde"), with or without an @. A piece of news, a decision or a reminder to all is not a request. One action per request, the most pressing first, two at most. Write each as a to-do item that starts with a verb in the infinitive ("Vérifier le front avant midi", "Review the pull request"): never a question, never "you" or "vous".
+        You help \(input.reader) catch up on a team chat channel they have not read. The messages are numbered. A long message is given as its summary, after a word that says what it is (Request, Question, Problem or Update). \(input.reader) is the reader.
+        List what \(input.reader) has to do, if anything, then the one or two most important other things that were said or decided. Do not repeat what \(input.reader) has to do in the rest. For the rest, what is still open comes first: a Problem, a Request made to someone else, a Question. An Update comes last, and only when nothing is open.
+        Something is asked of \(input.reader) when a message tells or asks them to do, check, review or answer something. That includes a message written to someone else that says \(input.reader) should, must or could do it ("\(input.reader) should look at it", "il faudrait que \(input.reader) regarde"), with or without an @. A piece of news, a decision or a reminder to all is not a request. One action per request, the most pressing first, two at most. Write each as a to-do item that starts with a verb in the infinitive and says what the message asks, in its words: never a question, never "you" or "vous".
         Every sentence you write is in \(input.language), whatever language the messages are in: translate when they differ. Short plain sentences in your own words, never a quotation of a message: say what happened, not what a message contains. Each sentence names what it is about, so that it is understood without the messages. Never name \(input.reader). Use only what the messages say.
         """
     }
@@ -122,7 +147,8 @@ enum CatchUp {
     private static func tidy(_ raw: String, action: Bool = false) -> String? {
         var text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         // The model sometimes copies a message in quotes and leaves its number behind: `…XP", 2.`
-        text = text.replacingOccurrences(of: #"["”’']?,?\s*\[?\d{1,2}\]?\.?$"#, with: "", options: .regularExpression)
+        // Only after a quote or a comma: "SUP-931" ends with digits that are its own.
+        text = text.replacingOccurrences(of: #"(["”’'],?|,)\s*\[?\d{1,2}\]?\.?$"#, with: "", options: .regularExpression)
         text = text.trimmingCharacters(in: CharacterSet(charactersIn: "\"“”‘’' "))
         if action { text = text.trimmingCharacters(in: CharacterSet(charactersIn: " .?!\u{202F}\u{00A0}")) }
         guard text.count > 2 else { return nil }
@@ -139,12 +165,16 @@ enum CatchUp {
         return try await intelligence.perform(.onScreen) { model in
             let instructions = instructions(input)
             let room = TextBudget.room(contextSize: model.contextSize, instructions: await model.tokenCount(instructions))
+            // What is still open is what a catch-up is for. Left to choose, the model retells the
+            // news: when enough else was said, the long messages that are plain updates are left out.
+            let open = input.lines.filter { !$0.text.hasPrefix("Update: ") }
+            let lines = open.count >= fewestKept ? open : input.lines
             var costs: [Int] = []
-            for (index, line) in input.lines.enumerated() {
+            for (index, line) in lines.enumerated() {
                 // The number can only grow once older lines are dropped: count with the largest.
                 costs.append(await model.tokenCount("[\(index + 1)] \(line.author): \(line.text)\n"))
             }
-            guard let kept = TextBudget.newestThatFit(input.lines, costs: costs, room: room), kept.count >= fewestKept else {
+            guard let kept = TextBudget.newestThatFit(lines, costs: costs, room: room), kept.count >= fewestKept else {
                 log.notice("catch-up: silent, \(input.lines.count) messages are \(costs.reduce(0, +)) tokens for \(room) of room")
                 throw IntelligenceError.tooLong
             }
@@ -155,7 +185,7 @@ enum CatchUp {
                     log.notice("catch-up: silent, the answer held nothing to show")
                     throw IntelligenceError.unavailable
                 }
-                if input.olderUnread || kept.count < input.lines.count { text.note = coverage(kept: kept.count) }
+                if input.olderUnread || kept.count < lines.count { text.note = coverage(kept: input.lines.count - (lines.count - kept.count)) }
                 log.notice("catch-up: written from \(kept.count) of \(input.lines.count) messages, \(text.sentences.count) sentences, older unread \(input.olderUnread)")
                 return text
             } catch {

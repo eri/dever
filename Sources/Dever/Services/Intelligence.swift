@@ -43,7 +43,7 @@ protocol LanguageModel: Sendable {
 
 /// What the model says of one message.
 struct MessageSummaryAnswer: Equatable, Sendable {
-    /// One of `MessageSummary.kinds`.
+    /// One of `MessageSummary.kinds`: what the message expects of its readers.
     var kind: String
     var summary: String
 }
@@ -75,8 +75,8 @@ private struct CatchUpPoint {
 private struct MessageSummaryShape {
     @Guide(description: "The point of the message in one full sentence of at most 20 words, understandable by someone who has not read the channel: who or what it is about, and what is asked, wrong, decided or announced")
     var summary: String
-    @Guide(description: "Request: the author asks someone to do, send, check, answer or decide something. Warning: the author reports a bug, a failure, a delay or a risk. Decision: the author states a choice that has already been made. Info: anything else, such as news, a welcome, an explanation, a report with no problem",
-           .anyOf(["Request", "Warning", "Decision", "Info"]))
+    @Guide(description: "Request: the author asks someone to do, send, check, fix or decide something. Question: the author asks for an answer or an opinion. Problem: something is wrong, slow, failing, late or to fix, and no one in particular is asked. Update: only when nothing is asked and nothing is wrong, such as progress, news, a decision, a welcome",
+           .anyOf(["Request", "Question", "Problem", "Update"]))
     var kind: String
 }
 

@@ -122,9 +122,16 @@ the parts already decided.
 - **Content:** first, only if something is asked of the user, their actions as a short to-do list (two
   at most, each starting with a verb: "Vérifier le front avant midi"), each leading to its message; never
   a question, never "you". Then one or two sentences on the rest. No headings.
+- **Fed by the message summaries:** asked to read fourteen messages at once, the model wrote vague or
+  false sentences; one message at a time it does well. So each long unread message is summarised first
+  (5.7) and the catch-up reads those summaries, kind included ("Problem: …"), with the short messages as
+  they are. It waits for them, its skeleton showing meanwhile. Left to choose, the model retells the
+  news: when at least three other lines exist, the long messages that are plain Updates are left out,
+  and the instructions put what is still open first.
 - **No example sentence in the instructions:** one given to show the tone ("The QA of the feature is
   complete…") came back in the catch-up of a channel that never spoke of QA. Examples are kept to the
-  form of an action, where the check below catches a copy.
+  form of an action, where the check below catches a copy. Then an action example ("Review the pull
+  request") came back too, on a real channel: there is no example left in the instructions.
 - **An action is checked, not trusted:** the model lists a reminder to all as readily as a request to
   one, and confuses who asks with who is asked. An action is shown only when the message it rests on
   names the user, with an @ or by a word of their name (`CatchUp.names`). A request made with "tu" alone
@@ -219,10 +226,14 @@ Someone speaks of the user, or asks something of them, without a Slack mention.
 - **When:** by itself, for the messages the rail shows, the newest first, one at a time behind the
   catch-up. The original shows until the summary is ready, with a line under it ("Summarising", the
   sparkle breathing) so that the swap is expected; then the block takes its place.
-- **What:** the kind of message at the head of the block (Request, Warning, Decision or Info) and one
-  sentence of at most 20 words that stands on its own: who or what it is about, then what is asked,
-  wrong, decided or announced. Names, numbers and ticket identifiers kept. Guided generation; the kind
-  is chosen after the sentence, and a "Decision" whose sentence asks to decide is shown as a Request. Never more than 180 characters: whole sentences are kept
+- **What:** the kind of message at the head of the block and one sentence of at most 20 words that
+  stands on its own: who or what it is about, then what is asked, wrong, decided or announced. Names,
+  numbers and ticket identifiers kept. Guided generation; the kind is chosen after the sentence.
+- **Kinds,** by what the message expects of its readers: **Request** (someone is asked to do, send,
+  check, fix or decide), **Question** (an answer or an opinion is asked for), **Problem** (something is
+  wrong, slow, failing, late or to fix, and no one in particular is asked), **Update** (the rest:
+  progress, news, a decision, a welcome). The first three show in ink, Update muted. "Decision", "Warning"
+  and "Info" were tried first: the model filed almost everything under Decision, and Info said nothing. Never more than 180 characters: whole sentences are kept
   as far as they fit. "Show original" opens the message in full, "Show summary" goes back.
 - **Folded with it:** the link previews of the message, which come back with the original. Pictures,
   files, reactions and the thread link stay under the summary.

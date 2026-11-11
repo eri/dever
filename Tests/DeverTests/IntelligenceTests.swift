@@ -19,7 +19,7 @@ private final class FakeModel: LanguageModel, @unchecked Sendable {
         return "answer to \(prompt)"
     }
 
-    var summary = MessageSummaryAnswer(kind: "Info", summary: "A summary.")
+    var summary = MessageSummaryAnswer(kind: "Update", summary: "A summary.")
     func summarise(instructions: String, prompt: String) async throws -> MessageSummaryAnswer {
         lock.withLock { order.append(prompt) }
         return summary
@@ -276,6 +276,21 @@ final class CatchUpTests: XCTestCase {
         XCTAssertTrue(model.order.last?.hasPrefix("[1] Alex:") ?? false)
     }
 
+    func testALongMessageIsReadThroughItsSummaryAndTheCatchUpWaitsForIt() throws {
+        let list = messages(8)
+        func made(_ summary: @escaping (SlackMessage) -> CatchUp.Summary) throws -> CatchUp.Input {
+            try XCTUnwrap(CatchUp.input(messages: list, lastRead: "0.500000", hasEarlier: false, users: users, me: "U2",
+                                        languageCode: { _ in "fr" }, summary: summary))
+        }
+        let waiting = try made { $0.ts == "8.000000" ? .pending : .none }
+        XCTAssertEqual(waiting.awaiting, 1)
+        let written = GeneratedText(sentences: [.init(text: "Le correctif est poussé.")], kind: "Update")
+        let ready = try made { $0.ts == "8.000000" ? .ready(written) : .none }
+        XCTAssertEqual(ready.awaiting, 0)
+        XCTAssertEqual(ready.lines.last?.text, "Update: Le correctif est poussé.")
+        XCTAssertNotEqual(waiting.version, ready.version, "the summary landing is a new input")
+    }
+
     func testSystemAndEmptyMessagesDoNotCount() {
         var list = messages(7)
         list[0].subtype = "channel_topic"
@@ -352,6 +367,8 @@ final class CatchUpTests: XCTestCase {
                                                      .init(sentence: "Testing is complete, covering all 24 criteria\", 6.", message: 6)])
         let text = try XCTUnwrap(CatchUp.text(from: answer, lines: lines))
         XCTAssertEqual(text.sentences.map(\.text), ["The feature gives +2 XP.", "Testing is complete, covering all 24 criteria."])
+        let ticket = CatchUpAnswer(asked: [.init(sentence: "Fix SUP-931", message: 6)], rest: [.init(sentence: "The release is on the 12", message: 1)])
+        XCTAssertEqual(CatchUp.text(from: ticket, lines: lines)?.sentences.map(\.text), ["Fix SUP-931", "The release is on the 12."])
     }
 
     func testEmptyAndRepeatedSentencesAreDropped() {
@@ -443,7 +460,7 @@ final class MessageSummaryTests: XCTestCase {
         XCTAssertNotEqual(a.version, b.version)
     }
 
-    private func shown(_ summary: String, kind: String = "Info", original: String) -> GeneratedText? {
+    private func shown(_ summary: String, kind: String = "Update", original: String) -> GeneratedText? {
         MessageSummary.text(from: .init(kind: kind, summary: summary), original: original)
     }
 
@@ -468,8 +485,8 @@ final class MessageSummaryTests: XCTestCase {
         XCTAssertEqual(text?.kind, "Request")
         XCTAssertEqual(text?.sentences.map(\.text), ["Get two screenshots of the feature before the weekly."])
         XCTAssertNil(shown("Something else entirely.", kind: "Poem", original: long)?.kind)
-        XCTAssertEqual(shown("The team should decide whether to optimise the sync.", kind: "Decision", original: long)?.kind, "Request")
-        XCTAssertEqual(shown("The export leaves this release.", kind: "Decision", original: long)?.kind, "Decision")
+        XCTAssertEqual(shown("The export leaves this release.", kind: "update", original: long)?.kind, "Update")
+        XCTAssertEqual(MessageSummary.kinds, ["Request", "Question", "Problem", "Update"])
     }
 
     func testSubjectsAreOnePerMessage() {
@@ -499,5 +516,35 @@ extension RealModelTests {
             print("summary (\(language)) in \(String(format: "%.1f", Date().timeIntervalSince(start))) s: [\(text.kind ?? "-")] \(text.sentences.first?.text ?? "")")
             XCTAssertLessThanOrEqual(text.sentences.first?.text.count ?? .max, MessageSummary.longest)
         }
+    }
+}
+
+extension RealModelTests {
+    /// The whole chain as the rail runs it: each long message summarised, then the catch-up
+    /// written from the summaries and the short messages.
+    func testCatchUpFedByMessageSummaries() async throws {
+        try XCTSkipUnless(ProcessInfo.processInfo.environment["DEVER_TEST_REAL_MODEL"] == "1", "needs the system model")
+        let said: [(String, String)] = [
+            ("Estelle", "Hey team, I have the customer weekly tomorrow at 11am and I'd love to show them what's coming with AI Tips. Could someone send me 2 or 3 screenshots of the feature in the web extension before tomorrow morning? Nothing fancy, the tip page and the success screen would be perfect. Thanks a lot!"),
+            ("Marco", "Hi Kyryl, welcome! You can start testing AI tips. FYI: tips are a new kind of content we're pushing on the platform. They are short, hands-on AI tips that learners validate with a 'Nailed it!' button to earn +2 XP. The acceptance criteria are in the Linear project and the preview is deployed on PR-4714. Ping me if anything is unclear."),
+            ("Marco", "Tom, Tarik: there is no tip menu on the preview back office."),
+            ("Tarik", "Fixed, redeploying."),
+            ("Kyryl", "One more thing on sync: when I change a tip in the back office, it takes 1 to 2 minutes before the change shows in the web extension. It is not a bug strictly speaking, the cache is refreshed on a timer, but for editors it feels broken because they do not see their fix. I think we should decide whether we optimize for faster sync before the release or document the delay."),
+            ("Kyryl", "Hi team, final QA report for the tips feature (QA-27). Scope: all test cases executed, covering all 24 acceptance criteria. Tested on preview PR-4714 in the web extension and the back office. Result: 21 criteria pass, 3 fail. SUP-931: the tips list isn't refreshed after a language change. SUP-928: visual flickering in the tip content text when toggling the favorite heart. SUP-929: sync latency for backend tip changes. None is blocking for the demo, but SUP-931 should be fixed before the release. Sam, can you take SUP-931?"),
+        ]
+        var lines: [CatchUp.Line] = []
+        for (index, (author, text)) in said.enumerated() {
+            var read = text
+            if text.count > MessageSummary.minimumLength,
+               let summary = try? await MessageSummary.write(.init(author: author, text: text, language: "English")) {
+                read = "\(summary.kind ?? "Update"): \(summary.sentences.map(\.text).joined(separator: " "))"
+            }
+            print("line \(index + 1): \(author) | \(read.prefix(170))")
+            lines.append(.init(ts: "\(index + 1)", author: author, text: read, namesReader: CatchUp.names(text, reader: "Sam")))
+        }
+        let text = try await CatchUp.write(.init(lines: lines, reader: "Sam", language: "English"))
+        for s in text.sentences { print(s.forYou ? "CATCH →" : "CATCH  ", s.text, "[\(s.source ?? "-")]") }
+        XCTAssertEqual(text.sentences.first?.forYou, true)
+        XCTAssertEqual(text.sentences.first?.source, "6")
     }
 }

@@ -99,7 +99,7 @@ struct SummarisedMessage: View {
             HStack(spacing: 6) {
                 GeneratedMark(size: 11)
                 Text(text.kind ?? "Summary").font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(text.kind == "Warning" || text.kind == "Request" ? Soot.ink : Soot.muted)
+                    .foregroundStyle(text.kind.map(MessageSummary.pressing.contains) ?? false ? Soot.ink : Soot.muted)
             }
             Text(text.sentences.map(\.text).joined(separator: " "))
                 .font(.system(size: 14)).foregroundStyle(Soot.ink.opacity(0.92))
