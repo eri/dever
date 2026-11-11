@@ -51,6 +51,10 @@ the hover tone, the press, the lime focus ring, the pointing hand, the disabled 
 Never write, on a button or a link: `.buttonStyle(.plain)`, `PressButton()`, `.handCursor()`,
 `.onHover` to tint it, `FocusOutline`, or a font and a colour that stand in for a role. If no
 role fits, add one to Buttons.swift (and a row to the gallery) rather than a one-off.
+A button drawn over selectable text (a floating pill, a hover toolbar) must keep the pointing hand:
+the roles see to it (`CursorArea`), and every `NSTextView` subclasses `YieldingTextView`
+(SlackPreview.swift) so its I-beam yields to what covers it. Never subclass `NSTextView` directly.
+
 Check your button in the gallery: `DEVER_SNAPSHOT_SCREENS=0 DEVER_SNAPSHOT_GALLERY=1` writes every
 role in every state to `buttons-dark.png` / `buttons-light.png`.
 

@@ -133,7 +133,7 @@ struct RichTextLabel: NSViewRepresentable {
 
     /// A read-only text view: unlike a text field it honours the link colour and keeps its
     /// attributes while selecting; links show the pointing hand and open on click.
-    final class LabelView: NSTextView {
+    final class LabelView: YieldingTextView {
         override var acceptsFirstResponder: Bool { true }
         override func resetCursorRects() {
             super.resetCursorRects()
@@ -257,6 +257,20 @@ struct RichTextLabel: NSViewRepresentable {
     }
 }
 
+/// A text view that leaves the cursor alone where something else is drawn over it (a pill
+/// floating over a message, a hover toolbar): without this its I-beam shows on the button.
+/// Every `NSTextView` of the app inherits from it.
+class YieldingTextView: NSTextView {
+    private func covered(_ event: NSEvent) -> Bool {
+        guard let root = window?.contentView else { return false }
+        let point = root.superview?.convert(event.locationInWindow, from: nil) ?? event.locationInWindow
+        guard let hit = root.hitTest(point) else { return true }
+        return !(hit === self || hit.isDescendant(of: self))
+    }
+    override func mouseMoved(with event: NSEvent) { if !covered(event) { super.mouseMoved(with: event) } }
+    override func cursorUpdate(with event: NSEvent) { if !covered(event) { super.cursorUpdate(with: event) } }
+}
+
 /// A cursor for the area of a view, through AppKit's cursor rects: reliable where
 /// pushing cursors on hover is not. Clicks pass through.
 struct CursorArea: NSViewRepresentable {
@@ -266,6 +280,24 @@ struct CursorArea: NSViewRepresentable {
         var cursor: NSCursor = .arrow
         override func hitTest(_ point: NSPoint) -> NSView? { nil }
         override func resetCursorRects() { addCursorRect(bounds, cursor: cursor) }
+
+        // Selectable text under a floating button sets the I-beam on every mouse move, past
+        // the cursor rect. The area answers each move after it, so its cursor has the last word.
+        override func updateTrackingAreas() {
+            super.updateTrackingAreas()
+            trackingAreas.forEach(removeTrackingArea)
+            addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseMoved, .mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
+                                           owner: self))
+        }
+        override func mouseEntered(with event: NSEvent) { claim() }
+        override func mouseMoved(with event: NSEvent) { claim() }
+        private func claim() {
+            DispatchQueue.main.async { [weak self] in
+                guard let self, let window = self.window,
+                      self.bounds.contains(self.convert(window.mouseLocationOutsideOfEventStream, from: nil)) else { return }
+                self.cursor.set()
+            }
+        }
     }
 
     func makeNSView(context: Context) -> CursorView {

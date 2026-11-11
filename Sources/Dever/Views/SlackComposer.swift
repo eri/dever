@@ -192,7 +192,7 @@ final class ComposerModel: ObservableObject {
 /// The editor: bold, italic, underline and strikethrough are real attributes (what you see
 /// is what is sent); lists are lines that start with "• " or "1. ". Return sends,
 /// Shift-Return breaks the line, Escape cancels. Pasted text comes in plain.
-final class ComposerTextView: NSTextView {
+final class ComposerTextView: YieldingTextView {
     var model: ComposerModel?
     var onSend: () -> Void = {}
     var onCancel: () -> Void = {}
