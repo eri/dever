@@ -804,7 +804,7 @@ struct IssueDetailView: View {
                 switch item {
                 case .created(let date, let state):
                     eventRow(name: d.creator?.name, avatar: d.creator?.avatarUrl,
-                             changes: [Change(symbol: state == nil ? "plus.circle" : "", text: state.map { "created the issue in \($0.name)" } ?? "created the issue", state: state)],
+                             changes: [Change(symbol: state == nil ? "plus.circle" : "", text: state.map { "created an issue with status \($0.name)" } ?? "created the issue", state: state)],
                              date: date)
                 case .pull(let p, let date):
                     let n = String(p.number)
