@@ -41,6 +41,9 @@ struct DeliveryBoard: View {
 
     @State private var showsOthers = false
     @State private var showsShipped = false
+    @ObservedObject private var release = ReleaseStore.shared
+    @ObservedObject private var previews = PreviewStore.shared
+    @EnvironmentObject private var appState: AppState
     @State private var showsAllShipped = false
     @State private var teams: [String: LinearTeamContext] = [:]
     @State private var notice: Notice?
@@ -64,7 +67,10 @@ struct DeliveryBoard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             headline
-            bar
+            VStack(alignment: .leading, spacing: 8) {
+                bar
+                whereLine
+            }
             if let notice { noticeLine(notice).transition(.opacity) }
             if let start = plan.start {
                 startTile(start, grab: plan.startIsGrab)
@@ -90,6 +96,10 @@ struct DeliveryBoard: View {
         .motion(Motion.ui, fade: true, value: plan.start?.id)
         .motion(Motion.ui, fade: true, value: notice)
         .task(id: teamIDs) { await loadTeams() }
+        // Where the shipped work is needs the release line: read within its own budget.
+        .task { await ReleaseStore.shared.refresh(appState) }
+        // Snapshots: DEVER_SNAPSHOT_SHIPPED_OPEN=1 unfolds the shipped list.
+        .onAppear { if ProcessInfo.processInfo.environment["DEVER_SNAPSHOT_SHIPPED_OPEN"] == "1" { showsShipped = true } }
     }
 
     // MARK: Headline
@@ -557,6 +567,51 @@ struct DeliveryBoard: View {
         }
     }
 
+    // MARK: Where the work is
+
+    /// Where a shipped issue's code is: on staging until a release took it to production.
+    /// Nil when the release line does not follow the pull request's repository.
+    private func environment(_ item: DeliveryPlan.Shipped) -> (ReleaseStore.Environment, Date)? {
+        guard let state = release.state,
+              let merged = item.merged.filter({ $0.repository == state.repository }).compactMap({ m in m.mergedAt.map { (m, $0) } })
+                .max(by: { $0.1 < $1.1 }) else { return nil }
+        return (state.environment(mergedAt: merged.1), merged.1)
+    }
+
+    /// The shipped issues still on staging, newest first.
+    private var onStaging: [DeliveryPlan.Shipped] {
+        plan.shipped.filter { environment($0)?.0 == .staging }
+    }
+
+    /// One quiet line under the bar: what is on staging to test, and the preview when it is live.
+    @ViewBuilder
+    private var whereLine: some View {
+        let staging = onStaging
+        let preview = previews.state(for: project)?.status
+        let live = preview?.phase == .live ? preview : nil
+        if !staging.isEmpty || live != nil {
+            HStack(spacing: 14) {
+                if !staging.isEmpty {
+                    Label { Text("\(staging.count) on staging").monospacedDigit() } icon: {
+                        Image(systemName: "testtube.2").foregroundStyle(Theme.chart2)
+                    }
+                    .help("Merged, waiting for the next release: " + staging.prefix(8).map(\.issue.identifier).joined(separator: ", "))
+                }
+                if let live {
+                    Label { Text(verbatim: "#\(live.pull.number) in preview") } icon: {
+                        Image(systemName: "globe").foregroundStyle(Theme.positive)
+                    }
+                    .help("The preview of pull request #\(live.pull.number) is live")
+                }
+            }
+            .font(.system(size: 12))
+            .foregroundStyle(Soot.muted)
+            .labelStyle(QuietLabel())
+            .transition(.opacity)
+            .accessibilityElement(children: .combine)
+        }
+    }
+
     /// A shipped issue, stepped back: key, title, "in QA" while the ticket has not closed, its pull request.
     private func shippedRow(_ item: DeliveryPlan.Shipped) -> some View {
         let issue = item.issue
@@ -576,8 +631,42 @@ struct DeliveryBoard: View {
                 Text("in QA").font(.system(size: 12, weight: .medium)).foregroundStyle(Soot.muted).fixedSize()
                     .help("Merged; the ticket is still \(issue.state.name) in Linear")
             }
+            if let (env, at) = environment(item) {
+                EnvironmentPill(environment: env, since: at)
+            }
         }
-        .accessibilityLabel("\(issue.identifier), \(issue.title). Shipped\(item.inQA ? ", still in QA" : "")")
+        .accessibilityLabel("\(issue.identifier), \(issue.title). Shipped\(item.inQA ? ", still in QA" : "")"
+                            + (environment(item).map { $0.0 == .staging ? ", on staging" : ", in production" } ?? ""))
         .accessibilityHint("Opens the issue")
+    }
+}
+
+/// Where a shipped issue's code is, as a small pill: on staging (and since when), or in
+/// production. The word carries it; the tint only repeats it.
+private struct EnvironmentPill: View {
+    let environment: ReleaseStore.Environment
+    let since: Date
+
+    var body: some View {
+        let staging = environment == .staging
+        Text(staging ? "Staging · \(Brief.ago(since))" : "Prod")
+            .font(.system(size: 11, weight: .medium))
+            .foregroundStyle(staging ? Theme.chart2 : Soot.muted)
+            .monospacedDigit()
+            .padding(.horizontal, 7)
+            .frame(height: 20)
+            .background((staging ? Theme.chart2 : Soot.muted).opacity(0.12), in: Capsule())
+            .fixedSize()
+            .help(staging ? "Merged \(since.formatted(.relative(presentation: .named))), waiting for the next release" : "In production")
+    }
+}
+
+/// A label whose icon sits close and small, for one quiet line of facts.
+private struct QuietLabel: LabelStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        HStack(spacing: 5) {
+            configuration.icon.font(.system(size: 11, weight: .semibold)).accessibilityHidden(true)
+            configuration.title
+        }
     }
 }

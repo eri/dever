@@ -107,6 +107,7 @@ enum OverviewDemo {
         s.staging = .init(number: 5068, title: "Remove obsolete jobs after rollout", author: "tarik", date: now.addingTimeInterval(-3_600), url: url)
         s.stagingChecks = .passing
         s.next = .init(number: 5001, author: "tom", opened: now.addingTimeInterval(-2 * 86_400), url: url, checks: .running)
+        s.lastRelease = now.addingTimeInterval(-5 * 86_400)
         return s
     }
 }

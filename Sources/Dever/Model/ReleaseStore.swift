@@ -53,7 +53,19 @@ final class ReleaseStore: ObservableObject {
         var stagingCheckList: [Check] = []
         var production: Merge?
         var next: Release?
+        /// When staging last went to production: the merge of the last release pull request
+        /// (staging into production). Nil when there is no staging branch: merges go straight out.
+        var lastRelease: Date?
+
+        /// Where a pull request merged at `date` is now: on staging until a release took it.
+        func environment(mergedAt date: Date) -> Environment {
+            guard stagingBranch != nil else { return .production }
+            guard let lastRelease else { return .staging }
+            return date <= lastRelease ? .production : .staging
+        }
     }
+
+    enum Environment { case staging, production }
 
     @Published private(set) var state: State?
     /// When the last answer arrived; with `failed`, how old the line is.
@@ -135,6 +147,7 @@ final class ReleaseStore: ObservableObject {
                 var url: String
                 var mergedAt: String?
                 var createdAt: String
+                var headRefName: String?
                 var author: Author?
                 struct Commits: Decodable {
                     struct Node: Decodable { struct C: Decodable { var statusCheckRollup: Rollup? }; var commit: C }
@@ -161,7 +174,7 @@ final class ReleaseStore: ObservableObject {
         guard parts.count == 2 else { throw AppError.message("Not a repository: \(repository)") }
         // Production is `main` (or `master`); staging is the default branch when it is not one
         // of them, else a branch named `staging`.
-        let prFields = "number title url mergedAt createdAt author { login }"
+        let prFields = "number title url mergedAt createdAt headRefName author { login }"
         let query = """
         query($owner: String!, $name: String!) { repository(owner: $owner, name: $name) {
           defaultBranchRef { name }
@@ -183,6 +196,9 @@ final class ReleaseStore: ObservableObject {
         var state = State(repository: repository, stagingBranch: staging, productionBranch: production)
         let merged = production == "main" ? repo.mergedMain : repo.mergedMaster
         state.production = latest(merged.nodes)
+        if let staging {
+            state.lastRelease = merged.nodes.filter { $0.headRefName == staging }.compactMap { $0.mergedAt.flatMap(iso) }.max()
+        }
         if let open = (production == "main" ? repo.openMain : repo.openMaster).nodes.first, let url = URL(string: open.url) {
             let r = open.commits?.nodes.last?.commit.statusCheckRollup
             state.next = Release(number: open.number, title: open.title, author: open.author?.login ?? "someone",
