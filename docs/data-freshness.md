@@ -262,7 +262,7 @@ Refresh every. "Volatile" is the cadence while something is in flight.
 | Preview environment | 60 s | 15 s while deploying, updating or deleting (30 s after a command posted from Dever) | command posted, activation | ETag |
 | Slack channel: new messages | 20 s | | reply sent, activation | `oldest` cursor |
 | Slack channel: edits, reactions, reply counts of what is shown | 60 s | | reaction or reply made here (local, at once) | latest page |
-| Summary and kind of a long Slack message (generated on the Mac from the message already in `SlackStore`) | follows the message: rewritten when it is edited | | the message entering the rail, an edit, the model becoming ready, its switch | no request: derived, in memory (`IntelligenceStore`) |
+| Summary and kind of a long Slack message (generated on the Mac from the message already in `SlackStore`) | follows the message: rewritten when it is edited | | the message entering the rail or being listed as a long mention on the Overview (one entry for both), an edit, the model becoming ready, its switch | no request: derived, in memory (`IntelligenceStore`) |
 | Slack read cursor, unread, mentions | 20 s | | mark read (local, at once), activation. A cursor moved back in Slack ("Mark unread") wins over what was read here, except in the 10 s after a move made here | `conversations.info` |
 | Thread replies (open thread) | 20 s | | reply sent | `conversations.replies` |
 | Linear issue rows, blockers | 60 s | | any issue write (local, at once), activation | `updatedAt` delta |
@@ -289,6 +289,7 @@ means the behaviour once sections 3.1 to 3.4 are in place.
 | --- | --- | --- | --- |
 | Open a project and come back | Whatever was done there | Old rows unless the timer is due | Rows are derived from the stores: already current |
 | Click a mention or "N unread" | Read cursor | Removed in place (`slackRead`) | Keep |
+| Stay on the page with a long mention listed | Nothing remote: its summary is written on the Mac | The line is the start of the message, then its summary dissolves in, same height | Keep. Reads the entry the project's rail writes (`IntelligenceStore`, keyed by channel and message); no request, no budget of its own: it follows the message (section 4) |
 | Click a review request | Review given on GitHub | Stays until the next cycle | Opened externally: refresh `pulls(repo)` on return |
 | Open a part of the release line (Prod, Staging, Next prod) on GitHub | A merge, the checks, the release pull request | Read again when Dever is active again (`ReleaseStore.opened`) | Keep |
 | Link Linear / edit a project | The project's links | Row unchanged until the next cycle | Load that one project's resources on save |

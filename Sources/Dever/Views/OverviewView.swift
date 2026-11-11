@@ -22,6 +22,9 @@ struct OverviewView: View {
     @State private var showMany = false
     /// Rows fade in once, on the page's first appearance.
     @State private var appeared = false
+    /// The projects whose items are all listed ("Show all").
+    @State private var expanded: Set<UUID> = []
+    @ObservedObject private var intelligence = IntelligenceStatus.shared
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     /// One project as the page sees it.
@@ -53,7 +56,7 @@ struct OverviewView: View {
         app.projects.map { p in
             let s = store.snapshots[p.id]
             return Entry(project: p, status: p.status(s), snapshot: s,
-                         waiting: s?.waiting(channel: p.slack?.name) ?? [],
+                         waiting: s?.waiting(channel: p.slack?.name, channelID: p.slack?.id) ?? [],
                          last: s?.lastActivity(channel: p.slack?.name))
         }
     }
@@ -115,6 +118,34 @@ struct OverviewView: View {
             .joined(separator: ";")
     }
 
+    // MARK: Message summaries (docs/on-device-ai.md, 5.7)
+
+    /// The items listed on the page that come from a long message, the newest first.
+    private var toSummarise: [WaitingItem] {
+        WaitingItem.toSummarise(visible.flatMap { entry in
+            expanded.contains(entry.id) ? entry.waiting : Array(entry.waiting.prefix(WaitingItem.listed))
+        })
+    }
+
+    /// Changes when the long messages listed, their words or the model's readiness do.
+    private var summariesTrigger: String {
+        toSummarise.map { "\($0.summary?.subject.id ?? "")@\($0.summary?.input.version ?? "")" }.joined(separator: ",")
+            + "|\(intelligence.offers(.messageSummary))"
+    }
+
+    /// Asks for the summary of each long message listed, as the project's rail does and in the
+    /// same entry: one the rail wrote is not written again. One at a time, behind anything a
+    /// screen waits for. No network request.
+    private func refreshMessageSummaries() {
+        guard intelligence.offers(.messageSummary) else { return }
+        for item in toSummarise {
+            guard let summary = item.summary else { continue }
+            IntelligenceStore.shared.want(summary.subject, version: summary.input.version) {
+                try await MessageSummary.write(summary.input)
+            }
+        }
+    }
+
     var body: some View {
         Group {
             if app.projects.isEmpty {
@@ -132,6 +163,7 @@ struct OverviewView: View {
                 .searchable(text: $search, placement: .toolbar, prompt: "Search projects")
                 // A click anywhere else in the window closes the Add-many menu.
                 .closesOnOutsideClick(showMany) { Motion.run(Motion.ui, fade: true) { showMany = false } }
+                .onChange(of: summariesTrigger, initial: true) { _, _ in refreshMessageSummaries() }
             }
         }
         .background(Soot.ground)
@@ -244,6 +276,8 @@ struct OverviewView: View {
                     ProjectBlock(entry: entry, columns: settings.shownColumns, density: settings.density,
                                  favorite: Binding(get: { entry.project.favorite == true },
                                                    set: { app.setFavorite(entry.project, $0) }),
+                                 expanded: Binding(get: { expanded.contains(entry.id) },
+                                                   set: { if $0 { expanded.insert(entry.id) } else { expanded.remove(entry.id) } }),
                                  open: { open(entry.project) },
                                  openItem: { item in
                                      ProjectFocus.set(item.target, for: entry.project.id)
@@ -532,12 +566,13 @@ private struct ProjectBlock: View {
     let columns: [OverviewSettings.Column]
     let density: OverviewSettings.Density
     @Binding var favorite: Bool
+    /// Every item is listed. Held by the page, which asks for what the listed items need.
+    @Binding var expanded: Bool
     let open: () -> Void
     let openItem: (WaitingItem) -> Void
     let link: (ProjectEditorSheet.Step) -> Void
-    @State private var expanded = false
 
-    private var items: [WaitingItem] { expanded ? entry.waiting : Array(entry.waiting.prefix(3)) }
+    private var items: [WaitingItem] { expanded ? entry.waiting : Array(entry.waiting.prefix(WaitingItem.listed)) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -548,7 +583,7 @@ private struct ProjectBlock: View {
                         ItemRow(item: item, density: density, trailing: Grid.trailing(columns)) { openItem(item) }
                             .transition(Motion.rise)
                     }
-                    if entry.waiting.count > 3 {
+                    if entry.waiting.count > WaitingItem.listed {
                         Button(expanded ? "Show fewer" : "Show all \(entry.waiting.count)") {
                             Motion.run(Motion.ui) { expanded.toggle() }
                         }
@@ -566,12 +601,48 @@ private struct ProjectBlock: View {
 }
 
 /// One thing waiting for you: its icon, one sentence, how long ago. Opens it inside Dever.
+/// A long Slack message is its summary once the Mac's model has written it (the page asks, the
+/// row only reads): the sparkle, the kind, the sentence, on the same line at the same height.
+/// Until then, and when the model stays silent, the line is the start of the message.
 private struct ItemRow: View {
     let item: WaitingItem
     let density: OverviewSettings.Density
     /// The row's columns and status: the sentence never runs under them.
     let trailing: CGFloat
     let action: () -> Void
+    @ObservedObject private var intelligence = IntelligenceStore.shared
+    @ObservedObject private var intelligenceStatus = IntelligenceStatus.shared
+
+    private var summary: (kind: String?, sentence: String)? {
+        guard let subject = item.summary?.subject, intelligenceStatus.offers(.messageSummary) else { return nil }
+        return item.summarised(by: intelligence.text(subject))
+    }
+
+    /// The line's words: the message, or who wrote it, the mark, the kind and the sentence.
+    @ViewBuilder private var line: some View {
+        if let summary {
+            HStack(spacing: 6) {
+                if let author = item.author {
+                    Text("\(author):").font(.system(size: 13)).foregroundStyle(Soot.ink).fixedSize()
+                }
+                GeneratedMark(size: 11)
+                if let kind = summary.kind {
+                    Text(kind).font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(MessageSummary.pressing.contains(kind) ? Soot.ink : Soot.muted).fixedSize()
+                }
+                Text(summary.sentence).font(.system(size: 13)).foregroundStyle(Soot.ink).lineLimit(1).truncationMode(.tail)
+            }
+            .transition(.opacity)
+        } else {
+            Text(item.text).font(.system(size: 13)).foregroundStyle(Soot.ink).lineLimit(1).truncationMode(.tail)
+                .transition(.opacity)
+        }
+    }
+
+    private var spoken: String {
+        guard let summary else { return item.text }
+        return [item.author, "summary", summary.kind].compactMap { $0 }.joined(separator: ", ") + ": \(summary.sentence)"
+    }
 
     var body: some View {
         Button(action: action) {
@@ -581,7 +652,9 @@ private struct ItemRow: View {
                     .foregroundStyle(item.kind == .mention ? Soot.lime : Soot.muted)
                     .frame(width: 16)
                     .accessibilityHidden(true)
-                Text(item.text).font(.system(size: 13)).foregroundStyle(Soot.ink).lineLimit(1).truncationMode(.tail)
+                // A dissolve in a still line: the row's height is set below, whatever the words.
+                ZStack(alignment: .leading) { line }
+                    .motion(Motion.ui, fade: true, value: summary?.sentence)
                 Text("· \(Brief.ago(item.date))").font(.system(size: 12)).foregroundStyle(Soot.muted).monospacedDigit()
                     .fixedSize()
                     .help(item.date.formatted(date: .abbreviated, time: .shortened))
@@ -593,8 +666,9 @@ private struct ItemRow: View {
         }
         .buttonStyle(RowButton(lift: .ground))
         .help(item.text)
-        .accessibilityLabel("\(item.text), \(item.date.formatted(.relative(presentation: .named)))")
-        .accessibilityHint(item.kind == .review ? "Opens the pull request in the project" : "Opens the message in the project")
+        .accessibilityLabel("\(spoken), \(item.date.formatted(.relative(presentation: .named)))")
+        .accessibilityHint((item.kind == .review ? "Opens the pull request in the project" : "Opens the message in the project")
+                           + (summary == nil ? "" : ". \(GeneratedMark.meaning)"))
     }
 }
 

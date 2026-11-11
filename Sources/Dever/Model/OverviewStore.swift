@@ -40,6 +40,20 @@ struct ProjectSnapshot {
             var author: String
             var text: String
             var date: Date
+            /// What the Mac's model would read to shorten the message; nil for a message short
+            /// enough to be read as it is. The same input, so the same version, as the rail's.
+            var summary: MessageSummary.Input? = nil
+
+            init(ts: String, author: String, text: String, date: Date, summary: MessageSummary.Input? = nil) {
+                self.ts = ts; self.author = author; self.text = text; self.date = date; self.summary = summary
+            }
+
+            /// A message that names the reader, as the Overview lists it.
+            init(_ message: SlackMessage, users: [String: SlackUser], languageCode: (String) -> String) {
+                self.init(ts: message.ts, author: message.user.flatMap { users[$0]?.name } ?? "Someone",
+                          text: SlackPlain.text(message.text ?? "", users: users), date: message.date,
+                          summary: MessageSummary.input(message, users: users, languageCode: languageCode))
+            }
         }
     }
 
@@ -470,10 +484,8 @@ final class OverviewStore: ObservableObject {
                 if let me {
                     stats.mentions = unread.filter { ($0.text ?? "").contains("<@\(me)>") }
                         .sorted { $0.ts > $1.ts }
-                        .map { m in
-                            .init(ts: m.ts, author: m.user.flatMap { users[$0]?.name } ?? "Someone",
-                                  text: SlackPlain.text(m.text ?? "", users: users), date: m.date)
-                        }
+                        // The language a long one would be summarised in is part of its summary's version.
+                        .map { .init($0, users: users, languageCode: { IntelligencePreferences.language(forSummaryOf: $0) }) }
                 }
             }
             return .success(stats)

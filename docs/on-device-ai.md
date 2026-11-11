@@ -241,6 +241,32 @@ time; a bolder one would speak for the user. Writing on the user's behalf is not
   and for no statement stronger than the message's.
 - **Reads:** the message already in `SlackStore`. Derived data keyed by channel, message and text (an
   edit is another version), in `IntelligenceStore`, memory only. No network request.
+- **Also in the Overview,** and nowhere else: a "for you" item that comes from a long message (a
+  mention over 240 characters, the same test as the rail's) shows who wrote it, the sparkle, the kind
+  and the sentence, on the item's one line, in place of the cut message. No block and no taller row:
+  the line is too small to be taken for the message, and the mark says what it is. Until the sentence
+  is written, and when the model stays silent, the line is the start of the message as before; the
+  sentence dissolves in (`Motion.ui`, a fade under Reduce Motion too) and the row keeps its height. The
+  tooltip is still the message's own words, and a click still opens the room on the message. The
+  author, the age and the "N for you" count are the raw values. Short mentions, review requests and
+  the "N unread" line are never touched.
+  - **One copy:** the item reads the entry the rail writes (`MessageSummary.subject(channel:ts:)`, the
+    same input version, carried by the mention in the project's snapshot), so a message summarised in
+    the rail costs nothing here, and the other way round.
+  - **Who asks:** the Overview page (`OverviewView.refreshMessageSummaries`), never a row; only for
+    the items listed (the first three of a project, all of them after "Show all", filters applied),
+    the newest first, in the background queue, six at most (`WaitingItem.mostSummaries`).
+  - **Cost:** no request. One to three seconds of generation per long mention listed, one at a time:
+    a usual Overview holds none to two, so 0 to 6 s after it loads; 18 s at the cap. Each one asked
+    for here delays the rail's by as much, which is why short messages and the rest of the unread
+    are left out.
+  - **Off:** with "Long messages" switched off, or the model not ready, the items are as they were.
+  - Captures: `docs/reviews/shots/overview-summary-{dark,light}.png` (written) and
+    `overview-excerpt-{dark,light}.png` (the same item with the model off), both with the made-up
+    answer of capture runs; `overview-summary-model-{dark,light}.png` is the same made-up message
+    summarised by the Mac's own model (no `DEVER_SNAPSHOT_INTELLIGENCE`). Not yet looked at on real
+    channels: how often a real long mention is met with silence, and how the line reads when the
+    sentence is cut by the columns.
 - **Measured:** 1.2 to 2.7 s for a 700-character report.
 
 ## 6. Settings › Intelligence

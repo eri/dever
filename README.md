@@ -92,7 +92,8 @@ On-device intelligence: `DEVER_SNAPSHOT_INTELLIGENCE=available|notReady|off|unsu
 that state and shows every feature's interface (Settings › Intelligence included); with `DEVER_SNAPSHOT_GALLERY=1` it adds
 `generated-{dark,light}.png`, generated text in each of its states, and with `DEVER_SNAPSHOT_SUMMARIES=1`
 `summaries-{dark,light}-{waiting,landing-0…5,landed}.png`: a rail of made-up long messages whose summaries land one after the other.
-Nothing is written back in these runs.
+With `DEVER_SNAPSHOT_OVERVIEW_DEMO=busy` the Overview's long mention shows as its summary (as its start with
+`DEVER_SNAPSHOT_INTELLIGENCE=off`; without the variable the Mac's own model writes it). Nothing is written back in these runs.
 
 ## Onboarding
 

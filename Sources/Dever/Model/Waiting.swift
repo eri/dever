@@ -10,6 +10,36 @@ struct WaitingItem: Identifiable, Equatable {
     let text: String
     let date: Date
     let target: ProjectFocus.Target
+    /// Who wrote the message, for an item that comes from one.
+    var author: String? = nil
+    /// The item comes from a long Slack message: where its summary is kept, and what it is
+    /// written from (docs/on-device-ai.md, 5.7). Nil for everything else, short messages included.
+    var summary: Summary? = nil
+
+    struct Summary: Equatable {
+        /// The entry the project's rail writes for the same message: one copy.
+        let subject: IntelligenceStore.Subject
+        let input: MessageSummary.Input
+    }
+
+    /// The most summaries the Overview asks for at once. One is written at a time, so each one
+    /// asked for here is one to three seconds the others wait.
+    static let mostSummaries = 6
+    /// The items listed under a project before "Show all".
+    static let listed = 3
+
+    /// The items whose summary the Overview asks for, out of those it shows: the newest first,
+    /// `mostSummaries` at most. What is seen first is written first.
+    static func toSummarise(_ shown: [WaitingItem]) -> [WaitingItem] {
+        Array(shown.filter { $0.summary != nil }.sorted { $0.date > $1.date }.prefix(mostSummaries))
+    }
+
+    /// What the item's line shows in place of the cut message once its summary is written: the
+    /// kind and the sentence. Nil keeps the excerpt: no summary yet, silence, or not a long message.
+    func summarised(by text: GeneratedText?) -> (kind: String?, sentence: String)? {
+        guard summary != nil, let text, !text.isEmpty else { return nil }
+        return (text.kind, text.sentences.map(\.text).joined(separator: " "))
+    }
 
     var id: String {
         switch target {
@@ -30,10 +60,16 @@ struct WaitingItem: Identifiable, Equatable {
 extension ProjectSnapshot {
     /// Mentions first (someone is asking you), then review requests, then one line for the
     /// rest of the unread messages; newest first within each kind.
-    func waiting(channel: String?) -> [WaitingItem] {
+    /// - Parameter channelID: the Slack channel's id, which keys the summaries of its messages.
+    func waiting(channel: String?, channelID: String? = nil) -> [WaitingItem] {
         var out: [WaitingItem] = []
         for m in slack?.mentions ?? [] {
-            out.append(.init(kind: .mention, text: "\(m.author): \(m.text)", date: m.date, target: .slack(ts: m.ts)))
+            var summary: WaitingItem.Summary?
+            if let channelID, let input = m.summary {
+                summary = .init(subject: MessageSummary.subject(channel: channelID, ts: m.ts), input: input)
+            }
+            out.append(.init(kind: .mention, text: "\(m.author): \(m.text)", date: m.date, target: .slack(ts: m.ts),
+                             author: m.author, summary: summary))
         }
         for r in github?.reviewRequests ?? [] {
             out.append(.init(kind: .review, text: "Review #\(r.number) \(r.title)", date: r.date,

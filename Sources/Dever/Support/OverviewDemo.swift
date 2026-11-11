@@ -13,6 +13,14 @@ enum OverviewDemo {
 
     private static func id(_ n: Int) -> UUID { UUID(uuidString: String(format: "00000000-0000-0000-0000-%012d", n))! }
 
+    /// A mention long enough for the rail to cut: the Overview shows it as its summary when the
+    /// model is there (`DEVER_SNAPSHOT_INTELLIGENCE=available`), as its start otherwise.
+    private static func longMention(_ ts: String) -> ProjectSnapshot.SlackStats.Mention {
+        let users = ["U1": SlackUser(id: "U1", name: "Ana", avatar: nil, isBot: false)]
+        let text = "Hello team, here is the final QA report for AI Tips. We went through the 24 criteria this morning and three of them still fail on the staging build, the rest pass. The failing ones are the empty state on a new workspace, the keyboard order in the side panel and SUP-931. The details are in the sheet, with a recording for each."
+        return .init(SlackMessage(ts: ts, user: "U1", text: text), users: users, languageCode: { _ in "en" })
+    }
+
     private static func make(busy: Bool) -> (projects: [Project], snapshots: [UUID: ProjectSnapshot]) {
         let now = Date()
         func ago(_ minutes: Double) -> Date { now.addingTimeInterval(-minutes * 60) }
@@ -64,7 +72,7 @@ enum OverviewDemo {
         s.delivery = delivery(done: 6, total: 11)
         s.slack = .init(messagesThisWeek: 12, lastActivity: ago(25), lastAuthor: "Ana", unread: busy ? 1 : 0,
                         firstUnreadTS: busy ? ts(25) : nil, lastUnreadAt: busy ? ago(25) : nil,
-                        mentions: busy ? [.init(ts: ts(25), author: "Ana", text: "the invoice export fails on Safari for every customer with more than one VAT rate, I tried clearing the cache and switching accounts but nothing changes, any idea?", date: ago(25))] : [])
+                        mentions: busy ? [longMention(ts(25))] : [])
         g = ProjectSnapshot.GitHubStats(openPRs: 2, pipeline: .failing)
         g.failingRepositories = ["demo/billing"]
         s.github = g
