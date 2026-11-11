@@ -106,16 +106,22 @@ the parts already decided.
 ### 5.1 Slack catch-up
 
 - **Where:** top of the Slack rail of the project page, above the unread messages.
-- **When:** by itself when the rail holds at least 6 unread messages (threads with new replies count).
-  Below that, nothing: reading three messages is faster than reading about them.
+- **When:** by itself when the channel holds at least 6 unread messages (`CatchUp.threshold`). Below
+  that, nothing: reading three messages is faster than reading about them. Replies inside threads are
+  not counted and not read by the catch-up yet (open point).
 - **Content:** first, only if something asks an action of the user, one line "for you" that leads to the
   message. Then one or two sentences on the rest. No headings, no lists.
 - **Language:** the language of the messages (detected with `NaturalLanguage` over the unread), or
   English when Settings says so.
 - **Loading:** two skeleton lines beside the sparkle, then the whole text fades in. No word-by-word
   streaming. While newer messages are being summarised the previous text stays.
-- **Too long:** the newest unread messages that fit the context are summarised only if they are all of
-  them; otherwise no catch-up (rule 4). Chunked summarising is an open point.
+- **Too long:** no catch-up (rule 4) when the unread messages do not all fit the context, or when some
+  of them are older than what `SlackStore` has loaded (20 messages): a catch-up of a part would pass for
+  one of the whole. One message counts for at most 600 characters. Chunked summarising is an open point.
+- **How:** the unread messages go to the model numbered, with the reader's name; it answers two lines,
+  `YOU:` (or `NONE`) and `REST:`, each sentence followed by the number of the message it rests on.
+  `CatchUp.parse` turns that into sentences tied to messages; an answer of another shape is silence.
+  Plain text rather than guided generation for now: to be revisited once the model can be tried.
 - **Reads:** `SlackStore` messages of the channel, `lastRead` / `seenUpTo`, opened threads, user names.
   **New derived data:** the catch-up, keyed by channel and by the timestamps of the first and last unread
   message, held in an app-lifetime store, memory only. A new message invalidates it; "Mark as read"
@@ -255,7 +261,7 @@ Pipelines
 | Phase | Content | Depends on |
 | --- | --- | --- |
 | 0. Ground | **Built:** `Intelligence` service and availability gating, `IntelligenceStore`, the mark and the generated block, Settings › Intelligence, the one-time invitation, snapshot states, tests. No feature visible yet (`IntelligenceFeature.built` is empty). **Left:** run the probe on a ready model and record context size and timings here. | the model downloaded on the development Mac |
-| 1. Slack catch-up | 5.1 in the rail, then 5.2 in the catch-up, then 5.2 in the Overview. | 0 |
+| 1. Slack catch-up | **Built:** 5.1 in the rail, with its "for you" line (the first form of 5.2), tests, a made-up text for captures. **Left:** try and tune the instructions on the real model; 5.2 as `@✦` items in the Overview. | 0 |
 | 2. Writing | `issueCreate` and the sheet (useful without the model), its filling (5.3), then the reply draft (5.4). | 0; the sheet itself depends on nothing |
 | 3. Issue summary | 5.5. | 0 |
 | 4. Pipeline failure | job and log reads, then 5.6. | 0 |
@@ -270,6 +276,9 @@ in section 5) in the same change.
 - **Long catch-ups.** The days with the most unread are the ones where a catch-up helps most and the
   ones least likely to fit 4,096 tokens. Summarising in chunks and then summarising the chunks is
   possible but multiplies the time; decide after measuring.
+- **Threads.** The catch-up reads the channel's unread messages, not the new replies inside threads
+  (only opened threads are loaded). A busy thread is where decisions are made; loading unread replies
+  for the catch-up costs one request per thread and needs its own budget row.
 - **Detected mentions with no name.** "He wrote that screen, he should look" needs the thread around
   it and will produce false positives; the rate has to be looked at on real channels before 5.2 reaches
   the Overview.

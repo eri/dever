@@ -10,6 +10,10 @@ struct ProjectDetailView: View {
     @ObservedObject private var issueStore = IssueStore.shared
     @ObservedObject private var github = GitHubStore.shared
     @ObservedObject private var slackStore = SlackStore.shared
+    @ObservedObject private var intelligence = IntelligenceStore.shared
+    @ObservedObject private var intelligenceStatus = IntelligenceStatus.shared
+    /// What the catch-up of the rail is written from; nil when there is none to write.
+    @State private var catchUp: CatchUp.Input?
     @State private var shownMessages = 8
     @State private var loadingEarlier = false
     @State private var slackExpanded = false
@@ -180,6 +184,7 @@ struct ProjectDetailView: View {
             if LookAgain.shared.isDue(lastLoad) { Task { await load(quiet: true) } }
         }
         .sheet(isPresented: $flow.githubSheet) { GitHubLoginSheet() }
+        .onChange(of: catchUpTrigger, initial: true) { _, _ in refreshCatchUp() }
         // Another channel: the messages and the read cursor of the previous one do not carry over.
         .onChange(of: project.slack?.id) { _, _ in
             shownMessages = 8
@@ -592,6 +597,15 @@ struct ProjectDetailView: View {
                 QuietEmpty(symbol: "bubble.left", text: "No messages yet")
             } else {
                 if !slackExpanded { IntelligenceInvitation() }
+                if !slackExpanded, let subject = catchUpSubject, catchUp != nil,
+                   intelligence.text(subject) != nil || intelligence.isWriting(subject) {
+                    GeneratedBlock(text: intelligence.text(subject), writing: intelligence.isWriting(subject),
+                                   open: { openInRoom($0) })
+                        .padding(.bottom, 14)
+                        .overlay(alignment: .bottom) { Rectangle().fill(Soot.line).frame(height: 1) }
+                        .padding(.bottom, 14)
+                        .transition(.opacity)
+                }
                 SlackThreadView(messages: messages, users: users, domain: app.slack?.domain,
                                 channelID: project.slack?.id, channelName: project.slack?.name, otherChannels: linkedChannels,
                                 shown: shownMessages, railMessages: railPlan.messages, readUpTo: lastRead,
@@ -854,6 +868,42 @@ struct ProjectDetailView: View {
         let recent = messages.prefix { $0.date >= weekAgo }.count   // newest first
         if recent == 0 { return (Array(messages.prefix(1)), 0, false, messages.first?.date) }
         return (Array(messages.prefix(min(recent, 6))), recent, false, nil)
+    }
+
+    // MARK: Catch-up (docs/on-device-ai.md, 5.1)
+
+    private var catchUpSubject: IntelligenceStore.Subject? {
+        project.slack.map { .init(feature: .catchUp, id: $0.id) }
+    }
+
+    /// Changes when the unread messages, the cursor or the model's readiness do.
+    private var catchUpTrigger: String {
+        "\(project.slack?.id ?? "")|\(lastRead ?? "")|\(messages.first?.ts ?? "")|\(messages.count)|\(intelligenceStatus.offers(.catchUp))"
+    }
+
+    /// Asks the store for a catch-up of the unread messages when there are enough of them, and
+    /// drops the previous one when there is nothing left to catch up on. No network request.
+    private func refreshCatchUp() {
+        guard let subject = catchUpSubject else { catchUp = nil; return }
+        let input = !intelligenceStatus.offers(.catchUp) ? nil : CatchUp.input(
+            messages: messages, lastRead: lastRead, hasEarlier: hasEarlier, users: users, me: app.slack?.userID,
+            languageCode: { IntelligencePreferences.language(forSummaryOf: $0) })
+        catchUp = input
+        if let input {
+            intelligence.want(subject, version: input.version) { try await CatchUp.write(input) }
+        } else {
+            intelligence.drop(subject)
+        }
+    }
+
+    /// Opens the room on a message and lights it for two seconds.
+    private func openInRoom(_ ts: String) {
+        slackFocus = ts
+        if !slackExpanded { toggleSlackWide() }
+        Task {
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            if slackFocus == ts { Motion.run(Motion.ui, fade: true) { slackFocus = nil } }
+        }
     }
 
     private var slackSubtitle: String {

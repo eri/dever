@@ -262,6 +262,7 @@ Refresh every. "Volatile" is the cadence while something is in flight.
 | Preview environment | 60 s | 15 s while deploying, updating or deleting (30 s after a command posted from Dever) | command posted, activation | ETag |
 | Slack channel: new messages | 20 s | | reply sent, activation | `oldest` cursor |
 | Slack channel: edits, reactions, reply counts of what is shown | 60 s | | reaction or reply made here (local, at once) | latest page |
+| Slack catch-up (generated on the Mac from the unread messages already in `SlackStore`) | follows the unread messages: rewritten when one arrives, dropped when the channel is read | | a new unread message, the read cursor, the model becoming ready, its switch | no request: derived, in memory (`IntelligenceStore`) |
 | Slack read cursor, unread, mentions | 20 s | | mark read (local, at once), activation | `conversations.info` |
 | Thread replies (open thread) | 20 s | | reply sent | `conversations.replies` |
 | Linear issue rows, blockers | 60 s | | any issue write (local, at once), activation | `updatedAt` delta |
@@ -330,7 +331,8 @@ means the behaviour once sections 3.1 to 3.4 are in place.
 
 Covered by the project page rows. In addition: an open thread refreshes its replies every 20 s; the room
 appends new messages at the bottom without moving the reading position (the "jump to latest" control
-already exists for this).
+already exists for this). A sentence of the catch-up above the rail opens the room on its message; it
+changes nothing, and the catch-up goes when the read cursor passes its messages.
 
 ### Sheets (new project, import, editor, pickers)
 

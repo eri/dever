@@ -194,3 +194,107 @@ final class IntelligenceStoreTests: XCTestCase {
         XCTAssertEqual(IntelligencePreferences.language(forSummaryOf: french, defaults: defaults), "en")
     }
 }
+
+final class CatchUpTests: XCTestCase {
+    private let users = ["U1": SlackUser(id: "U1", name: "Alex", avatar: nil, isBot: false),
+                         "U2": SlackUser(id: "U2", name: "Sam", avatar: nil, isBot: false)]
+
+    /// `count` messages, newest first, with timestamps 1…count.
+    private func messages(_ count: Int) -> [SlackMessage] {
+        (1...count).reversed().map { SlackMessage(ts: "\($0).000000", user: "U1", text: "La migration casse la facturation, message \($0)") }
+    }
+
+    private func input(_ messages: [SlackMessage], lastRead: String?, hasEarlier: Bool = false) -> CatchUp.Input? {
+        CatchUp.input(messages: messages, lastRead: lastRead, hasEarlier: hasEarlier, users: users, me: "U2",
+                      languageCode: { Intelligence.language(of: $0) ?? "en" })
+    }
+
+    func testNothingBelowTheThreshold() {
+        XCTAssertNil(input(messages(8), lastRead: "3.000000"), "five unread")
+        XCTAssertNotNil(input(messages(8), lastRead: "2.000000"), "six unread")
+    }
+
+    func testNothingWithoutAReadCursor() {
+        XCTAssertNil(input(messages(12), lastRead: nil))
+    }
+
+    func testOnlyTheUnreadOldestFirstWithNamesAndLanguage() throws {
+        let input = try XCTUnwrap(input(messages(10), lastRead: "3.000000"))
+        XCTAssertEqual(input.lines.map(\.ts), (4...10).map { "\($0).000000" })
+        XCTAssertEqual(input.lines.first?.author, "Alex")
+        XCTAssertEqual(input.reader, "Sam")
+        XCTAssertEqual(input.language, "French")
+    }
+
+    func testNothingWhenUnreadMessagesAreOlderThanWhatIsLoaded() {
+        XCTAssertNil(input(messages(10), lastRead: "0.500000", hasEarlier: true))
+        XCTAssertNotNil(input(messages(10), lastRead: "0.500000", hasEarlier: false))
+        XCTAssertNotNil(input(messages(10), lastRead: "1.000000", hasEarlier: true))
+    }
+
+    func testSystemAndEmptyMessagesDoNotCount() {
+        var list = messages(7)
+        list[0].subtype = "channel_topic"
+        list[1].text = ""
+        XCTAssertNil(input(list, lastRead: "0.500000"))
+    }
+
+    func testANewMessageIsANewVersion() throws {
+        let a = try XCTUnwrap(input(messages(8), lastRead: "1.000000"))
+        let b = try XCTUnwrap(input(messages(9), lastRead: "1.000000"))
+        XCTAssertNotEqual(a.version, b.version)
+    }
+
+    func testLongMessagesAreCut() throws {
+        var list = messages(7)
+        list[0].text = String(repeating: "log ", count: 1_000)
+        let input = try XCTUnwrap(input(list, lastRead: "0.500000"))
+        XCTAssertEqual(input.lines.last?.text.count, CatchUp.messageLimit)
+    }
+
+    func testPromptNumbersTheMessages() throws {
+        let input = try XCTUnwrap(input(messages(6), lastRead: "0.500000"))
+        XCTAssertTrue(CatchUp.prompt(input).hasPrefix("[1] Alex: La migration"))
+        XCTAssertTrue(CatchUp.instructions(input).contains("French"))
+    }
+
+    private var lines: [CatchUp.Line] { (1...6).map { CatchUp.Line(ts: "\($0)", author: "Alex", text: "m\($0)") } }
+
+    func testParsesBothLinesAndTiesSentencesToMessages() throws {
+        let text = try XCTUnwrap(CatchUp.parse("""
+        YOU: On attend ta réponse sur le front avant midi [6].
+        REST: La migration casse la facturation [1]. L'export CSV sort de la version. [4]
+        """, lines: lines))
+        XCTAssertEqual(text.sentences, [
+            .init(text: "On attend ta réponse sur le front avant midi.", source: "6", forYou: true),
+            .init(text: "La migration casse la facturation.", source: "1"),
+            .init(text: "L'export CSV sort de la version.", source: "4"),
+        ])
+    }
+
+    func testNoneMeansNoLineForYou() throws {
+        let text = try XCTUnwrap(CatchUp.parse("YOU: NONE\nREST: The export leaves the release [2].", lines: lines))
+        XCTAssertEqual(text.sentences, [.init(text: "The export leaves the release.", source: "2")])
+    }
+
+    func testANumberOutOfRangeLeavesTheSentenceUntied() throws {
+        let text = try XCTUnwrap(CatchUp.parse("YOU: none.\nREST: Billing is broken [42]. Nobody told the client", lines: lines))
+        XCTAssertEqual(text.sentences, [.init(text: "Billing is broken."), .init(text: "Nobody told the client.")])
+    }
+
+    func testAnAnswerWithoutTheShapeIsSilence() {
+        XCTAssertNil(CatchUp.parse("Here is a summary of the conversation: lots happened.", lines: lines))
+        XCTAssertNil(CatchUp.parse("YOU: NONE\nREST:", lines: lines))
+    }
+
+    func testTooLongForTheContextIsRefusedBeforeAsking() async {
+        let model = FakeModel()
+        model.contextSize = 500
+        let long = (1...6).map { CatchUp.Line(ts: "\($0)", author: "Alex", text: String(repeating: "mot ", count: 150)) }
+        do {
+            _ = try await CatchUp.write(.init(lines: long, reader: "Sam", language: "French"), with: Intelligence(model: model))
+            XCTFail("expected a throw")
+        } catch { XCTAssertEqual(error as? IntelligenceError, .tooLong) }
+        XCTAssertTrue(model.order.isEmpty)
+    }
+}
