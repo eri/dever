@@ -127,9 +127,9 @@ struct PanelGlyph: View {
     }
 }
 
-/// A block with nothing to show yet, in one shape for the whole page: the tool's logo, one
-/// short line, the lime action that fills the block, and at most one quiet alternative.
-/// Same tile as the connect invitation (`ConnectPanelBody`), so the two read as one family.
+/// A block with nothing to show yet, in one shape for the whole page: one quiet line under the
+/// panel's header, the lime action that fills the block, and at most one quiet alternative.
+/// No tile and no second logo: same flat row as the connect invitation (`ConnectPanelBody`).
 struct PanelEmpty: View {
     var service: ServiceKind?
     var symbol: String?
@@ -145,19 +145,15 @@ struct PanelEmpty: View {
             HStack(spacing: 14) { glyphAndLine; Spacer(minLength: 16); buttons }
             VStack(alignment: .leading, spacing: 14) { glyphAndLine; buttons }
         }
-        .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Soot.ground.opacity(0.6), in: RoundedRectangle(cornerRadius: 10))
         .accessibilityElement(children: .contain)
         .transition(.opacity)
     }
 
+    /// The line alone: the panel's header already carries the logo, and the panel is the box.
     private var glyphAndLine: some View {
-        HStack(spacing: 14) {
-            PanelGlyph(service: service, symbol: symbol, size: 28)
-            Text(line).font(.system(size: 14, weight: .medium)).foregroundStyle(Soot.ink)
-                .fixedSize(horizontal: false, vertical: true)
-        }
+        Text(line).font(.system(size: 13)).foregroundStyle(Soot.muted)
+            .fixedSize(horizontal: false, vertical: true)
     }
 
     private var buttons: some View {

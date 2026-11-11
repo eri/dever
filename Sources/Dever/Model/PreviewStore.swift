@@ -141,6 +141,27 @@ struct PreviewStatus: Equatable {
     /// When the latest `/preview` or `/delete-preview` was posted (to find its run).
     var commandAt: Date?
 
+    /// What the probes found across the hosts of a live preview.
+    enum Health: Equatable { case checking, up, partlyDown, down }
+
+    var health: Health {
+        let probed = targets.values.compactMap { $0 }
+        if probed.isEmpty { return .checking }
+        if probed.allSatisfy({ !$0 }) { return .down }
+        return probed.contains(false) ? .partlyDown : .up
+    }
+
+    /// The phase in one word, as shown: a live preview with a host that does not answer is
+    /// not called "Live".
+    var word: String {
+        guard phase == .live else { return phase.word }
+        switch health {
+        case .partlyDown: return "Partly down"
+        case .down: return "Down"
+        case .checking, .up: return phase.word
+        }
+    }
+
     var sortedTargets: [PreviewTarget] { PreviewTarget.allCases.filter { targets[$0] != nil } }
     var appURL: URL? { targets[.app] != nil ? PreviewTarget.url(.app, pull: pull.number) : nil }
 }

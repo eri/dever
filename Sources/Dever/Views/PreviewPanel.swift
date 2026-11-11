@@ -49,10 +49,14 @@ struct PreviewPanel: View {
                 if let actionError { ErrorLabel(actionError).transition(Motion.rise) }
             } else {
                 header {
-                    if project.previewPullNumber != nil, app.github != nil, failure == nil { skeleton.transition(.opacity) }
+                    if project.previewPullNumber == nil {
+                        noneActions
+                    } else if app.github != nil, failure == nil {
+                        skeleton.transition(.opacity)
+                    }
                 }
                 if project.previewPullNumber == nil {
-                    nonePart
+                    // The invitation is the header's own line: nothing under it.
                 } else if app.github == nil {
                     if missing.count > 1 {
                         ConnectPlaceholder(service: .github, widths: [300, 180, 240])
@@ -99,7 +103,8 @@ struct PreviewPanel: View {
     /// title, the run and the protection live in the tooltip and under More.
     private func header<T: View>(@ViewBuilder trailing: @escaping () -> T) -> some View {
         let s = status
-        return PanelHeader(symbol: "globe", title: "Preview", accessory: {
+        return PanelHeader(symbol: "globe", title: "Preview",
+                           subtitle: project.previewPullNumber == nil ? "Follow a pull request's preview here" : nil, accessory: {
             if let number = project.previewPullNumber {
                 HoverLink(destination: s?.pull.url ?? URL(string: "https://github.com/\(app.previewRepository(for: project) ?? "")/pull/\(number)")!) {
                     HStack(spacing: 6) {
@@ -116,9 +121,9 @@ struct PreviewPanel: View {
             }
             if let s {
                 HStack(spacing: 6) {
-                    PreviewPhaseGlyph(phase: s.phase, size: 13)
-                    Text(s.phase.word).font(.system(size: 13, weight: .semibold)).foregroundStyle(Soot.ink)
-                        .contentTransition(.opacity).motion(Motion.ui, fade: true, value: s.phase)
+                    PreviewPhaseGlyph(phase: s.phase, health: s.health, size: 13)
+                    Text(s.word).font(.system(size: 13, weight: .semibold)).foregroundStyle(Soot.ink)
+                        .contentTransition(.opacity).motion(Motion.ui, fade: true, value: s.word)
                     if let at = s.updatedAt {
                         Text(verbatim: "·").foregroundStyle(Soot.muted).accessibilityHidden(true)
                         Text(at.formatted(.relative(presentation: .named))).font(.system(size: 12)).foregroundStyle(Soot.muted).lineLimit(1)
@@ -132,13 +137,16 @@ struct PreviewPanel: View {
 
     // MARK: No preview
 
-    /// No pull request yet: one line, the lime way to add one, the quiet way to say none is wanted.
-    private var nonePart: some View {
-        PanelEmpty(service: .github, line: "Follow a pull request's preview here",
-                   primary: ("Add a preview", addPreview),
-                   quiet: ("No preview needed", dismiss),
-                   primaryHelp: "Choose the pull request whose preview this project follows",
-                   quietHelp: "Hides this panel; pick a pull request later in Edit project to bring it back")
+    /// No pull request yet: the header says what the block is for, and holds the lime way to
+    /// add one and the quiet way to say none is wanted.
+    private var noneActions: some View {
+        HStack(spacing: 8) {
+            Button("Add a preview", action: addPreview).buttonStyle(PrimaryButton())
+                .help("Choose the pull request whose preview this project follows")
+            Button("No preview needed", action: dismiss).buttonStyle(TertiaryButton(tint: .muted))
+                .help("Hides this panel; pick a pull request later in Edit project to bring it back")
+        }
+        .fixedSize()
     }
 
     /// What the phase offers, at the right of the line: the products to open when live, the
@@ -170,16 +178,19 @@ struct PreviewPanel: View {
         }
     }
 
-    /// A deploy takes about ten minutes: a travelling line, and the step the run is on.
-    /// The step the run is on, with a short travelling light beside it: the light belongs to
-    /// the step, not to the panel, and says "still going" without a spinner or a percentage.
+    /// A deploy takes about ten minutes: the step the run is on, and before it a short track
+    /// with a light travelling inside it (clipped to the track): "still going", with no
+    /// spinner and no percentage the workflow cannot give.
     private func progress(_ s: PreviewStatus) -> some View {
         HStack(spacing: 10) {
-            WaitingLine().frame(width: 72)
             Text(s.run?.step ?? (s.run == nil ? "Waiting for the workflow to start…" : "Running…"))
                 .font(.system(size: 13)).foregroundStyle(Soot.muted).lineLimit(1)
+            WaitingLine()
+                .frame(width: 64)
+                .background(Soot.edge.opacity(0.5))
+                .clipShape(Capsule())
         }
-        .frame(minHeight: 36)
+        .frame(minHeight: 32)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("\(s.phase.word). \(s.run?.step ?? "Waiting for the workflow")")
     }
@@ -290,9 +301,13 @@ struct PreviewPanel: View {
 /// The phase as a shape and a colour together, so neither carries the meaning alone.
 struct PreviewPhaseGlyph: View {
     let phase: PreviewStatus.Phase
+    /// What the probes found: a live preview with a host down is not drawn as live.
+    var health: PreviewStatus.Health = .up
     var size: CGFloat = 14
     var body: some View {
         let (symbol, tint): (String, Color) = switch phase {
+        case .live where health == .partlyDown: ("exclamationmark.triangle.fill", Theme.chart3)
+        case .live where health == .down: ("xmark.circle.fill", Theme.negative)
         case .live: ("checkmark.circle.fill", Theme.positive)
         case .deploying, .updating: ("clock.fill", Theme.chart2)
         case .deleting: ("clock.fill", Soot.muted)
@@ -301,7 +316,7 @@ struct PreviewPhaseGlyph: View {
         case .notDeployed: ("circle.dotted", Soot.muted)
         }
         Image(systemName: symbol).font(.system(size: size, weight: .semibold)).foregroundStyle(tint)
-            .accessibilityLabel("Preview \(phase.word.lowercased())")
+            .accessibilityLabel("Preview \((phase == .live && health == .partlyDown ? "partly down" : phase == .live && health == .down ? "down" : phase.word.lowercased()))")
     }
 }
 

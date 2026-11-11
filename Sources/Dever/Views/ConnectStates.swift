@@ -211,25 +211,19 @@ struct ConnectPanelBody: View {
                 HStack(spacing: 14) { logoAndLine; Spacer(minLength: 16); ConnectControl(service: service, flow: flow) }
                 VStack(alignment: .leading, spacing: 14) { logoAndLine; ConnectControl(service: service, flow: flow) }
             }
-            .padding(16)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Soot.ground.opacity(0.6), in: RoundedRectangle(cornerRadius: 10))
+            .padding(.bottom, 8)
             .overlay(alignment: .bottom) { if flow.running == service { WaitingLine().transition(.opacity) } }
-            .clipShape(RoundedRectangle(cornerRadius: 10))
+            .clipped()
             .motion(Motion.ui, fade: true, value: flow.running == service)
             if let error = flow.error, error.service == service { ErrorLabel(error.message) }
         }
     }
 
     private var logoAndLine: some View {
-        HStack(spacing: 14) {
-            BrandLogo(service: service, size: 28).foregroundStyle(Soot.ink)
-                .modifier(Breathing(active: flow.running == service))
-                .frame(width: 28, height: 28)
-                .accessibilityHidden(true)
-            Text(ConnectPitch.line(service, for: project)).font(.system(size: 14, weight: .medium)).foregroundStyle(Soot.ink)
-                .fixedSize(horizontal: false, vertical: true)
-        }
+        // The line alone: the panel's header already carries the logo (see `PanelEmpty`).
+        Text(ConnectPitch.line(service, for: project)).font(.system(size: 13)).foregroundStyle(Soot.muted)
+            .fixedSize(horizontal: false, vertical: true)
     }
 }
 

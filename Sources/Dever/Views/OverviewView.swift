@@ -657,7 +657,7 @@ private struct ProjectRow: View {
             case .github:
                 if let g = snapshot?.github { parts.append("GitHub: pipeline \(PipelineGlyph.word(g.pipeline)), \(g.openPRs) open pull requests") }
             case .preview:
-                if let phase = previews.state(for: project)?.status?.phase { parts.append("preview \(phase.word.lowercased())") }
+                if let status = previews.state(for: project)?.status { parts.append("preview \(status.word.lowercased())") }
             case .target:
                 if let t = snapshot?.linear?.targetDate { parts.append("due \(t.formatted(.dateTime.day().month(.wide)))") }
             }
@@ -842,10 +842,10 @@ private struct ProjectRow: View {
     }
 
     @ViewBuilder private var preview: some View {
-        if let phase = previews.state(for: project)?.status?.phase {
+        if let status = previews.state(for: project)?.status {
             HStack(spacing: 5) {
-                PreviewPhaseGlyph(phase: phase, size: 12)
-                Text(phase.word).font(.system(size: 13)).foregroundStyle(Soot.ink).lineLimit(1)
+                PreviewPhaseGlyph(phase: status.phase, health: status.health, size: 12)
+                Text(status.word).font(.system(size: 13)).foregroundStyle(Soot.ink).lineLimit(1)
             }
         } else if project.previewPullNumber != nil && !loaded {
             Skeleton(width: 56, height: 12)

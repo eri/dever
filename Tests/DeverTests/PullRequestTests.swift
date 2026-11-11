@@ -67,6 +67,21 @@ final class PullRequestTests: XCTestCase {
 }
 
 final class ProjectPullsTests: XCTestCase {
+    private struct Ref: IssueReference {
+        var identifier: String
+        var branchName: String?
+        var attachments: Attachments?
+    }
+
+    func testAProjectThatFollowsItsIssuesWaitsForThem() {
+        // Linear not connected, failing, or not linked on the shared repository: no issues.
+        XCTAssertTrue(ProjectPulls.waitsForIssues(nil, wholeRepository: false))
+        // A project that takes every pull request of its repositories needs no issues.
+        XCTAssertFalse(ProjectPulls.waitsForIssues(nil, wholeRepository: true))
+        XCTAssertFalse(ProjectPulls.waitsForIssues([Ref(identifier: "ENG-1")], wholeRepository: false))
+        XCTAssertFalse(ProjectPulls.waitsForIssues([Ref](), wholeRepository: false))
+    }
+
     private struct Issue: IssueReference {
         var identifier: String
         var branchName: String?

@@ -162,6 +162,13 @@ struct ProjectPulls {
 
     init() {}
 
+    /// A project that keeps only the pull requests of its issues has none to show while the
+    /// issues cannot be read (no Linear project on the shared repository, Linear not connected
+    /// or failing): listing the repository's instead would show other projects' work as its own.
+    static func waitsForIssues(_ issues: [IssueReference]?, wholeRepository: Bool) -> Bool {
+        issues == nil && !wholeRepository
+    }
+
     init(repositories: [(name: String, data: GitHubStore.Repository)], issues: [IssueReference]?, wholeRepository: Bool) {
         for (name, data) in repositories {
             let prs = ProjectPullRequests(pulls: data.state.pulls, issues: issues, wholeRepository: wholeRepository)

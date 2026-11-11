@@ -333,7 +333,13 @@ struct ProjectDetailView: View {
 
     private var workPanel: some View {
         VStack(alignment: .leading, spacing: 16) {
-            if project.linear != nil {
+            if project.linear != nil, connectsLinearInHeader {
+                // Not connected: the header is the invitation, as in the Preview panel. Nothing
+                // under it, and no pull requests either when they are matched through the issues.
+                PanelHeader(service: .linear, title: "Delivery", subtitle: ConnectPitch.line(.linear, for: project)) {
+                    ConnectControl(service: .linear, flow: flow)
+                }
+            } else if project.linear != nil {
                 PanelHeader(service: .linear, title: "Delivery", subtitle: "What is left, and where to start",
                             link: linearURL, linkHelp: "Open the project in Linear")
             } else {
@@ -368,14 +374,17 @@ struct ProjectDetailView: View {
         .sootPanel()
     }
 
+    /// Linear is the only tool missing: its invitation sits in the panel's header.
+    private var connectsLinearInHeader: Bool { states[.linear] == .notConnected && missing.count <= 1 }
+
     /// What is left, where to start, then the rest: see `DeliveryBoard`.
     @ViewBuilder
     private var linearPart: some View {
         if states[.linear] == .notConnected {
             if missing.count > 1 {
                 ConnectPlaceholder(service: .linear, widths: [90, 320, 220, 280])
-            } else {
-                ConnectPanelBody(service: .linear, project: project, flow: flow)
+            } else if let error = flow.error, error.service == .linear {
+                ErrorLabel(error.message)
             }
         } else if let state = states[.linear] {
             failure(.linear, state)
@@ -961,9 +970,9 @@ struct ProjectDetailView: View {
         guard !repos.isEmpty, app.github != nil else { return false }
         let refs = issueRefs
         var derived = ProjectPulls()
-        // The shared repository's pull requests belong to every project: without issues to
-        // match, none of them is this project's.
-        if app.followsSharedRepository(project), refs == nil {
+        // A project that follows its issues (always so on the shared repository): without
+        // issues to match, none of the repository's pull requests is known to be its own.
+        if ProjectPulls.waitsForIssues(refs, wholeRepository: app.showsWholeRepository(project)) {
             derived.scoped = true
         } else {
             var held: [(name: String, data: GitHubStore.Repository)] = []
@@ -995,7 +1004,7 @@ struct ProjectDetailView: View {
         guard !repos.isEmpty, states[.github] != .notConnected else { return }
         do {
             let client = try app.githubClient()
-            if !(app.followsSharedRepository(project) && issueRefs == nil) {
+            if !ProjectPulls.waitsForIssues(issueRefs, wholeRepository: app.showsWholeRepository(project)) {
                 // One repository after the other: a project rarely follows more than a few.
                 for repo in repos { _ = try await github.load(repo, client: client, maxAge: force ? 0 : RepoCache.maxAge) }
             }

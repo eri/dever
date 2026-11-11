@@ -144,3 +144,18 @@ Kept on a second line: the failure note (it explains the lime button above it), 
 invitation when no pull request is linked.
 
 Captures: `…/scratchpad/shots8/{live,deploying,failed,notdeployed,none}/project-{dark,light}.png`. Verdict: Approve.
+
+## Revision 5 (user feedback: "Live" beside a product that is down; the progress light over the text; the empty boxes)
+
+| Severity | Domain | Location | Before | After | Why |
+| --- | --- | --- | --- | --- | --- |
+| HIGH | Writing | Phase, live | "Live" with a green check while a product did not answer | "Partly down" with a warning triangle when some hosts fail, "Down" with a cross when all do (`PreviewStatus.health`, `word`); the product that fails keeps its own mark and "down" / "API down". Same word on the Overview row | The state must not contradict the link beside it; the word says something is wrong, the mark on the link says which |
+| HIGH | Layout | Progress | The waiting light ran unclipped across the step text | The step, then a 64 pt clipped track the light runs in | The light was drawn over the words it belongs beside |
+| MEDIUM | Layout | No preview yet | A tile with a logo, a line and two buttons under the header | The header's own line: "Follow a pull request's preview here" as its subtitle, "Add a preview" and "No preview needed" on the right | The panel is the box; a box inside it doubled the frame and the glyph |
+| MEDIUM | Layout | `PanelEmpty`, `ConnectPanelBody` (every panel) | A tile on the ground colour with a 28 pt logo | One muted line and the button, no tile, no second logo | Same reason, for "link Linear / a repository / a channel" and "connect" on every panel |
+| HIGH | Data | Delivery, Linear not connected | The invitation row, then every open pull request of the repository (hundreds) under "Pull requests" | The header is the invitation (pitch as subtitle, "Connect Linear" on the right, no "Open ↗"); no pull requests until the issues can be read (`ProjectPulls.waitsForIssues`), unless the project takes the whole repository | A project that follows its issues cannot tell its pull requests from the others' without them; listing the repository's showed other projects' work as its own |
+
+Not changed: the Overview still counts a per-project repository's pull requests while Linear fails (it leaves GitHub
+out only on the shared repository).
+
+Captures: `…/scratchpad/shots9/{live,deploying,none,disc2}/project-{dark,light}.png`. Verdict: Approve.
