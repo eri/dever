@@ -95,4 +95,18 @@ enum OverviewDemo {
 
         return ([checkout, billing, onboarding, search, leaderboard], snapshots)
     }
+
+    /// The release line of the demo: production five days ago, staging an hour ago with its
+    /// checks passing, a release pull request open for two days.
+    @MainActor static var release: ReleaseStore.State? {
+        guard scene != nil else { return nil }
+        let now = Date()
+        let url = URL(string: "https://github.com/demo/app/pull/1")!
+        var s = ReleaseStore.State(repository: "demo/app", stagingBranch: "staging", productionBranch: "main")
+        s.production = .init(number: 4701, title: "Release", author: "jad", date: now.addingTimeInterval(-5 * 86_400), url: url)
+        s.staging = .init(number: 5068, title: "Remove obsolete jobs after rollout", author: "tarik", date: now.addingTimeInterval(-3_600), url: url)
+        s.stagingChecks = .passing
+        s.next = .init(number: 5001, author: "tom", opened: now.addingTimeInterval(-2 * 86_400), url: url, checks: .running)
+        return s
+    }
 }

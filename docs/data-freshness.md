@@ -32,6 +32,7 @@ they closed are marked there). File references are under `Sources/Dever/`.
 | Open and merged pull requests, workflow runs, review verdicts | `ProjectDetailView.loadGitHub` | **view `@State`** | one visit of the page | page appearing, Refresh |
 | Slack channel messages, read cursor, thread replies | `ProjectDetailView.loadSlack`, `ThreadPane.load` | **view `@State`** | one visit of the page | page appearing, after a reply or a reaction |
 | Slack members, custom emoji, linked channel names | `SlackDirectory` | actor + disk copy | 15 min · 1 h · session | on demand |
+| Release line: last merge into staging and production, staging checks, open release pull request | `ReleaseStore.refresh` (one or two GraphQL queries, about 2 kB) | `ReleaseStore.state` | 2 min | Overview cycle, Refresh, back to Dever after opening one of its parts on GitHub |
 | Preview environment of a pull request | `PreviewStore.load` | `PreviewStore.states` | 60 s, shared by Overview and project page | Overview cycle, panel appearing, every 30 s after a command |
 | Images, Slack files | `ImageCache`, `SlackMediaCache` | disk | size and age purge | on demand |
 | Projects, settings, credentials | `AppState` | JSON file, UserDefaults, Keychain | permanent | local only |
@@ -288,6 +289,7 @@ means the behaviour once sections 3.1 to 3.4 are in place.
 | Open a project and come back | Whatever was done there | Old rows unless the timer is due | Rows are derived from the stores: already current |
 | Click a mention or "N unread" | Read cursor | Removed in place (`slackRead`) | Keep |
 | Click a review request | Review given on GitHub | Stays until the next cycle | Opened externally: refresh `pulls(repo)` on return |
+| Open a part of the release line (Prod, Staging, Next prod) on GitHub | A merge, the checks, the release pull request | Read again when Dever is active again (`ReleaseStore.opened`) | Keep |
 | Link Linear / edit a project | The project's links | Row unchanged until the next cycle | Load that one project's resources on save |
 | Add or import projects | New rows | Skeleton rows until the next cycle | Load the new projects only |
 | Refresh, ⌘R | Everything | Whole reload, row by row, 11 MB per repository | Revalidate all, cheap requests, rows update in place |

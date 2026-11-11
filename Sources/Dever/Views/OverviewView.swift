@@ -156,6 +156,8 @@ struct OverviewView: View {
                 Text("Overview").font(.system(size: 28, weight: .semibold)).tracking(-0.8).foregroundStyle(Soot.ink)
                     .accessibilityAddTraits(.isHeader)
                 summary
+                ReleaseLine()
+                    .padding(.top, 6)
             }
             Spacer(minLength: 16)
             HStack(spacing: 8) {
@@ -1017,5 +1019,74 @@ enum Brief {
         if s < 7 * 86_400 { return "\(Int(s / 86_400))d" }
         if s < 60 * 86_400 { return "\(Int(s / (7 * 86_400)))w" }
         return "\(Int(s / (30 * 86_400)))mo"
+    }
+}
+
+// MARK: - Release line
+
+/// Where the code stands, under the title: what went to production last, what landed on
+/// staging last (with its checks), and the release waiting to go. One line, three links.
+private struct ReleaseLine: View {
+    @EnvironmentObject var app: AppState
+    @EnvironmentObject var store: OverviewStore
+    @ObservedObject private var release = ReleaseStore.shared
+
+    var body: some View {
+        Group {
+            if let s = release.state {
+                HStack(spacing: 6) {
+                    if let p = s.production {
+                        part(symbol: "checkmark.seal.fill", tint: Soot.lime, title: "Prod",
+                             detail: "\(when(p.date)) · \(p.author)", checks: nil, url: p.url,
+                             help: "Last merged into \(s.productionBranch): #\(p.number) \(p.title)")
+                    }
+                    if let st = s.staging {
+                        part(symbol: "testtube.2", tint: Theme.chart2, title: "Staging",
+                             detail: "\(when(st.date)) · \(st.author)", checks: s.stagingChecks, url: st.url,
+                             help: "Last merged into \(s.stagingBranch ?? "staging"): #\(st.number) \(st.title)")
+                    }
+                    if let n = s.next {
+                        part(symbol: "arrow.up.forward.circle.fill", tint: Soot.muted, title: "Next prod",
+                             detail: "#\(n.number) · open \(Brief.ago(n.opened))", checks: n.checks, url: n.url,
+                             help: "Release pull request into \(s.productionBranch), opened by \(n.author)")
+                    }
+                    if release.failed, let at = release.loadedAt {
+                        Text("as of \(at.formatted(.relative(presentation: .named)))")
+                            .font(.system(size: 12)).foregroundStyle(Soot.muted)
+                            .padding(.leading, 4)
+                    }
+                }
+                .padding(.leading, -8)
+                .transition(.opacity)
+            } else if ReleaseStore.repository(app) != nil, app.github != nil, release.loadedAt == nil, !release.failed {
+                Skeleton(width: 320, height: 12).padding(.vertical, 8)
+            }
+        }
+        .motion(Motion.ui, fade: true, value: release.state)
+        .task(id: store.lastRefresh) { await release.refresh(app) }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Releases of \(release.state?.repository ?? "the repository")")
+    }
+
+    /// Under a day: "3h ago"; older: the day.
+    private func when(_ date: Date) -> String {
+        Date().timeIntervalSince(date) < 86_400 ? "\(Brief.ago(date)) ago" : date.formatted(.dateTime.day().month(.abbreviated))
+    }
+
+    private func part(symbol: String, tint: Color, title: String, detail: String,
+                      checks: ProjectSnapshot.PipelineState?, url: URL, help: String) -> some View {
+        HoverLink(destination: url, hoverTint: Soot.surface) {
+            HStack(spacing: 6) {
+                Image(systemName: symbol).font(.system(size: 12, weight: .semibold)).foregroundStyle(tint)
+                    .accessibilityHidden(true)
+                Text(title).font(.system(size: 12, weight: .semibold)).foregroundStyle(Soot.ink)
+                Text(detail).font(.system(size: 12)).foregroundStyle(Soot.muted).monospacedDigit()
+                if let checks, checks != .unknown { PipelineGlyph(state: checks) }
+            }
+            .lineLimit(1)
+        }
+        .simultaneousGesture(TapGesture().onEnded { release.opened() })
+        .help(help + " · Opens on GitHub")
+        .accessibilityLabel("\(title): \(detail)" + (checks.map { $0 == .unknown ? "" : ", checks \(PipelineGlyph.word($0))" } ?? "") + ". Opens on GitHub")
     }
 }
