@@ -1,14 +1,16 @@
 import Foundation
+import os
 
 // A long Slack message shown as its summary in the rail (docs/on-device-ai.md, 5.7). The rail
 // already cuts a long message at four lines; the summary takes the place of that cut, the
 // original stays one click away, and the room always shows the messages themselves.
 
 enum MessageSummary {
+    /// Why a summary was or was not written: counts and reasons only, never a message's words.
+    static let log = Logger(subsystem: "io.github.eri.dever", category: "intelligence")
+
     /// Same test as the rail's "Show more": only a message the rail would cut is shown as its summary.
     static let minimumLength = 240
-    /// Shortest message worth asking the model about: under it ("Fine for me."), nothing is open.
-    static let shortest = 40
     /// Longest summary worth showing, as a share of the original: past it, the original reads as fast.
     static let longestShare = 0.7
     /// And in characters: a summary is two lines of the rail, three at most, whatever the message.
@@ -19,8 +21,6 @@ enum MessageSummary {
         let text: String
         /// English name of the language to write in ("French").
         let language: String
-        /// A message the rail shows whole: only its kind is asked for, its own words stand.
-        var short = false
         /// An edited message is another input.
         var version: String { "\(language)-\(text.count)-\(text.hashValue)" }
     }
@@ -29,20 +29,38 @@ enum MessageSummary {
         (message.text?.count ?? 0) > minimumLength && !message.isSystem
     }
 
+    /// The message asks something of the reader: a request or a question, in a message that
+    /// names them, with an @ or by a word of their name. Read from the message, not asked of the
+    /// model, which takes the author of a request for its target.
+    static func isForReader(_ message: SlackMessage, kind: String?, me: String?, users: [String: SlackUser]) -> Bool {
+        guard let kind, kind == "Request" || kind == "Question", let me else { return false }
+        if (message.text ?? "").contains("<@\(me)") { return true }
+        return names(SlackPlain.text(message.text ?? "", users: users), reader: users[me]?.name ?? "")
+    }
+
+    /// `text` holds a word of the reader's name ("Sam" for "Sam Rivers"), as a whole word, whatever
+    /// the case and the accents. Words of one or two letters do not count.
+    static func names(_ text: String, reader: String) -> Bool {
+        func words(_ s: String) -> Set<String> {
+            Set(s.lowercased().folding(options: .diacriticInsensitive, locale: nil)
+                .split(whereSeparator: { !$0.isLetter && !$0.isNumber }).map(String.init).filter { $0.count > 2 })
+        }
+        return !words(text).isDisjoint(with: words(reader))
+    }
+
     static func subject(channel: String, ts: String) -> IntelligenceStore.Subject {
         .init(feature: .messageSummary, id: "\(channel)/\(ts)")
     }
 
-    /// The input for a message, or nil when it is too short to hold anything open.
+    /// The input for a message, or nil when it is not one the rail cuts.
     static func input(_ message: SlackMessage, users: [String: SlackUser], languageCode: (String) -> String) -> Input? {
-        guard !message.isSystem, (message.text?.count ?? 0) >= shortest else { return nil }
+        guard isLong(message) else { return nil }
         // Slack's marks for bold and code are noise to the model, and it copies them out.
         let text = SlackPlain.text(message.text ?? "", users: users)
             .replacingOccurrences(of: "*", with: "").replacingOccurrences(of: "`", with: "")
-        guard text.count >= shortest else { return nil }
+        guard text.count > minimumLength else { return nil }
         let language = Locale(identifier: "en_US").localizedString(forLanguageCode: languageCode(text)) ?? "English"
-        return Input(author: message.user.flatMap { users[$0]?.name } ?? "Someone", text: text, language: language,
-                     short: !isLong(message))
+        return Input(author: message.user.flatMap { users[$0]?.name } ?? "Someone", text: text, language: language)
     }
 
     /// The kinds a message can be, as shown at the head of its summary.
@@ -62,12 +80,7 @@ enum MessageSummary {
 
     /// The model's answer as shown, or nil when it is not worth the place of the original:
     /// empty, too long for two lines, or nearly as long as the message.
-    /// A short message keeps its own words: only the kind comes from the model.
-    static func text(from answer: MessageSummaryAnswer, original: String, short: Bool = false) -> GeneratedText? {
-        if short {
-            return GeneratedText(sentences: [.init(text: original)],
-                                 kind: kinds.first { $0.lowercased() == answer.kind.lowercased() })
-        }
+    static func text(from answer: MessageSummaryAnswer, original: String) -> GeneratedText? {
         var plain = answer.summary.replacingOccurrences(of: "*", with: "").replacingOccurrences(of: "`", with: "")
             .split(whereSeparator: \.isNewline).joined(separator: " ")
             .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -102,18 +115,22 @@ enum MessageSummary {
             }
             do {
                 let answer = try await model.summarise(instructions: instructions, prompt: prompt)
-                guard let text = text(from: answer, original: input.text, short: input.short) else {
-                    CatchUp.log.notice("message summary: silent, nothing shorter than the \(input.text.count) characters of the message")
+                guard let text = text(from: answer, original: input.text) else {
+                    log.notice("message summary: silent, nothing shorter than the \(input.text.count) characters of the message")
                     throw IntelligenceError.unavailable
                 }
-                CatchUp.log.notice("message summary: written, \(input.text.count) characters to \(text.sentences.first?.text.count ?? 0)")
+                log.notice("message summary: written, \(input.text.count) characters to \(text.sentences.first?.text.count ?? 0)")
                 return text
             } catch {
-                CatchUp.log.error("message summary: silent, the model failed: \(String(String(describing: error).prefix(160)), privacy: .public)")
+                log.error("message summary: silent, the model failed: \(String(String(describing: error).prefix(160)), privacy: .public)")
                 throw error
             }
         }
     }
+
+    static let sampleRequest = GeneratedText(sentences: [
+        .init(text: "Kyryl asks Sam to fix SUP-931 before the release.")
+    ], kind: "Request")
 
     /// A made-up summary for captures (`DEVER_SNAPSHOT_INTELLIGENCE`).
     static let sample = GeneratedText(sentences: [

@@ -7,12 +7,11 @@ import Foundation
 
 /// One use of the model. Each has its own switch in Settings › Intelligence, on by default.
 enum IntelligenceFeature: String, CaseIterable, Identifiable, Sendable {
-    case catchUp, messageSummary, detectedMentions, issueSummary, draftReply, issueFromMessage, explainFailure
+    case messageSummary, detectedMentions, issueSummary, draftReply, issueFromMessage, explainFailure
     var id: String { rawValue }
 
     var title: String {
         switch self {
-        case .catchUp: "Slack catch-up"
         case .messageSummary: "Long messages"
         case .detectedMentions: "Detected mentions"
         case .issueSummary: "Issue summary"
@@ -39,7 +38,7 @@ enum IntelligenceFeature: String, CaseIterable, Identifiable, Sendable {
 
     var group: Group {
         switch self {
-        case .catchUp, .messageSummary, .detectedMentions, .issueSummary: .summaries
+        case .messageSummary, .detectedMentions, .issueSummary: .summaries
         case .draftReply, .issueFromMessage: .writing
         case .explainFailure: .pipelines
         }
@@ -49,7 +48,7 @@ enum IntelligenceFeature: String, CaseIterable, Identifiable, Sendable {
 
     /// The features that exist in this build. A feature not listed has no switch, no interface
     /// and no invitation; each phase of docs/on-device-ai.md adds its own here.
-    static let built: Set<IntelligenceFeature> = [.catchUp, .messageSummary]
+    static let built: Set<IntelligenceFeature> = [.messageSummary]
 
     /// Built, or shown for a capture (`DEVER_SNAPSHOT_INTELLIGENCE`).
     static var shipped: Set<IntelligenceFeature> {
@@ -175,12 +174,8 @@ final class IntelligenceStore: ObservableObject {
     @Published private(set) var entries: [Subject: Entry] = [:]
     private var tasks: [Subject: Task<Void, Never>] = [:]
 
-    /// Whether features are switched on; replaced in tests. Message summaries are written for the
-    /// rail's long messages and for the catch-up, which is put together from them.
-    var isOn: (IntelligenceFeature) -> Bool = {
-        $0 == .messageSummary ? IntelligencePreferences.isOn(.messageSummary) || IntelligencePreferences.isOn(.catchUp)
-                              : IntelligencePreferences.isOn($0)
-    }
+    /// Whether features are switched on; replaced in tests.
+    var isOn: (IntelligenceFeature) -> Bool = { IntelligencePreferences.isOn($0) }
 
     /// The text to show for a subject, whatever its version: an older one stays until the newer
     /// one lands, so the place never empties and refills.

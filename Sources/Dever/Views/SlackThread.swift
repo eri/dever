@@ -1382,7 +1382,8 @@ private struct MessageRow: View {
                 }
                 Group {
                     if let summary, !showOriginal {
-                        SummarisedMessage(text: summary).padding(.top, 2).transition(Motion.pop)
+                        SummarisedMessage(text: summary, forYou: MessageSummary.isForReader(message, kind: summary.kind, me: me, users: users))
+                            .padding(.top, 2).transition(Motion.pop)
                     } else {
                         MessageBody(message: message, users: users, channels: channels, expanded: wide ? .constant(true) : $expanded)
                             .transition(.opacity)

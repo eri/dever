@@ -262,8 +262,7 @@ Refresh every. "Volatile" is the cadence while something is in flight.
 | Preview environment | 60 s | 15 s while deploying, updating or deleting (30 s after a command posted from Dever) | command posted, activation | ETag |
 | Slack channel: new messages | 20 s | | reply sent, activation | `oldest` cursor |
 | Slack channel: edits, reactions, reply counts of what is shown | 60 s | | reaction or reply made here (local, at once) | latest page |
-| Slack catch-up (the open matters among the unread messages, put together from the message summaries below) | follows the unread messages and their summaries | | a new unread message, the read cursor, a summary landing, its switch | no request and no generation: derived in the view |
-| Summary and kind of a Slack message (generated on the Mac from the message already in `SlackStore`: the rail's long messages, and every unread one for the catch-up) | follows the message: rewritten when it is edited | | the message entering the rail or being unread, an edit, the model becoming ready, its switches | no request: derived, in memory (`IntelligenceStore`) |
+| Summary and kind of a long Slack message (generated on the Mac from the message already in `SlackStore`) | follows the message: rewritten when it is edited | | the message entering the rail, an edit, the model becoming ready, its switch | no request: derived, in memory (`IntelligenceStore`) |
 | Slack read cursor, unread, mentions | 20 s | | mark read (local, at once), activation. A cursor moved back in Slack ("Mark unread") wins over what was read here, except in the 10 s after a move made here | `conversations.info` |
 | Thread replies (open thread) | 20 s | | reply sent | `conversations.replies` |
 | Linear issue rows, blockers | 60 s | | any issue write (local, at once), activation | `updatedAt` delta |
@@ -332,8 +331,7 @@ means the behaviour once sections 3.1 to 3.4 are in place.
 
 Covered by the project page rows. In addition: an open thread refreshes its replies every 20 s; the room
 appends new messages at the bottom without moving the reading position (the "jump to latest" control
-already exists for this). A sentence of the catch-up above the rail opens the room on its message; it
-changes nothing, and the catch-up goes when the read cursor passes its messages.
+already exists for this).
 
 ### Sheets (new project, import, editor, pickers)
 

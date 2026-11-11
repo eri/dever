@@ -595,13 +595,6 @@ struct ProjectDetailView: View {
                 QuietEmpty(symbol: "bubble.left", text: "No messages yet")
             } else {
                 if !slackExpanded { IntelligenceInvitation() }
-                if !slackExpanded, let digest, !digest.isEmpty {
-                    DigestBlock(digest: digest, open: { openInRoom($0) })
-                        .padding(.bottom, 14)
-                        .overlay(alignment: .bottom) { Rectangle().fill(Soot.line).frame(height: 1) }
-                        .padding(.bottom, 14)
-                        .transition(.opacity)
-                }
                 SlackThreadView(messages: messages, users: users, domain: app.slack?.domain,
                                 channelID: project.slack?.id, channelName: project.slack?.name, otherChannels: linkedChannels,
                                 shown: shownMessages, railMessages: railPlan.messages, readUpTo: lastRead,
@@ -866,61 +859,23 @@ struct ProjectDetailView: View {
         return (Array(messages.prefix(min(recent, 6))), recent, false, nil)
     }
 
-    // MARK: Catch-up and message summaries (docs/on-device-ai.md, 5.1 and 5.7)
+    // MARK: Message summaries (docs/on-device-ai.md, 5.7)
 
-    /// The open matters among the unread messages, put together from their summaries as they
-    /// land. Nothing is generated for it and nothing is fetched.
-    private var digest: CatchUp.Digest? {
-        guard intelligenceStatus.offers(.catchUp) else { return nil }
-        return CatchUp.digest(messages: messages, lastRead: lastRead, hasEarlier: hasEarlier, firstUnread: countedFirstUnread,
-                              shown: Set(railPlan.messages.map(\.ts)), users: users, me: app.slack?.userID, summary: { messageSummary($0) })
-    }
-
-    /// The oldest unread message the Overview counted, unless it stopped counting (200 and more).
-    private var countedFirstUnread: String? {
-        guard let slack = store.snapshots[project.id]?.slack, !slack.unreadCapped else { return nil }
-        return slack.firstUnreadTS
-    }
-
-    /// Changes when the messages, the cursor, the names or the model's readiness do.
+    /// Changes when the messages the rail shows, the names or the model's readiness do.
     private var summariesTrigger: String {
-        "\(project.slack?.id ?? "")|\(lastRead ?? "")|\(messages.first?.ts ?? "")|\(messages.count)|\(users.count)|\(intelligenceStatus.offers(.catchUp))|\(intelligenceStatus.offers(.messageSummary))"
+        "\(project.slack?.id ?? "")|\(lastRead ?? "")|\(messages.first?.ts ?? "")|\(messages.count)|\(users.count)|\(intelligenceStatus.offers(.messageSummary))"
     }
 
-    /// What the store holds for a message's summary.
-    private func messageSummary(_ message: SlackMessage) -> CatchUp.Summary {
-        guard let channel = project.slack?.id,
-              let entry = intelligence.entries[MessageSummary.subject(channel: channel, ts: message.ts)] else { return .none }
-        if let text = entry.text { return .ready(text) }
-        return entry.writing ? .pending : .none
-    }
-
-    /// Asks for the summary of the messages that need one, the newest first (what is seen first
-    /// is written first), one at a time: the long messages the rail shows, for their block, and
-    /// every unread message, for the catch-up. No network request.
+    /// Asks for the summary of each long message the rail shows, the newest first: what is seen
+    /// first is written first. One at a time. No network request.
     private func refreshMessageSummaries() {
-        guard let channel = project.slack?.id else { return }
-        let inPlace = intelligenceStatus.offers(.messageSummary), catchUp = intelligenceStatus.offers(.catchUp)
-        guard inPlace || catchUp else { return }
-        let shown = Set(railPlan.messages.map(\.ts))
-        for message in messages {
-            let unread = !(lastRead.map { SlackTS.isAtOrBefore(message.ts, $0) } ?? true)
-            guard (catchUp && unread) || (inPlace && shown.contains(message.ts) && MessageSummary.isLong(message)),
-                  let input = MessageSummary.input(message, users: users,
+        guard let channel = project.slack?.id, intelligenceStatus.offers(.messageSummary) else { return }
+        for message in railPlan.messages {
+            guard let input = MessageSummary.input(message, users: users,
                                                    languageCode: { IntelligencePreferences.language(forSummaryOf: $0) }) else { continue }
             intelligence.want(MessageSummary.subject(channel: channel, ts: message.ts), version: input.version) {
                 try await MessageSummary.write(input)
             }
-        }
-    }
-
-    /// Opens the room on a message and lights it for two seconds.
-    private func openInRoom(_ ts: String) {
-        slackFocus = ts
-        if !slackExpanded { toggleSlackWide() }
-        Task {
-            try? await Task.sleep(nanoseconds: 2_000_000_000)
-            if slackFocus == ts { Motion.run(Motion.ui, fade: true) { slackFocus = nil } }
         }
     }
 

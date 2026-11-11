@@ -19,7 +19,6 @@ board already answers it.
 
 | Kept | Where | Trigger |
 | --- | --- | --- |
-| Slack catch-up | Slack rail of the project page, above the unread messages | automatic, from a threshold of unread |
 | Long messages as summaries | Slack rail, in the place of each message the rail cuts | automatic, newest first |
 | Detected mentions | the catch-up, and the "for you" items of the Overview | automatic |
 | Issue from a message | ⋯ menu of a Slack message | on demand |
@@ -113,34 +112,22 @@ Each feature gives its data contract when it is implemented (the template of
 [data-freshness.md, section 7](data-freshness.md#7-checklist-for-every-feature)); the lines below are
 the parts already decided.
 
-### 5.1 Slack catch-up
+### 5.1 Slack catch-up (dropped)
 
-- **Where:** top of the Slack rail of the project page, above the unread messages.
-- **When:** by itself when the channel holds at least 6 unread messages (`CatchUp.threshold`). Below
-  that, nothing: reading three messages is faster than reading about them.
-- **What:** what the rail does not already say, one line each, three at most: the kind (Request,
-  Question or Problem) and the summary of one message (5.7). First the requests and questions in a
-  message that names the user, with an @ or by a word of their name (`CatchUp.names`), marked with an
-  arrow; then the open matters among the unread messages the rail does not display (it shows eight),
-  newest first. A click opens the room on the message. Updates are never listed.
-- **No doubles, no empty block:** a message displayed under the block, with its own summary, is not
-  listed again unless it is for the user. With nothing to point at there is no block at all.
-- **Not written by the model.** Three ways of having it sum up the channel were tried on real channels
-  and dropped: free text in two labelled lines (malformed one time in two), guided generation over the
-  raw messages (vague or false, an example of the instructions repeated as if the channel had said it,
-  the author of a request taken for its target), then the same over the message summaries (better, still
-  not trusted). One message at a time the model does well, so the catch-up is put together by Dever from
-  those summaries: nothing in it can be wrong that is not wrong in the summary one click away.
-- **Every unread message gets a kind.** A long one through its summary; a short one (40 to 240
-  characters) keeps its own words and only its kind is asked for; under 40 characters nothing is asked.
-- **Loading:** no skeleton, since most channels end with nothing to list: the block appears with its
-  first line, and "Summarising" shows under the lines while summaries are still being written.
-- **More unread than what is loaded:** the list covers what is loaded and says so: "Covers the last 15
-  unread messages". The Overview's oldest counted unread message tells whether anything older is unread.
-- **Reads:** `SlackStore` messages of the channel, `lastRead`, user names, and the message summaries in
-  `IntelligenceStore`. Derived in the view from them: no generation of its own, no network request.
-- **Left out for now:** replies inside threads (only opened threads are loaded), and the link between a
-  problem and the later message that says it is fixed.
+A block above the unread messages of the rail that sums up the channel. Built four ways, tried on real
+channels, and removed:
+
+1. Free text in two labelled lines: malformed one time in two.
+2. Guided generation over the raw messages: vague or false sentences, an example of the instructions
+   repeated as if the channel had said it, the author of a request taken for its target.
+3. The same over the summaries of the messages: better, still not trusted.
+4. A list put together by Dever from the message summaries, with no writing of its own: reliable, but
+   it said again what the summaries under it already said.
+
+What stays of it: the summaries message by message (5.7), which is where the model does well, and the
+arrow on a summarised message that asks something of the user. Lessons kept for the next features: one
+small task at a time, guided generation, no example in the instructions (the model repeats it), and a
+check in code for anything the model gets wrong in a known way.
 
 ### 5.2 Detected mentions
 
@@ -209,12 +196,14 @@ Someone speaks of the user, or asks something of them, without a Slack mention.
 
 - **Where:** the Slack rail, in the place of each message it would cut ("Show more", over 240
   characters). Not in the room, not for short messages.
-- **When:** by itself, for the messages the rail shows, the newest first, one at a time behind the
-  catch-up. The original shows until the summary is ready, with a line under it ("Summarising", the
+- **When:** by itself, for the messages the rail shows, the newest first, one at a time. The original shows until the summary is ready, with a line under it ("Summarising", the
   sparkle breathing) so that the swap is expected; then the block takes its place.
 - **What:** the kind of message at the head of the block and one sentence of at most 20 words that
   stands on its own: who or what it is about, then what is asked, wrong, decided or announced. Names,
   numbers and ticket identifiers kept. Guided generation; the kind is chosen after the sentence.
+- **Asked of the user:** a lime arrow before the kind when the message is a Request or a Question and
+  names the user, with an @ or by a word of their name (`MessageSummary.isForReader`). Read from the
+  message, not asked of the model.
 - **Kinds,** by what the message expects of its readers: **Request** (someone is asked to do, send,
   check, fix or decide), **Question** (an answer or an opinion is asked for), **Problem** (something is
   wrong, slow, failing, late or to fix, and no one in particular is asked), **Update** (the rest:
@@ -245,7 +234,6 @@ Intelligence
 Runs on this Mac. Nothing leaves it.
 
 Summaries
-  Slack catch-up                        [on]
   Long messages                         [on]
   Detected mentions  @✦                 [on]
   Issue summary                         [on]
@@ -272,8 +260,8 @@ Pipelines
 | Available | features on | as section 6 |
 
 - **The invitation:** one quiet line at the top of the Slack rail, the first time only, when the Mac
-  could run the model but it is off or not ready: what Dever would do here and a link to System
-  Settings. Dismissed once, never shown again.
+  could run the model but it is off or not ready: what Dever would do here (shorten long messages) and
+  a link to System Settings. Dismissed once, never shown again.
 - **Slow:** skeleton lines in the reserved place; the content under it is usable at once.
 - **Failing** (refusal, guardrail, context exceeded, rate limit, unsupported language): rule 4. The
   place closes without a message; the next change of the input may try again, the same input does not.
@@ -307,8 +295,8 @@ Pipelines
 | Phase | Content | Depends on |
 | --- | --- | --- |
 | 0. Ground | **Done.** `Intelligence` service and availability gating, `IntelligenceStore`, the mark and the generated block, Settings › Intelligence, the one-time invitation, snapshot states, tests, measurements (section 2). | |
-| 1. Slack catch-up | **Built:** 5.1 as a list of open matters put together from the message summaries, after three written forms were tried and dropped. **Left:** 5.2 as `@✦` items in the Overview. | 0 |
-| 1b. Long messages | **Built:** 5.7, tried on the real model. **Left:** look at it on real channels. | 0 |
+| 1. Slack catch-up | **Dropped** after four forms on real channels (5.1). | 0 |
+| 1b. Long messages | **Built:** 5.7, with kinds and the arrow for what is asked of the user, tuned on real channels. | 0 |
 | 2. Writing | `issueCreate` and the sheet (useful without the model), its filling (5.3), then the reply draft (5.4). | 0; the sheet itself depends on nothing |
 | 3. Issue summary | 5.5. | 0 |
 | 4. Pipeline failure | job and log reads, then 5.6. | 0 |

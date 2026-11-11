@@ -108,7 +108,7 @@ final class TextBudgetTests: XCTestCase {
 
 @MainActor
 final class IntelligenceStoreTests: XCTestCase {
-    private let subject = IntelligenceStore.Subject(feature: .catchUp, id: "channel")
+    private let subject = IntelligenceStore.Subject(feature: .messageSummary, id: "channel")
     private func text(_ s: String) -> GeneratedText { GeneratedText(sentences: [.init(text: s)]) }
 
     func testWritesOncePerVersion() async {
@@ -185,119 +185,20 @@ final class IntelligenceStoreTests: XCTestCase {
         store.want(subject, version: "1") { GeneratedText(sentences: [.init(text: "one")]) }
         store.want(other, version: "1") { GeneratedText(sentences: [.init(text: "issue")]) }
         await store.settle()
-        store.drop(.catchUp)
+        store.drop(.messageSummary)
         XCTAssertNil(store.text(subject))
         XCTAssertEqual(store.text(other), text("issue"))
     }
 
     func testPreferencesDefaultOnAndSourceLanguage() {
         let defaults = UserDefaults(suiteName: "intelligence-tests-\(UUID().uuidString)")!
-        XCTAssertTrue(IntelligencePreferences.isOn(.catchUp, defaults: defaults))
-        defaults.set(false, forKey: IntelligenceFeature.catchUp.settingKey)
-        XCTAssertFalse(IntelligencePreferences.isOn(.catchUp, defaults: defaults))
+        XCTAssertTrue(IntelligencePreferences.isOn(.messageSummary, defaults: defaults))
+        defaults.set(false, forKey: IntelligenceFeature.messageSummary.settingKey)
+        XCTAssertFalse(IntelligencePreferences.isOn(.messageSummary, defaults: defaults))
         let french = "On attend ta réponse sur le front avant midi pour savoir si on livre aujourd'hui."
         XCTAssertEqual(IntelligencePreferences.language(forSummaryOf: french, defaults: defaults), "fr")
         defaults.set("english", forKey: IntelligencePreferences.summaryLanguageKey)
         XCTAssertEqual(IntelligencePreferences.language(forSummaryOf: french, defaults: defaults), "en")
-    }
-}
-
-final class CatchUpTests: XCTestCase {
-    private let users = ["U1": SlackUser(id: "U1", name: "Alex", avatar: nil, isBot: false),
-                         "U2": SlackUser(id: "U2", name: "Sam Rivers", avatar: nil, isBot: false)]
-
-    /// `count` messages, newest first, with timestamps 1…count.
-    private func messages(_ count: Int) -> [SlackMessage] {
-        (1...count).reversed().map { SlackMessage(ts: "\($0).000000", user: "U1", text: "La migration casse la facturation, message \($0)") }
-    }
-
-    private func written(_ kind: String, _ text: String = "A sentence.") -> CatchUp.Summary {
-        .ready(GeneratedText(sentences: [.init(text: text)], kind: kind))
-    }
-
-    private func digest(_ list: [SlackMessage], lastRead: String? = "0.500000", hasEarlier: Bool = false, firstUnread: String? = nil,
-                        summary: (SlackMessage) -> CatchUp.Summary = { _ in .none }) -> CatchUp.Digest? {
-        CatchUp.digest(messages: list, lastRead: lastRead, hasEarlier: hasEarlier, firstUnread: firstUnread,
-                       users: users, me: "U2", summary: summary)
-    }
-
-    func testNothingBelowTheThresholdOrWithoutACursor() {
-        XCTAssertNil(digest(messages(8), lastRead: "3.000000"), "five unread")
-        XCTAssertNotNil(digest(messages(8), lastRead: "2.000000"), "six unread")
-        XCTAssertNil(digest(messages(12), lastRead: nil))
-    }
-
-    func testSystemAndEmptyMessagesDoNotCount() {
-        var list = messages(7)
-        list[0].subtype = "channel_topic"
-        list[1].text = ""
-        XCTAssertNil(digest(list))
-    }
-
-    func testOnlyWhatIsOpenIsListedNewestFirstAndTheRestIsCounted() throws {
-        let kinds = ["8.000000": "Update", "7.000000": "Problem", "6.000000": "Update", "5.000000": "Request", "4.000000": "Question", "3.000000": "Problem"]
-        let digest = try XCTUnwrap(digest(messages(8)) { m in kinds[m.ts].map { self.written($0, "About \(m.ts)") } ?? .none })
-        XCTAssertEqual(digest.items.map(\.kind), ["Problem", "Request", "Question"])
-        XCTAssertEqual(digest.items.map(\.ts), ["7.000000", "5.000000", "4.000000"])
-        XCTAssertEqual(digest.more, 5)
-        XCTAssertEqual(digest.pending, 0)
-        XCTAssertFalse(digest.items.contains(where: \.forYou))
-    }
-
-    func testARequestThatNamesTheReaderComesFirst() throws {
-        var list = messages(8)                                   // list[0] is message 8
-        list[5].text = "il faudrait que Sam relise la PR"        // message 3, no @
-        list[1].text = "<@U2> on livre demain, bravo"            // message 7, an @ but nothing asked
-        list[7].text = "<@U2> le build de Sam est cassé"         // message 1, a problem that names them
-        let kinds = ["3.000000": "Request", "7.000000": "Update", "6.000000": "Problem", "1.000000": "Problem"]
-        let digest = try XCTUnwrap(digest(list) { m in kinds[m.ts].map { self.written($0) } ?? .none })
-        XCTAssertEqual(digest.items.map(\.ts), ["3.000000", "6.000000", "1.000000"])
-        XCTAssertEqual(digest.items.map(\.forYou), [true, false, false], "a problem is not an action, an update is not listed")
-    }
-
-    func testAtMostThreeLines() throws {
-        var list = messages(9)
-        for i in 0..<4 { list[i].text = "Sam, peux-tu regarder le point \(i) ?" }
-        let digest = try XCTUnwrap(digest(list) { _ in self.written("Request") })
-        XCTAssertEqual(digest.items.count, 3)
-        XCTAssertEqual(digest.items.map(\.forYou), [true, true, true])
-        XCTAssertEqual(digest.more, 6)
-    }
-
-    func testSummariesStillBeingWrittenAreCountedApart() throws {
-        let digest = try XCTUnwrap(digest(messages(8)) { m in m.ts < "4" ? .pending : self.written("Update") })
-        XCTAssertTrue(digest.items.isEmpty)
-        XCTAssertEqual(digest.pending, 3)
-        XCTAssertEqual(digest.more, 5)
-        XCTAssertTrue(digest.isEmpty, "nothing to point at yet: no block")
-    }
-
-    func testWhatTheRailShowsIsNotListedAgainUnlessItIsForTheReader() throws {
-        var list = messages(10)
-        list[0].text = "Sam, peux-tu relire la PR ?"             // message 10, shown in the rail, for the reader
-        let shown: Set<String> = ["10.000000", "9.000000", "8.000000"]
-        let digest = try XCTUnwrap(CatchUp.digest(messages: list, lastRead: "0.500000", hasEarlier: false, shown: shown,
-                                                  users: users, me: "U2") { m in
-            ["10.000000", "9.000000", "2.000000"].contains(m.ts) ? self.written(m.ts == "10.000000" ? "Request" : "Problem") : self.written("Update")
-        })
-        XCTAssertEqual(digest.items.map(\.ts), ["10.000000", "2.000000"], "message 9 is on screen under the block")
-    }
-
-    func testUnreadOlderThanWhatIsLoadedIsSaid() throws {
-        XCTAssertEqual(try XCTUnwrap(digest(messages(10), hasEarlier: true)).covers, 10)
-        XCTAssertNil(try XCTUnwrap(digest(messages(10), hasEarlier: false)).covers)
-        XCTAssertNil(try XCTUnwrap(digest(messages(10), lastRead: "1.000000", hasEarlier: true)).covers)
-        XCTAssertNil(try XCTUnwrap(digest(messages(10), hasEarlier: true, firstUnread: "1.000000")).covers,
-                     "the Overview counted no unread message older than the oldest loaded")
-        XCTAssertEqual(try XCTUnwrap(digest(messages(10), hasEarlier: true, firstUnread: "0.700000")).covers, 10)
-    }
-
-    func testAMessageNamesTheReaderWithOrWithoutAnAt() {
-        XCTAssertTrue(CatchUp.names("Il faudrait que sam regarde le front", reader: "Sam Rivers"))
-        XCTAssertTrue(CatchUp.names("@Sam Rivers tu peux relire ?", reader: "Sam Rivers"))
-        XCTAssertFalse(CatchUp.names("Le même problème qu'hier", reader: "Sam Rivers"))
-        XCTAssertFalse(CatchUp.names("samedi on livre", reader: "Sam Rivers"))
-        XCTAssertFalse(CatchUp.names("anything", reader: ""))
     }
 }
 
@@ -313,7 +214,7 @@ final class MessageSummaryTests: XCTestCase {
 
     func testOnlyAMessageTheRailCutsIsSummarised() {
         let short = SlackMessage(ts: "1", user: "U1", text: "Ok pour moi.")
-        XCTAssertNil(MessageSummary.input(short, users: users, languageCode: { _ in "fr" }), "nothing open in so few words")
+        XCTAssertNil(MessageSummary.input(short, users: users, languageCode: { _ in "fr" }))
         var system = SlackMessage(ts: "2", user: "U1", text: long)
         system.subtype = "channel_topic"
         XCTAssertNil(MessageSummary.input(system, users: users, languageCode: { _ in "fr" }))
@@ -357,13 +258,20 @@ final class MessageSummaryTests: XCTestCase {
         XCTAssertEqual(MessageSummary.kinds, ["Request", "Question", "Problem", "Update"])
     }
 
-    func testAShortMessageKeepsItsWordsAndGetsAKind() throws {
-        let message = SlackMessage(ts: "4", user: "U1", text: "Sam, tu peux relire la migration avant midi ?")
-        let input = try XCTUnwrap(MessageSummary.input(message, users: users, languageCode: { _ in "fr" }))
-        XCTAssertTrue(input.short)
-        let text = MessageSummary.text(from: .init(kind: "request", summary: "Whatever the model wrote."), original: input.text, short: true)
-        XCTAssertEqual(text?.kind, "Request")
-        XCTAssertEqual(text?.sentences.map(\.text), ["Sam, tu peux relire la migration avant midi ?"])
+    func testARequestInAMessageThatNamesTheReaderIsForThem() {
+        let users = ["U1": SlackUser(id: "U1", name: "Alex", avatar: nil, isBot: false),
+                     "U2": SlackUser(id: "U2", name: "Sam Rivers", avatar: nil, isBot: false)]
+        let named = SlackMessage(ts: "1", user: "U1", text: "il faudrait que Sam relise la migration")
+        let mentioned = SlackMessage(ts: "2", user: "U1", text: "<@U2> tu peux relire ?")
+        let other = SlackMessage(ts: "3", user: "U1", text: "Robin, tu peux relire ?")
+        XCTAssertTrue(MessageSummary.isForReader(named, kind: "Request", me: "U2", users: users))
+        XCTAssertTrue(MessageSummary.isForReader(mentioned, kind: "Question", me: "U2", users: users))
+        XCTAssertFalse(MessageSummary.isForReader(other, kind: "Request", me: "U2", users: users))
+        XCTAssertFalse(MessageSummary.isForReader(named, kind: "Problem", me: "U2", users: users), "a problem is not asked of anyone")
+        XCTAssertFalse(MessageSummary.isForReader(named, kind: "Update", me: "U2", users: users))
+        XCTAssertFalse(MessageSummary.isForReader(named, kind: "Request", me: nil, users: users))
+        XCTAssertFalse(MessageSummary.names("samedi on livre", reader: "Sam Rivers"))
+        XCTAssertFalse(MessageSummary.names("anything", reader: ""))
     }
 
     func testSubjectsAreOnePerMessage() {
@@ -397,21 +305,3 @@ extension RealModelTests {
 }
 
 
-extension RealModelTests {
-    /// Short messages keep their words and get a kind, for the catch-up.
-    func testKindsOfShortMessages() async throws {
-        try XCTSkipUnless(ProcessInfo.processInfo.environment["DEVER_TEST_REAL_MODEL"] == "1", "needs the system model")
-        let said = [
-            ("Marco", "Tom, Tarik: there is no tip menu on the preview back office."),
-            ("Charlie", "Do we keep the CSV export in this release, or do we move it to the next one?"),
-            ("Alex", "Sam, can you review the migration pull request before noon?"),
-            ("Robin", "The staging deploy is green again, I merged the retry fix this morning."),
-        ]
-        for (author, message) in said {
-            let text = try await MessageSummary.write(.init(author: author, text: message, language: "English", short: true))
-            print("short: [\(text.kind ?? "-")] \(text.sentences.first?.text ?? "")")
-            XCTAssertEqual(text.sentences.first?.text, message)
-            XCTAssertNotNil(text.kind)
-        }
-    }
-}

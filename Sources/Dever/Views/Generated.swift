@@ -89,73 +89,21 @@ struct GeneratedBlock: View {
     }
 }
 
-/// The catch-up above the unread messages: the open matters, one line each, the reader's first.
-/// Each line is the summary of one message and opens the room on it. Put together by Dever; only
-/// the lines themselves were written by the model, hence the mark.
-struct DigestBlock: View {
-    let digest: CatchUp.Digest
-    var open: ((String) -> Void)? = nil
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 8) {
-            GeneratedMark().frame(height: 20)
-            VStack(alignment: .leading, spacing: 2) {
-                ForEach(digest.items) { item in
-                    Button { open?(item.ts) } label: { row(item) }
-                        .buttonStyle(RowButton(lift: .ground, radius: 6))
-                        .padding(.horizontal, -6)
-                        .help("Show the message")
-                        .transition(.opacity)
-                }
-                foot
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-        }
-        .motion(Motion.ui, fade: true, value: digest.items)
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel("Catch-up")
-    }
-
-    private func row(_ item: CatchUp.Item) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 8) {
-            Image(systemName: "arrow.right").font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(Soot.lime).opacity(item.forYou ? 1 : 0)
-                .accessibilityLabel(item.forYou ? "For you" : "")
-            Text(item.kind).font(.system(size: 11, weight: .semibold)).foregroundStyle(Soot.ink)
-                .frame(width: 56, alignment: .leading)
-            Text(item.text).font(.system(size: 13, weight: item.forYou ? .medium : .regular))
-                .foregroundStyle(item.forYou ? Soot.ink : Soot.ink.opacity(0.8))
-                .lineLimit(2).multilineTextAlignment(.leading)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 6).padding(.vertical, 3)
-        .contentShape(Rectangle())
-    }
-
-    @ViewBuilder
-    private var foot: some View {
-        if digest.covers != nil || digest.pending > 0 {
-            HStack(spacing: 10) {
-                if let covers = digest.covers {
-                    Text(CatchUp.coverage(covers)).font(.system(size: 11)).foregroundStyle(Soot.muted)
-                }
-                if digest.pending > 0 { SummarisingLine() }
-            }
-            .padding(.top, 4)
-        }
-    }
-}
-
 /// A long message as its summary, in the message's own place: a block that cannot be taken for
 /// the message itself. The original is one click away (the row's "Show original").
 struct SummarisedMessage: View {
     let text: GeneratedText
+    /// A request or a question in a message that names the reader: an arrow says so.
+    var forYou = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 6) {
                 GeneratedMark(size: 11)
+                if forYou {
+                    Image(systemName: "arrow.right").font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(Soot.lime).help("Asked of you").accessibilityLabel("Asked of you")
+                }
                 Text(text.kind ?? "Summary").font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(text.kind.map(MessageSummary.pressing.contains) ?? false ? Soot.ink : Soot.muted)
             }
@@ -211,7 +159,7 @@ struct IntelligenceInvitation: View {
 
     private var availability: IntelligenceAvailability { forced ?? status.availability }
     private var shown: Bool {
-        forced != nil || (availability.fixable && !dismissed && IntelligenceFeature.shipped.contains(.catchUp))
+        forced != nil || (availability.fixable && !dismissed && IntelligenceFeature.shipped.contains(.messageSummary))
     }
 
     var body: some View {
@@ -220,7 +168,7 @@ struct IntelligenceInvitation: View {
                 Image(systemName: "sparkles").font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(Soot.muted).padding(.top, 2).accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("Dever can sum up what you missed here, on this Mac.")
+                    Text("Dever can shorten long messages here, on this Mac.")
                         .font(.system(size: 13)).foregroundStyle(Soot.ink)
                         .fixedSize(horizontal: false, vertical: true)
                     ExternalLink(availability == .off ? "Turn on Apple Intelligence" : "Check Apple Intelligence",
@@ -258,7 +206,7 @@ struct GeneratedGallery: View {
             }
             row("Being written") { GeneratedBlock(text: nil, writing: true) }
             row("Written") { GeneratedBlock(text: sample, open: { _ in }) }
-            row("Catch-up") { DigestBlock(digest: CatchUp.sample) }
+            row("A long message that asks something of you") { SummarisedMessage(text: MessageSummary.sampleRequest, forYou: true) }
             row("A long message, being summarised") { SummarisingLine() }
             row("A long message, summarised") { SummarisedMessage(text: MessageSummary.sample) }
             row("Invitation, off") { IntelligenceInvitation(forced: .off) }
