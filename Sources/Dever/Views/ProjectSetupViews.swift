@@ -39,9 +39,10 @@ final class Catalog: ObservableObject {
 
 // MARK: - Add / edit project
 
-/// One question per screen, in the onboarding's frame: a name, then a Slack channel, a Linear
-/// project and a GitHub repository picked from lists, then a recap to confirm. One project per
-/// pass. Editing opens on the recap; each row opens its one step.
+/// One question per screen, in the onboarding's frame: a name, then for Slack, Linear, the
+/// repositories and the preview a question first (pictures to choose from) and the detail on
+/// the page after it, then a recap. One project per pass. Editing opens on the recap; each
+/// row opens its question.
 struct ProjectEditorSheet: View {
     @EnvironmentObject var app: AppState
     @Environment(\.dismiss) private var dismiss
@@ -52,9 +53,19 @@ struct ProjectEditorSheet: View {
     let isNew: Bool
 
     enum Step: Hashable { case name, slack, linear, github, preview, ready }
-    @State private var step: Step
+    /// A step's question, then what the answer needs (a name, a list).
+    enum Phase: Hashable { case ask, detail }
+    struct Page: Hashable { var step: Step; var phase: Phase = .ask }
+    @State private var page: Page
     /// The step the next editor opens on ("Add a preview" from the project page), consumed once.
     static var openAt: Step?
+
+    /// The answer to a tool's question.
+    enum Choice: Hashable { case found, create, existing, workspace, own, yes, no }
+    @State private var slackChoice: Choice = .create
+    @State private var linearChoice: Choice = .create
+    @State private var githubChoice: Choice = .workspace
+    @State private var previewChoice: Choice = .no
 
     /// What the pick means for a tool: an item id, `create`, or nothing.
     static let create = "__create__"
@@ -76,9 +87,10 @@ struct ProjectEditorSheet: View {
     init(project: Project = Project(name: ""), isNew: Bool = true) {
         var project = project
         self.isNew = isNew
-        // Snapshots: DEVER_SNAPSHOT_STEP=name|slack|linear|github|preview|ready opens that step.
-        let snapshot = ProcessInfo.processInfo.environment["DEVER_SNAPSHOT_STEP"]
-        let first: Step = switch snapshot {
+        // Snapshots: DEVER_SNAPSHOT_STEP=name|slack|linear|github|preview|ready opens that step,
+        // DEVER_SNAPSHOT_PHASE=detail its second page.
+        let env = ProcessInfo.processInfo.environment
+        let step: Step = switch env["DEVER_SNAPSHOT_STEP"] {
         case "slack": .slack
         case "linear": .linear
         case "github": .github
@@ -88,14 +100,16 @@ struct ProjectEditorSheet: View {
         }
         Self.openAt = nil
         // Snapshots of the preview step need a repository to list pull requests of.
-        if first == .preview, PreviewStore.simulation != nil, project.githubRepos.isEmpty {
+        if step == .preview, PreviewStore.simulation != nil, project.githubRepos.isEmpty {
             project.githubRepos = [PreviewStore.sampleRepo]
             project.previewRepository = PreviewStore.sampleRepo
             project.previewPullNumber = PreviewStore.samplePullNumber
         }
         _project = State(initialValue: project)
-        _step = State(initialValue: first)
+        _page = State(initialValue: Page(step: step, phase: env["DEVER_SNAPSHOT_PHASE"] == "detail" ? .detail : .ask))
     }
+
+    private var step: Step { page.step }
 
     /// The adding path: the repository step only where the mode lets a project choose, the
     /// preview step once the project follows a repository.
@@ -109,57 +123,81 @@ struct ProjectEditorSheet: View {
     var body: some View {
         StepSheet(step: isNew ? path.firstIndex(of: step) : nil, count: isNew ? path.count : 0,
                   back: backAction, close: { dismiss() }) {
-            // One step fades out and the next rises in (`FadeSwap`); the marks slide with it.
-            FadeSwap(value: step) { shown in
-                switch shown {
-                case .name: nameStep
-                case .slack: slackStep
-                case .linear: linearStep
-                case .github: githubStep
-                case .preview: previewStep
-                case .ready: readyStep
+            // One page fades out and the next rises in (`FadeSwap`); the marks slide with it.
+            FadeSwap(value: page) { shown in
+                switch (shown.step, shown.phase) {
+                case (.name, _): nameStep
+                case (.slack, .ask): slackAsk
+                case (.slack, .detail): slackDetail
+                case (.linear, .ask): linearAsk
+                case (.linear, .detail): linearDetail
+                case (.github, .ask): githubAsk
+                case (.github, .detail): githubDetail
+                case (.preview, .ask): previewAsk
+                case (.preview, .detail): previewDetail
+                case (.ready, _): readyStep
                 }
             }
         }
         .task {
             slackPick = project.slack?.id
             linearPick = project.linear?.id
+            githubChoice = ownRepositories ? .own : .workspace
+            previewChoice = project.previewPullNumber != nil ? .yes : .no
             await catalog.load(app)
             teamPick = teamPick ?? catalog.teams.first?.id
             buildRows()
+            let env = ProcessInfo.processInfo.environment
+            if env["DEVER_SNAPSHOT_STEP"] != nil, project.name.isEmpty {
+                // DEVER_SNAPSHOT_DETECT=1 names the project after a channel, so one is found.
+                let sample = env["DEVER_SNAPSHOT_DETECT"] == "1"
+                    ? availableChannels.first { fitsPrefix($0) }.map { Naming.projectName(fromChannel: $0.name, prefix: channelPrefix) }
+                    : nil
+                project.name = sample ?? "Checkout redesign"
+            }
             suggest()
-            if ProcessInfo.processInfo.environment["DEVER_SNAPSHOT_STEP"] != nil, project.name.isEmpty {
-                project.name = "Checkout redesign"; suggest()
+            if let want = env["DEVER_SNAPSHOT_CHOICE"].flatMap(Self.snapshotChoice) {
+                slackChoice = want; linearChoice = want; answer(.slack, want); answer(.linear, want)
             }
         }
         .onChange(of: channelsNarrowed) { _, _ in buildRows() }
-        .onChange(of: step) { _, _ in query = "" }
+        .onChange(of: page) { _, _ in query = "" }
     }
 
-    /// Every step change: the step fades out and the next rises in (`FadeSwap`); the marks slide.
-    private func go(_ s: Step) { Motion.run(Motion.settle) { step = s } }
+    private static func snapshotChoice(_ raw: String) -> Choice? {
+        switch raw { case "create": .create; case "existing": .existing; case "found": .found; default: nil }
+    }
+
+    /// Every page change: the page fades out and the next rises in (`FadeSwap`); the marks slide.
+    private func go(_ p: Page) { Motion.run(Motion.settle) { page = p } }
+    private func go(_ s: Step) { go(Page(step: s)) }
 
     private var backAction: (() -> Void)? {
+        if page.phase == .detail { return { go(Page(step: step)) } }
         if !isNew { return step == .ready ? nil : { go(.ready) } }
         guard let i = path.firstIndex(of: step), i > 0 else { return nil }
         return { go(path[i - 1]) }
     }
 
+    /// On to the next step (editing: back to the recap).
     private func next() {
         if !isNew { go(.ready); return }
         guard let i = path.firstIndex(of: step), i + 1 < path.count else { go(.ready); return }
         go(path[i + 1])
     }
 
-    // MARK: Steps
+    /// From a question to its detail page.
+    private func detail() { go(Page(step: step, phase: .detail)) }
+
+    // MARK: Name
 
     private var nameStep: some View {
-        VStack(alignment: .leading, spacing: 28) {
-            StepTitle(text: "Name your project")
+        StepPage(title: "Name your project") {
             UnderlineField(placeholder: "e.g. Checkout redesign", text: $project.name, size: 24,
                            onSubmit: { if nameOK { suggest(); next() } })
                 .frame(maxWidth: 360)
                 .accessibilityLabel("Name in Dever")
+        } buttons: {
             Button(isNew ? "Continue" : "Done") { suggest(); next() }
                 .buttonStyle(PrimaryButton(size: .sheet))
                 .keyboardShortcut(.defaultAction)
@@ -169,63 +207,103 @@ struct ProjectEditorSheet: View {
 
     private var nameOK: Bool { !project.name.trimmingCharacters(in: .whitespaces).isEmpty }
 
-    private var slackStep: some View {
-        toolStep(.slack, title: "Slack channel", rows: channelRows, selection: $slackPick,
-                 createTitle: "Create #\(suggestedChannel)",
-                 more: channelsNarrowed && hiddenChannels > 0 ? { channelsNarrowed = false } : nil) {
-            if slackPick == Self.create {
-                SwitchRow(title: "Private channel", isOn: $privateChannel).frame(maxWidth: 420)
+    // MARK: Slack
+
+    /// The channel named like the project, if there is one.
+    private var foundChannel: SlackChannel? {
+        guard nameOK else { return nil }
+        return Naming.closestChannel(to: project.name, prefix: channelPrefix, in: availableChannels)
+    }
+
+    private var slackAsk: some View {
+        askPage(.slack, title: "Which Slack channel?", choice: $slackChoice,
+                found: foundChannel.map { ("#\($0.name)", $0.num_members.map { Plural.text("^[\($0) member](inflect: true)") }) },
+                createDetail: "#\(suggestedChannel)", nothing: "No channel named like \u{201C}\(project.name)\u{201D} yet",
+                skip: "No channel for now")
+    }
+
+    @ViewBuilder
+    private var slackDetail: some View {
+        if slackChoice == .create {
+            StepPage(title: "Name the channel") {
+                VStack(alignment: .leading, spacing: 20) {
+                    SootField(label: "Channel", placeholder: suggestedChannel, text: $newChannelName,
+                              onSubmit: { next() })
+                        .accessibilityLabel("New channel name")
+                    SwitchRow(title: "Private channel", detail: "Only invited people can see it", isOn: $privateChannel)
+                }
+                .frame(maxWidth: 420)
+            } buttons: {
+                continueButton(ok: true)
             }
+        } else {
+            listPage(title: "Pick the channel", rows: channelRows, selection: $slackPick,
+                     more: channelsNarrowed && hiddenChannels > 0 ? { channelsNarrowed = false } : nil)
         }
     }
 
-    private var linearStep: some View {
-        toolStep(.linear, title: "Linear project", rows: linearRows, selection: $linearPick,
-                 createTitle: "Create \u{201C}\(project.name)\u{201D}", more: nil) {
-            if linearPick == Self.create, catalog.teams.count > 1 {
-                HStack(spacing: 12) {
-                    FieldLabel(text: "Team")
-                    SearchPicker(label: "Team", placeholder: "Pick a team",
-                                 items: catalog.teams.map { PickerItem(id: $0.id, title: $0.name) },
-                                 selection: $teamPick)
-                        .frame(maxWidth: 240)
+    // MARK: Linear
+
+    private var foundLinear: LinearProject? {
+        guard nameOK else { return nil }
+        return Naming.closest(to: project.name, in: availableLinear) { $0.name }
+    }
+
+    private var linearAsk: some View {
+        askPage(.linear, title: "Which Linear project?", choice: $linearChoice,
+                found: foundLinear.map { ($0.name, $0.teams?.nodes.map(\.name).joined(separator: ", ")) },
+                createDetail: "\u{201C}\(project.name)\u{201D}", nothing: "No project named like \u{201C}\(project.name)\u{201D} yet",
+                skip: "No Linear project for now")
+    }
+
+    @ViewBuilder
+    private var linearDetail: some View {
+        if linearChoice == .create {
+            listPage(title: "In which team?", rows: catalog.teams.map { PickerItem(id: $0.id, title: $0.name) },
+                     selection: $teamPick, more: nil, search: false)
+        } else {
+            listPage(title: "Pick the project", rows: linearRows, selection: $linearPick, more: nil)
+        }
+    }
+
+    // MARK: Repositories
+
+    /// Mixed mode: the project's own list rather than the workspace repository.
+    private var ownRepositories: Bool { !(project.usesWorkspaceRepository ?? project.githubRepos.isEmpty) }
+
+    /// Mixed mode only: the workspace repository, or the project's own.
+    private var githubAsk: some View {
+        StepPage(title: "Where is the code?") {
+            if !app.isConnected(.github) {
+                connectHint(.github)
+            } else {
+                ChoiceTiles {
+                    ChoiceTile(thumb: .found, title: "The shared repository",
+                               detail: app.workspaceRepository.map(GitHubRepository.short) ?? "Not picked in Settings yet",
+                               tag: "Recommended",
+                               selected: githubChoice == .workspace) { choose(.github, .workspace) }
+                    ChoiceTile(thumb: .existing, title: "Its own repositories",
+                               detail: project.githubRepos.isEmpty ? "One or several" : Plural.text("^[\(project.githubRepos.count) repository](inflect: true)"),
+                               selected: githubChoice == .own) { choose(.github, .own) }
                 }
             }
+        } buttons: {
+            continueButton(ok: !app.isConnected(.github) || githubChoice == .own || app.workspaceRepository != nil) {
+                if app.isConnected(.github) && githubChoice == .own { detail() } else { next() }
+            }
         }
     }
 
-    /// Mixed mode: the workspace repository, or the project's own list (nil until chosen).
-    private var ownRepositories: Binding<Bool> {
-        Binding(get: { !(project.usesWorkspaceRepository ?? project.githubRepos.isEmpty) },
-                set: { project.usesWorkspaceRepository = !$0 })
-    }
-
-    /// One or several repositories, ticked in a list; in mixed mode, first whether the project
-    /// follows the workspace repository at all.
-    private var githubStep: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            StepTitle(text: app.repositoryMode == .mixed ? "Repositories" : "GitHub repositories")
+    /// The project's own repositories, ticked in a list; the whole step where every project has its own.
+    private var githubDetail: some View {
+        StepPage(title: app.repositoryMode == .mixed ? "Which repositories?" : "Which repositories?") {
             if !app.isConnected(.github) {
                 connectHint(.github)
             } else if catalog.loading {
-                VStack(spacing: 6) { ForEach(0..<4, id: \.self) { _ in Skeleton(height: 44, radius: Soot.fieldRadius) } }
+                skeletonRows
             } else {
-                if app.repositoryMode == .mixed {
-                    VStack(spacing: 6) {
-                        PickRow(item: PickerItem(id: "workspace", title: "Use the workspace repository",
-                                                 subtitle: app.workspaceRepository ?? "None picked yet in Settings"),
-                                selected: !ownRepositories.wrappedValue) { ownRepositories.wrappedValue = false }
-                        PickRow(item: PickerItem(id: "own", title: "Its own repositories",
-                                                 subtitle: project.githubRepos.isEmpty ? "Pick one or several below"
-                                                     : project.githubRepos.joined(separator: ", ")),
-                                selected: ownRepositories.wrappedValue) { ownRepositories.wrappedValue = true }
-                    }
-                    .accessibilityElement(children: .contain)
-                    .accessibilityLabel("Which repositories")
-                }
-                if app.repositoryMode == .perProject || ownRepositories.wrappedValue {
-                    SootField(label: "", placeholder: "Search", text: $query, leadingSymbol: "magnifyingglass")
-                        .accessibilityLabel("Search repositories")
+                VStack(alignment: .leading, spacing: 16) {
+                    searchField("Search repositories")
                     ScrollView {
                         LazyVStack(spacing: 6) {
                             ForEach(filtered(repoRows)) { item in
@@ -233,33 +311,21 @@ struct ProjectEditorSheet: View {
                                     toggleRepository(item.id)
                                 }
                             }
-                            if filtered(repoRows).isEmpty && !query.isEmpty {
-                                Text("No match for \u{201C}\(query)\u{201D}").font(.system(size: 13)).foregroundStyle(Soot.muted)
-                                    .padding(.vertical, 16)
-                            }
+                            noMatch(repoRows)
                         }
                     }
                     .frame(maxHeight: .infinity)
                     if !project.githubRepos.isEmpty {
-                        Text(Plural.text("^[\(project.githubRepos.count) repository](inflect: true) picked"))
-                            .font(.system(size: 13)).foregroundStyle(Soot.muted)
+                        SwitchRow(title: "Count every pull request", detail: "Not only those linked to this project's issues",
+                                  isOn: Binding(get: { project.githubWholeRepo == true }, set: { project.githubWholeRepo = $0 }))
+                            .frame(maxWidth: 420)
                     }
                 }
-                if !repos.isEmpty, app.repositoryMode == .perProject || ownRepositories.wrappedValue {
-                    SwitchRow(title: "Count every pull request", detail: "Not only those linked to this project's issues",
-                              isOn: Binding(get: { project.githubWholeRepo == true }, set: { project.githubWholeRepo = $0 }))
-                        .frame(maxWidth: 420)
-                }
             }
-            HStack(spacing: 16) {
-                Button(isNew ? "Continue" : "Done") { next() }
-                    .buttonStyle(PrimaryButton(size: .sheet))
-                    .keyboardShortcut(.defaultAction)
-                    .disabled(app.isConnected(.github) && !catalog.loading && repos.isEmpty)
-                if app.isConnected(.github), app.repositoryMode == .perProject || ownRepositories.wrappedValue {
-                    Button("Skip") { project.githubRepos = []; next() }
-                        .buttonStyle(TertiaryButton(tint: .muted, lift: Soot.surface, font: .system(size: 14, weight: .medium)))
-                }
+        } buttons: {
+            continueButton(ok: !app.isConnected(.github) || catalog.loading || !project.githubRepos.isEmpty)
+            if app.isConnected(.github) {
+                skipButton("No repository for now") { project.githubRepos = []; next() }
             }
         }
     }
@@ -273,18 +339,40 @@ struct ProjectEditorSheet: View {
         if app.repositoryMode == .mixed { project.usesWorkspaceRepository = false }
     }
 
-    /// Which pull request's preview environment the project follows. Only with a repository;
-    /// with several, each pull request says which one it is in.
-    private var previewStep: some View {
-        toolStep(.github, title: "Preview environment", rows: pullItems,
+    // MARK: Preview
+
+    /// Some projects have no preview environment: ask before listing pull requests.
+    private var previewAsk: some View {
+        StepPage(title: "Is there a preview environment?") {
+            ChoiceTiles {
+                ChoiceTile(thumb: .symbol("globe"), title: "Yes", detail: "One pull request's preview",
+                           selected: previewChoice == .yes) { choose(.preview, .yes) }
+                ChoiceTile(thumb: .none, title: "No", detail: "Not for this project",
+                           selected: previewChoice == .no) { choose(.preview, .no) }
+            }
+        } buttons: {
+            continueButton(ok: true) {
+                if previewChoice == .yes {
+                    detail()
+                } else {
+                    project.previewPullNumber = nil; project.previewRepository = nil; project.previewDismissed = true
+                    next()
+                }
+            }
+        }
+    }
+
+    /// Which pull request's preview environment the project follows; with several
+    /// repositories, each pull request says which one it is in.
+    private var previewDetail: some View {
+        listPage(title: "Which pull request?", rows: pullItems,
                  selection: Binding(get: { previewID },
                                     set: { id in
                                         let parts = id?.split(separator: "#", maxSplits: 1).map(String.init)
                                         project.previewRepository = parts?.first
                                         project.previewPullNumber = parts.flatMap { $0.count > 1 ? Int($0[1]) : nil }
                                         if project.previewPullNumber != nil { project.previewDismissed = nil } }),
-                 createTitle: nil, more: nil,
-                 loading: repos.contains { catalog.pulls[$0] == nil }) { EmptyView() }
+                 more: nil, loading: repos.contains { catalog.pulls[$0] == nil })
             .task(id: repos) {
                 guard app.github != nil else { return }
                 for repo in repos { await catalog.loadPulls(repo, app) }
@@ -322,54 +410,155 @@ struct ProjectEditorSheet: View {
         return items
     }
 
-    /// A tool's step: the title, a search, the list (with "Create …" first when it applies),
-    /// then Continue and Skip. Not connected: one line and a way to Settings.
-    private func toolStep<Extra: View>(_ service: ServiceKind, title: String, rows: [PickerItem],
-                                       selection: Binding<String?>, createTitle: String?,
-                                       more: (() -> Void)?, loading: Bool = false,
-                                       @ViewBuilder extra: () -> Extra) -> some View {
-        VStack(alignment: .leading, spacing: 20) {
-            StepTitle(text: title)
+    // MARK: Pages shared by the tools
+
+    /// A tool's question: the match found (Recommended), create, or pick an existing one; a
+    /// quiet line when nothing close exists. Not connected: one line and a way to Settings.
+    private func askPage(_ service: ServiceKind, title: String, choice: Binding<Choice>,
+                         found: (title: String, detail: String?)?, createDetail: String,
+                         nothing: String, skip: String) -> some View {
+        StepPage(title: title) {
             if !app.isConnected(service) {
                 connectHint(service)
-            } else if catalog.loading || loading {
-                VStack(spacing: 6) { ForEach(0..<4, id: \.self) { _ in Skeleton(height: 44, radius: Soot.fieldRadius) } }
+            } else if catalog.loading {
+                skeletonTiles
             } else {
-                SootField(label: "", placeholder: "Search", text: $query, leadingSymbol: "magnifyingglass")
-                    .accessibilityLabel("Search \(title.lowercased())")
-                ScrollView {
-                    LazyVStack(spacing: 6) {
-                        if let createTitle, query.isEmpty {
-                            PickRow(item: PickerItem(id: Self.create, title: createTitle, symbol: "plus"),
-                                    selected: selection.wrappedValue == Self.create) { selection.wrappedValue = Self.create }
+                VStack(alignment: .leading, spacing: 12) {
+                    ChoiceTiles {
+                        if let found {
+                            ChoiceTile(thumb: .found, title: found.title, detail: found.detail, tag: "Recommended",
+                                       selected: choice.wrappedValue == .found) { choose(service == .slack ? .slack : .linear, .found) }
                         }
-                        ForEach(filtered(rows)) { item in
-                            PickRow(item: item, selected: selection.wrappedValue == item.id) { selection.wrappedValue = item.id }
-                        }
-                        if filtered(rows).isEmpty && !query.isEmpty {
-                            Text("No match for \u{201C}\(query)\u{201D}").font(.system(size: 13)).foregroundStyle(Soot.muted)
-                                .padding(.vertical, 16)
-                        }
-                        if let more, query.isEmpty {
-                            Button("Show every channel", action: more)
-                                .buttonStyle(SecondaryButton())
-                                .frame(maxWidth: .infinity)
-                                .padding(.top, 4)
-                        }
+                        ChoiceTile(thumb: .create, title: "Create one", detail: createDetail,
+                                   tag: found == nil ? "Recommended" : nil,
+                                   selected: choice.wrappedValue == .create) { choose(service == .slack ? .slack : .linear, .create) }
+                        ChoiceTile(thumb: .existing, title: "Pick an existing one",
+                                   selected: choice.wrappedValue == .existing) { choose(service == .slack ? .slack : .linear, .existing) }
+                    }
+                    if found == nil {
+                        Label(nothing, systemImage: "magnifyingglass")
+                            .font(.system(size: 13)).foregroundStyle(Soot.muted)
                     }
                 }
-                .frame(maxHeight: .infinity)
-                extra()
             }
-            HStack(spacing: 16) {
-                Button(isNew ? "Continue" : "Done") { next() }
-                    .buttonStyle(PrimaryButton(size: .sheet))
-                    .keyboardShortcut(.defaultAction)
-                    .disabled(app.isConnected(service) && !catalog.loading && !loading && selection.wrappedValue == nil)
-                if app.isConnected(service) {
-                    Button("Skip") { selection.wrappedValue = nil; next() }
-                        .buttonStyle(TertiaryButton(tint: .muted, lift: Soot.surface, font: .system(size: 14, weight: .medium)))
+        } buttons: {
+            continueButton(ok: !app.isConnected(service) || !catalog.loading) {
+                guard app.isConnected(service) else { return next() }
+                switch choice.wrappedValue {
+                case .found: next()
+                case .create where service == .linear && catalog.teams.count <= 1: next()
+                default: detail()
                 }
+            }
+            if app.isConnected(service) {
+                skipButton(skip) { answer(service == .slack ? .slack : .linear, .no); next() }
+            }
+        }
+    }
+
+    /// A tile chosen: the ring moves and the pick follows.
+    private func choose(_ step: Step, _ choice: Choice) {
+        Motion.run(Motion.settle) {
+            switch step {
+            case .slack: slackChoice = choice
+            case .linear: linearChoice = choice
+            case .github: githubChoice = choice
+            case .preview: previewChoice = choice
+            default: break
+            }
+        }
+        answer(step, choice)
+    }
+
+    /// What a choice means for the pick that is saved.
+    private func answer(_ step: Step, _ choice: Choice) {
+        switch (step, choice) {
+        case (.slack, .found): slackPick = foundChannel?.id
+        case (.slack, .create): slackPick = Self.create
+        case (.slack, .existing): if slackPick == Self.create || slackPick == foundChannel?.id { slackPick = nil }
+        case (.slack, .no): slackPick = nil; slackChoice = .existing
+        case (.linear, .found): linearPick = foundLinear?.id
+        case (.linear, .create): linearPick = Self.create
+        case (.linear, .existing): if linearPick == Self.create || linearPick == foundLinear?.id { linearPick = nil }
+        case (.linear, .no): linearPick = nil; linearChoice = .existing
+        case (.github, .workspace): project.usesWorkspaceRepository = true
+        case (.github, .own): project.usesWorkspaceRepository = false
+        default: break
+        }
+    }
+
+    /// A list to pick one thing from: search, rows, an optional "show every" at the end.
+    private func listPage(title: String, rows: [PickerItem], selection: Binding<String?>,
+                          more: (() -> Void)?, loading: Bool = false, search: Bool = true) -> some View {
+        StepPage(title: title) {
+            if catalog.loading || loading {
+                skeletonRows
+            } else {
+                VStack(alignment: .leading, spacing: 16) {
+                    if search { searchField("Search") }
+                    ScrollView {
+                        LazyVStack(spacing: 6) {
+                            ForEach(filtered(rows)) { item in
+                                PickRow(item: item, selected: selection.wrappedValue == item.id) {
+                                    Motion.run(Motion.ui) { selection.wrappedValue = item.id }
+                                }
+                            }
+                            noMatch(rows)
+                            if let more, query.isEmpty {
+                                Button("Show every channel", action: more)
+                                    .buttonStyle(SecondaryButton())
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.top, 4)
+                            }
+                        }
+                    }
+                    .frame(maxHeight: .infinity)
+                }
+            }
+        } buttons: {
+            continueButton(ok: catalog.loading || loading || selection.wrappedValue != nil)
+        }
+    }
+
+    private func continueButton(ok: Bool, action: (() -> Void)? = nil) -> some View {
+        Button(isNew ? "Continue" : "Done") { (action ?? next)() }
+            .buttonStyle(PrimaryButton(size: .sheet))
+            .keyboardShortcut(.defaultAction)
+            .disabled(!ok)
+    }
+
+    private func skipButton(_ title: String, action: @escaping () -> Void) -> some View {
+        Button(title, action: action)
+            .buttonStyle(TertiaryButton(tint: .muted, lift: Soot.surface, font: .system(size: 14, weight: .medium)))
+    }
+
+    private func searchField(_ label: String) -> some View {
+        SootField(label: "", placeholder: "Search", text: $query, leadingSymbol: "magnifyingglass")
+            .accessibilityLabel(label)
+    }
+
+    @ViewBuilder
+    private func noMatch(_ rows: [PickerItem]) -> some View {
+        if filtered(rows).isEmpty {
+            Text(query.isEmpty ? "Nothing to pick from yet" : "No match for \u{201C}\(query)\u{201D}")
+                .font(.system(size: 13)).foregroundStyle(Soot.muted)
+                .padding(.vertical, 16)
+        }
+    }
+
+    private var skeletonRows: some View {
+        VStack(spacing: 6) { ForEach(0..<4, id: \.self) { _ in Skeleton(height: 44, radius: Soot.fieldRadius) } }
+    }
+
+    private var skeletonTiles: some View {
+        HStack(spacing: 16) {
+            ForEach(0..<3, id: \.self) { _ in
+                VStack(spacing: 10) {
+                    Skeleton(width: 116, height: 76, radius: 8)
+                    Skeleton(width: 80, height: 10)
+                }
+                .frame(width: 148)
+                .padding(.vertical, 10)
             }
         }
     }
@@ -481,7 +670,7 @@ struct ProjectEditorSheet: View {
     }
 
     private var githubState: RecapState {
-        if app.repositoryMode == .mixed, !ownRepositories.wrappedValue {
+        if app.repositoryMode == .mixed, !ownRepositories {
             return app.workspaceRepository.map { .set("Workspace · \($0)") } ?? .unset("Workspace repository, not set")
         }
         return repos.isEmpty ? .unset("Not linked") : .set(repos.joined(separator: ", "))
@@ -538,16 +727,25 @@ struct ProjectEditorSheet: View {
         repoRows = catalog.repos.map { PickerItem(id: $0.full_name, title: $0.full_name, subtitle: $0.private ? "Private" : "Public") }
     }
 
-    /// Adding: a channel / Linear project with the project's name is picked; otherwise "Create".
-    /// Editing never changes a pick on its own.
+    /// Adding: the channel / Linear project named like the project is offered first; without
+    /// one, "Create" is. Editing keeps what is linked and only sets the question's answer.
     private func suggest() {
-        guard isNew, nameOK else { return }
-        let expected = Naming.channelName(for: project.name, prefix: channelPrefix)
-        if app.slack != nil, slackPick == nil || slackPick == Self.create {
-            slackPick = availableChannels.first { $0.name == expected }?.id ?? Self.create
+        guard nameOK else { return }
+        if app.slack != nil {
+            if let linked = project.slack?.id, !isNew {
+                slackChoice = linked == foundChannel?.id ? .found : .existing
+            } else if slackPick == nil || slackPick == Self.create || slackPick == foundChannel?.id {
+                slackChoice = foundChannel != nil ? .found : .create
+                slackPick = foundChannel?.id ?? Self.create
+            }
         }
-        if app.linear != nil, linearPick == nil || linearPick == Self.create {
-            linearPick = availableLinear.first { Naming.matches($0.name, project.name) }?.id ?? Self.create
+        if app.linear != nil {
+            if let linked = project.linear?.id, !isNew {
+                linearChoice = linked == foundLinear?.id ? .found : .existing
+            } else if linearPick == nil || linearPick == Self.create || linearPick == foundLinear?.id {
+                linearChoice = foundLinear != nil ? .found : .create
+                linearPick = foundLinear?.id ?? Self.create
+            }
         }
     }
 

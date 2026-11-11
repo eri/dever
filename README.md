@@ -80,7 +80,10 @@ tools had never been connected, `DEVER_SNAPSHOT_UNAUTHORIZED=linear` as if the s
 `DEVER_SNAPSHOT_CONNECTING=linear` shows that tool mid-connection on the project page.
 Preview panel states from sample data (PR #4714, no network): `DEVER_SNAPSHOT_PREVIEW=live|deploying|failed|deleted|notdeployed|none`
 (`none`: no pull request linked); add `DEVER_SNAPSHOT_PREVIEW_OPTIONS=1` for the deploy options row, and
-`DEVER_SNAPSHOT_SHEETS=1 DEVER_SNAPSHOT_SCREENS=0 DEVER_SNAPSHOT_STEP=preview DEVER_SNAPSHOT_PICKER="Pull request"` for the editor's step.
+`DEVER_SNAPSHOT_SHEETS=1 DEVER_SNAPSHOT_SCREENS=0 DEVER_SNAPSHOT_STEP=preview` for the editor's step.
+Editor pages: `DEVER_SNAPSHOT_STEP=name|slack|linear|github|preview|ready` opens that step's question, `DEVER_SNAPSHOT_PHASE=detail`
+its second page, `DEVER_SNAPSHOT_CHOICE=create|existing` picks that answer, `DEVER_SNAPSHOT_DETECT=1` names the project after
+one of your channels so a match is found, and `DEVER_SNAPSHOT_SHEET_THEME=light` captures sheets in light mode.
 Repository modes: `DEVER_SNAPSHOT_REPO_MODE=single|perProject|mixed[:owner/name]` runs under that mode (and workspace
 repository), `DEVER_SNAPSHOT_REPOS=owner/a,owner/b` gives the first project those repositories, and
 `DEVER_SNAPSHOT_UNLINK=slack,linear,github,preview` runs as if the captured project had not linked those tools

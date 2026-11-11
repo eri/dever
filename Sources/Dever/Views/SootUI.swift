@@ -432,6 +432,134 @@ struct ChoiceCard<Nested: View>: View {
     }
 }
 
+/// A small scene for a choice, in the Settings pictures' language: a card of three quiet rows
+/// and one accent that says what the choice does.
+struct ChoiceThumb: View {
+    enum Scene {
+        /// A new row appears: a lime plus.
+        case create
+        /// One of the rows is the one: a lime row with a check.
+        case existing
+        /// One row, named: the match that was found.
+        case found
+        /// Nothing picked: a dashed card.
+        case none
+        /// A symbol in a lime badge over the rows.
+        case symbol(String)
+    }
+    let scene: Scene
+
+    var body: some View {
+        ZStack {
+            switch scene {
+            case .none:
+                RoundedRectangle(cornerRadius: 6)
+                    .strokeBorder(Soot.muted.opacity(0.7), style: StrokeStyle(lineWidth: 1.5, dash: [4, 4]))
+                    .frame(width: 56, height: 36)
+            case .create:
+                rows(accent: nil)
+                Image(systemName: "plus").font(.system(size: 11, weight: .bold)).foregroundStyle(Soot.limeInk)
+                    .frame(width: 22, height: 22).background(Soot.lime, in: Circle())
+                    .offset(x: 24, y: 14)
+            case .existing:
+                rows(accent: 1)
+            case .found:
+                rows(accent: 1, check: true)
+            case .symbol(let name):
+                rows(accent: nil)
+                Image(systemName: name).font(.system(size: 11, weight: .bold)).foregroundStyle(Soot.limeInk)
+                    .frame(width: 22, height: 22).background(Soot.lime, in: Circle())
+                    .offset(x: 24, y: 14)
+            }
+        }
+        .frame(width: 116, height: 76)
+        .background(Soot.ground)
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Soot.edge))
+        .accessibilityHidden(true)
+    }
+
+    private func rows(accent: Int?, check: Bool = false) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            ForEach(0..<3, id: \.self) { i in
+                HStack(spacing: 6) {
+                    Capsule().fill(i == accent ? Soot.lime : Soot.ink.opacity(0.35))
+                        .frame(width: [40, 52, 34][i], height: 5)
+                    if check && i == accent {
+                        Image(systemName: "checkmark").font(.system(size: 8, weight: .bold)).foregroundStyle(Soot.lime)
+                    }
+                }
+            }
+        }
+        .padding(10)
+        .frame(width: 72, alignment: .leading)
+        .background(Soot.surface, in: RoundedRectangle(cornerRadius: 6))
+    }
+}
+
+/// One answer to a step's question: a picture, a title, one quiet line; the chosen one wears
+/// the lime ring. Laid out in a row by `ChoiceTiles`.
+struct ChoiceTile: View {
+    let thumb: ChoiceThumb.Scene
+    let title: String
+    var detail: String? = nil
+    var tag: String? = nil
+    let selected: Bool
+    let select: () -> Void
+
+    var body: some View {
+        Button(action: select) {
+            VStack(spacing: 10) {
+                ChoiceThumb(scene: thumb)
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 8).strokeBorder(Soot.lime, lineWidth: 2).opacity(selected ? 1 : 0)
+                    }
+                VStack(spacing: 2) {
+                    Text(title).font(.system(size: 13, weight: selected ? .semibold : .medium))
+                        .foregroundStyle(selected ? Soot.ink : Soot.muted)
+                        .multilineTextAlignment(.center).lineLimit(2)
+                    if let detail {
+                        Text(detail).font(.system(size: 11)).foregroundStyle(Soot.muted).lineLimit(1)
+                    }
+                    if let tag {
+                        Text(tag).font(.system(size: 11, weight: .semibold)).foregroundStyle(Soot.lime)
+                    }
+                }
+            }
+            .padding(.vertical, 10)
+            .frame(width: 148)
+        }
+        .buttonStyle(RowButton(lift: .tone, radius: 8))
+        .accessibilityLabel([title, tag ?? detail].compactMap { $0 }.joined(separator: ", "))
+        .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+}
+
+/// A step's page: the question, what answers it, the buttons. Same spacing on every page, so
+/// the pages of a flow line up as one.
+struct StepPage<Content: View, Buttons: View>: View {
+    let title: String
+    @ViewBuilder var content: () -> Content
+    @ViewBuilder var buttons: () -> Buttons
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 24) {
+            StepTitle(text: title)
+            content()
+            HStack(spacing: 16) { buttons() }
+        }
+    }
+}
+
+/// The answers to a question, side by side; three fit the sheet.
+struct ChoiceTiles<Content: View>: View {
+    @ViewBuilder var content: () -> Content
+    var body: some View {
+        HStack(alignment: .top, spacing: 8) { content() }
+            .accessibilityElement(children: .contain)
+    }
+}
+
 /// A sheet that asks one thing at a time, in the onboarding's frame: a headline, one control,
 /// one button; close top-right, back top-left, progress marks bottom-left. Same size every step.
 struct StepSheet<Content: View>: View {
