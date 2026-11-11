@@ -187,7 +187,7 @@ final class FailureStoreTests: XCTestCase {
         store.explain(key, reads: calls.reads)
         XCTAssertEqual(store.entry(key), .loading)
         await store.settle()
-        XCTAssertEqual(store.entry(key), .explained(.init(check: job, others: 0, sha: "abc", outcome: .sentence("testStreak failed: 3 is not equal to 4."))))
+        XCTAssertEqual(store.entry(key), .explained(.init(check: job, failed: [job], sha: "abc", outcome: .sentence("testStreak failed: 3 is not equal to 4."))))
         store.explain(key, reads: calls.reads)
         await store.settle()
         XCTAssertEqual([calls.failed, calls.log, calls.write], [1, 1, 1], "kept for the run: asking again reads nothing")
@@ -218,7 +218,7 @@ final class FailureStoreTests: XCTestCase {
         await store.settle()
         guard case .explained(let e) = store.entry(key) else { return XCTFail() }
         XCTAssertEqual(e.check, job)
-        XCTAssertEqual(e.others, 2)
+        XCTAssertEqual(e.failed, [job, later, status], "the explained job first")
     }
 
     func testALogThatStatesNoErrorSaysSoWithoutTheModel() async {

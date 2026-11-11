@@ -94,8 +94,8 @@ that state and shows every feature's interface (Settings › Intelligence includ
 `summaries-{dark,light}-{waiting,landing-0…5,landed}.png`: a rail of made-up long messages whose summaries land one after the other.
 With `DEVER_SNAPSHOT_OVERVIEW_DEMO=busy` the Overview's long mention shows as its summary (as its start with
 `DEVER_SNAPSHOT_INTELLIGENCE=off`; without the variable the Mac's own model writes it).
-`DEVER_SNAPSHOT_WHY=1` with `DEVER_SNAPSHOT_DELIVERY=busy` opens "Why?" under the "Start here" tile; `DEVER_SNAPSHOT_WHY=open` with
-`DEVER_SNAPSHOT_ISSUE=1` shows a made-up failed pull request on the issue page with its explanation.
+`DEVER_SNAPSHOT_WHY=1` with `DEVER_SNAPSHOT_DELIVERY=busy` opens the failed checks' card on the "Start here" tile; `DEVER_SNAPSHOT_WHY=open` with
+`DEVER_SNAPSHOT_ISSUE=1` shows a made-up failed pull request on the issue page with its card open.
 Nothing is written back in these runs.
 
 ## Onboarding

@@ -31,10 +31,12 @@ final class FailureStore: ObservableObject {
     }
 
     struct Explanation: Equatable {
-        /// The failed job, raw: its name, its step, when it ended, its page.
+        /// The failed job that is explained, raw: its name, its step, when it ended, its page.
         var check: GitHubFailedCheck
-        /// How many other checks of the same commit failed.
-        var others: Int
+        /// Every failed check of the commit, the explained one first, and the count of the rest.
+        var failed: [GitHubFailedCheck]
+        var passing = 0
+        var running = 0
         /// The commit the run was for.
         var sha: String
         var outcome: Outcome
@@ -127,7 +129,8 @@ final class FailureStore: ObservableObject {
             GitHubStore.shared.invalidate(key.repository)
             return set(.problem(.moved))
         }
-        var explanation = Explanation(check: check, others: checks.failed.count - 1, sha: checks.sha, outcome: .writing)
+        var explanation = Explanation(check: check, failed: [check] + checks.failed.filter { $0 != check },
+                                      passing: checks.passing, running: checks.running, sha: checks.sha, outcome: .writing)
         guard let job = check.jobID else {
             explanation.outcome = .noLog
             return set(.explained(explanation))
@@ -192,9 +195,12 @@ final class FailureStore: ObservableObject {
     }
 
     /// A made-up answer for captures (`DEVER_SNAPSHOT_INTELLIGENCE`).
-    static let sample = Explanation(
-        check: .init(name: "test (macos-15)", url: "https://github.com/demo/app/actions/runs/1/job/2", jobID: 2,
-                     step: "Run tests", completedAt: Date().addingTimeInterval(-12 * 60)),
-        others: 1, sha: "0000000",
-        outcome: .sentence("testStreakAcrossTimeZoneChange failed: 3 is not equal to 4, the streak should count the day in the new time zone."))
+    static let sample: Explanation = {
+        let job = GitHubFailedCheck(name: "test (macos-15)", url: "https://github.com/demo/app/actions/runs/1/job/2", jobID: 2,
+                                    step: "Run tests", completedAt: Date().addingTimeInterval(-12 * 60))
+        let other = GitHubFailedCheck(name: "e2e (tablet)", url: "https://github.com/demo/app/actions/runs/1/job/3", jobID: 3,
+                                      step: "Run Playwright", completedAt: Date().addingTimeInterval(-9 * 60))
+        return Explanation(check: job, failed: [job, other], passing: 17, sha: "0000000",
+                           outcome: .sentence("testStreakAcrossTimeZoneChange failed: 3 is not equal to 4, the streak should count the day in the new time zone."))
+    }()
 }

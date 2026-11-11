@@ -236,34 +236,35 @@ struct DeliveryBoard: View {
         }
     }
 
-    /// The failed pull request "Why?" can be asked of, where the feature is offered.
+    /// The failed pull request whose card can be opened, where the feature is offered.
     private func failure(of item: DeliveryPlan.Item) -> FailureStore.Key? {
         guard item.situation == .ciFailed, let pull = item.pull, explainsFailures, intelligence.offers(.explainFailure) else { return nil }
         return .init(repository: pull.repository, number: pull.number)
     }
 
-    /// The tile and, once asked, why its pipeline failed: one block, the explanation under it.
     private func startTile(_ item: DeliveryPlan.Item, grab: Bool) -> some View {
         let failure = failure(of: item)
         // A capture opens it on whichever pull request the demo starts with.
         let open = failure != nil && (why == failure || why?.number == 0)
-        return VStack(alignment: .leading, spacing: 0) {
-            startLink(item, grab: grab, failure: failure, open: open)
-            if open, let failure {
-                FailurePanel(key: failure, lift: Soot.surface)
-                    .padding(.leading, 16 + 26 + 14).padding(.trailing, 16).padding(.bottom, 14)
-                    .transition(.opacity)
-            }
-        }
-        .background(Soot.ground, in: RoundedRectangle(cornerRadius: 10))
+        return startLink(item, grab: grab, failure: failure, open: open)
+            // The card hangs over the rows under the tile.
+            .zIndex(open ? 1 : 0)
     }
 
     private func startLink(_ item: DeliveryPlan.Item, grab: Bool, failure: FailureStore.Key?, open: Bool) -> some View {
         let move = move(for: item, grab: grab)
         let why = reason(item, grab: grab)
-        let ask = WhyLink(open: open, lift: Soot.surface) {
-            Motion.run(Motion.ui, fade: true) { self.why = open ? nil : failure }
+        // The failed state is the button: it opens the checks that failed and why.
+        let ask = Button { Motion.run(Motion.ui, fade: true) { self.why = open ? nil : failure } } label: {
+            HStack(spacing: 4) {
+                Text(why)
+                Image(systemName: "chevron.down").font(.system(size: 9, weight: .bold)).rotationEffect(.degrees(open ? 180 : 0))
+                    .accessibilityHidden(true)
+            }
         }
+        .buttonStyle(TertiaryButton(tint: open ? .ink : .muted, lift: Soot.surface, font: .system(size: 13), height: 24))
+        .help("Show the checks that failed")
+        .accessibilityLabel("\(why). Show the checks that failed")
         return NavigationLink(value: IssueRoute(project: project, issue: item.issue)) {
             HStack(alignment: .center, spacing: 14) {
                 SituationGlyph(situation: item.situation, size: 22)
@@ -274,11 +275,12 @@ struct DeliveryBoard: View {
                         .foregroundStyle(Soot.ink).lineLimit(2).multilineTextAlignment(.leading)
                     HStack(spacing: 8) {
                         Text(verbatim: item.issue.identifier).font(.system(size: 12, weight: .medium, design: .monospaced))
-                        Text(why).lineLimit(1)
-                        // Room for the link, which sits on top so it takes its own click.
                         if failure != nil {
-                            ask.hidden().accessibilityHidden(true).padding(.leading, -6)
+                            // Room for the button, which sits on top so it takes its own click.
+                            ask.hidden().accessibilityHidden(true).padding(.leading, -8)
                                 .anchorPreference(key: WhyAnchor.self, value: .bounds) { $0 }
+                        } else {
+                            Text(why).lineLimit(1)
                         }
                     }
                     .font(.system(size: 13)).foregroundStyle(Soot.muted)
@@ -299,7 +301,12 @@ struct DeliveryBoard: View {
             GeometryReader { proxy in
                 if let anchor, failure != nil {
                     let place = proxy[anchor]
-                    ask.position(x: place.midX, y: place.midY)
+                    ask
+                        .failureCard(open: open, key: failure, heading: item.pull.map { "#\($0.number) \($0.title)" } ?? "",
+                                     url: item.pull.flatMap { URL(string: $0.url) }, drop: 30) {
+                            Motion.run(Motion.ui, fade: true) { self.why = nil }
+                        }
+                        .position(x: place.midX, y: place.midY)
                 }
             }
         }

@@ -198,20 +198,24 @@ time; a bolder one would speak for the user. Writing on the user's behalf is not
 
 ### 5.6 Explain a pipeline failure
 
-**Built.** "✦ Why?" beside a failed pipeline; on a click only, the failed job as GitHub names it, one
-generated sentence, and the link to the real log.
+**Built.** A failed pipeline opens its own card; on that click only, the checks that failed as GitHub
+names them and, under the first, one generated sentence.
 
-- **Where:** beside "CI failed on #N" on the "Start here" tile of the Delivery board, and on the issue
-  page, whose pull request chip now reads "#N CI failed" when the copy the app already holds says so
-  (no request of its own; past twice the budget of a pull request's checks the chip is drawn muted,
-  with the age of that copy). The explanation opens under the tile, or under the issue's signals.
-- **When:** on click only. Nothing is read from GitHub and nothing is generated without it.
-- **What shows,** in this order: the job's name and the step that failed, raw, with the run's age
-  ("failed 12m ago") and how many other checks failed; the sentence, behind the sparkle; "Open log ↗",
-  always. The red state, the count and the word "failed" are GitHub's (rule 2).
+- **Where:** the failed state itself is the button, as on the release line. "CI failed on #N ⌄" on the
+  "Start here" tile of the Delivery board, and on the issue page the pull request chip, which now
+  reads "#N CI failed" when the copy the app already holds says so (no request of its own; past twice
+  the budget of a pull request's checks the chip is drawn muted, with the age of that copy). A first
+  form put a "✦ Why?" link beside the state and the explanation in a panel under it: the link read as
+  unrelated to the pipeline, and was dropped for the card.
+- **When:** on click only. Nothing is read from GitHub and nothing is generated without it. A click
+  elsewhere or Escape closes the card.
+- **What the card shows,** built like the release line's: the pull request; "Failed 12m ago" (the
+  run's age); each failed check with its step, raw, as a link to its log; under the first one the
+  sentence, behind the sparkle; "2 failing · 17 passing"; "Open on GitHub ↗". The red state, the
+  counts and the word "failed" are GitHub's (rule 2), and the log link is the line above the sentence.
 - **Which job:** the Actions job that failed first on the pull request's head commit (what fails after
-  it often fails because of it). A check another service reports has no log to read: its name, "This
-  check has no log Dever can read.", and its link.
+  it often fails because of it). A check another service reports has no log to read: its name, which
+  leads to its page, and "No log Dever can read for this check."
 - **What the model reads:** not the tail of the log but the failed step alone, cut out in code
   (`PipelineLog.excerpt`): the step's command, its last 60 lines of output at most (1,600 tokens at
   most), the runner's error. The runner's time stamps, colour codes, set-up and clean-up are removed.
@@ -244,13 +248,14 @@ generated sentence, and the link to the real log.
 - **Kept:** in `FailureStore`, memory only, by repository and pull request. Dropped when the pull
   request's checks are no longer failing in `GitHubStore` (a new run started or passed), when the
   switch is turned off, and never refreshed by a timer. It carries the run's age.
-- **Switch:** "Explain a failure" in Settings › Intelligence. Off: no link, nothing kept.
+- **Switch:** "Explain a failure" in Settings › Intelligence. Off: the failed state is not a button,
+  nothing is read, nothing kept.
 - **Data contract.** Reads: two new ones, on click only: `failedChecks(repo, pull)` (one GraphQL
   query, about 1 kB for ten checks) and `jobLogTail(repo, job)` (GitHub's redirect, the size of the
   log, then its last 64 kB at most, never the whole log; the token is not sent to the storage host).
   Writes: none. Invalidates: `GitHubStore`'s repository when GitHub no longer reports a failure.
-  Budget: none, read once per run and per ask. Loading: skeleton lines for the job, then for the
-  sentence; the job's name shows as soon as GitHub answers. Failure: as above. Exits: "Open log"
+  Budget: none, read once per run and per ask. Loading: skeleton lines in the card, then for the
+  sentence; the failed checks show as soon as GitHub answers. Failure: as above. Exits: "Open log"
   opens GitHub; the pull request's checks are refreshed on return by the page's own rule. Cost: three
   API requests and at most 64 kB per ask; one generation of 3 to 7 s.
 

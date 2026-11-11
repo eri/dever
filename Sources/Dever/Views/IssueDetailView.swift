@@ -12,6 +12,7 @@ struct IssueDetailView: View {
     @AppStorage(IntelligenceFeature.explainFailure.settingKey) private var explainsFailures = true
     /// The pull request whose failed pipeline is being explained under the signals.
     @State private var why: FailureStore.Key?
+    @State private var whyShown = false
     @Environment(\.dismiss) private var dismiss
     let route: IssueRoute
 
@@ -45,7 +46,8 @@ struct IssueDetailView: View {
                         if let error {
                             ServiceFailureRow(service: .linear, state: error, retry: { Task { await load() } }, flow: flow)
                         } else if let detail {
-                            signals(detail)
+                            // Its failure card hangs over what follows.
+                            signals(detail).zIndex(1)
                             if let notice { noticeLine(notice).transition(Motion.rise) }
                             if let pull = mergedPull(detail) { mergedBanner(pull, detail) }
                             if twoColumns {
@@ -188,26 +190,34 @@ struct IssueDetailView: View {
                 // and never in red once that copy is old.
                 if let key = PullFailure.key(url: entry.url.absoluteString), let readAt = PullFailure.failed(key, in: github) {
                     let stale = PullFailure.isStale(readAt)
-                    signal(symbol: "xmark.circle.fill", text: stale ? "#\(n) CI failed · read \(Brief.ago(readAt)) ago" : "#\(n) CI failed",
-                           tint: stale ? nil : Theme.negative, label: "Pull request \(n), CI failed\(stale ? ", read \(Brief.ago(readAt)) ago" : "")")
+                    let chip = signal(symbol: "xmark.circle.fill", text: stale ? "#\(n) CI failed · read \(Brief.ago(readAt)) ago" : "#\(n) CI failed",
+                                      tint: stale ? nil : Theme.negative, label: "Pull request \(n), CI failed\(stale ? ", read \(Brief.ago(readAt)) ago" : "")") {
+                        if explains {
+                            Image(systemName: "chevron.down").font(.system(size: 9, weight: .bold)).foregroundStyle(Soot.muted)
+                                .rotationEffect(.degrees(why == key ? 180 : 0))
+                        }
+                    }
                     if explains {
                         // A capture shows it open.
-                        let _ = Snapshotter.directory != nil && why == nil && ProcessInfo.processInfo.environment["DEVER_SNAPSHOT_WHY"] == "open"
-                            ? DispatchQueue.main.async { why = key } : ()
-                        WhyLink(open: why == key) { Motion.run(Motion.ui, fade: true) { why = why == key ? nil : key } }
-                            .padding(.leading, -6).frame(height: 30)
+                        let _ = Snapshotter.directory != nil && why == nil && !whyShown && ProcessInfo.processInfo.environment["DEVER_SNAPSHOT_WHY"] == "open"
+                            ? DispatchQueue.main.async { whyShown = true; why = key } : ()
+                        // The failed state is the button: it opens the checks that failed and why.
+                        Button { Motion.run(Motion.ui, fade: true) { why = why == key ? nil : key } } label: { chip }
+                            .buttonStyle(MenuTriggerButton(open: why == key, fill: Soot.surface, radius: 8, edge: false))
+                            .help("Show the checks that failed")
+                            .accessibilityHint("Shows the checks that failed")
+                            .failureCard(open: why == key, key: key, heading: "#\(n) \(PullTitle.split(pull.title).title)", url: entry.url, drop: 36) {
+                                Motion.run(Motion.ui, fade: true) { why = nil }
+                            }
+                            .zIndex(why == key ? 1 : 0)
+                    } else {
+                        chip
                     }
                 } else {
                     signal(symbol: "arrow.triangle.pull", text: "#\(n) \(pull.state.label.lowercased())",
                            tint: Theme.chart2, label: "Pull request \(n), \(pull.state.label)")
                 }
             }
-          }
-          if let why, explains {
-              FailurePanel(key: why, lift: Soot.ground)
-                  .padding(.horizontal, 12).padding(.vertical, 10)
-                  .background(Soot.surface, in: RoundedRectangle(cornerRadius: 8))
-                  .transition(.opacity)
           }
         }
     }

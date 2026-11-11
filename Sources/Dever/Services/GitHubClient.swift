@@ -73,6 +73,9 @@ struct GitHubFailedCheck: Equatable, Sendable {
 struct GitHubFailedChecks: Equatable, Sendable {
     var sha: String
     var failed: [GitHubFailedCheck]
+    /// How many of the commit's other checks passed (or were skipped), and how many still run.
+    var passing = 0
+    var running = 0
 
     /// The check to explain: the Actions job that failed first (what fails after it often
     /// fails because of it), or a check without a log when there is no such job.
@@ -489,7 +492,7 @@ struct GitHubClient {
             struct Suite: Decodable { struct Run: Decodable { var databaseId: Int? }; var workflowRun: Run? }
             struct Steps: Decodable { struct Step: Decodable { var name: String; var conclusion: String? }; var nodes: [Step] }
             // A check run (an Actions job, or another app's check).
-            var name: String?, conclusion: String?, databaseId: Int?, detailsUrl: String?, completedAt: String?
+            var name: String?, conclusion: String?, status: String?, databaseId: Int?, detailsUrl: String?, completedAt: String?
             var checkSuite: Suite?, steps: Steps?
             // A commit status.
             var context: String?, state: String?, targetUrl: String?, createdAt: String?
@@ -518,7 +521,7 @@ struct GitHubClient {
         let r = try await graphql("""
         query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){
           commits(last:1){nodes{commit{oid statusCheckRollup{contexts(first:100){nodes{__typename
-            ... on CheckRun{name conclusion databaseId detailsUrl completedAt checkSuite{workflowRun{databaseId}} steps(first:60){nodes{name conclusion}}}
+            ... on CheckRun{name conclusion status databaseId detailsUrl completedAt checkSuite{workflowRun{databaseId}} steps(first:60){nodes{name conclusion}}}
             ... on StatusContext{context state targetUrl createdAt}}}}}}}}}}
         """, variables: variables, as: R.self)
         guard let commit = r.repository?.pullRequest?.commits.nodes.first?.commit else {
@@ -536,7 +539,10 @@ struct GitHubClient {
             guard let name = c.context, ["FAILURE", "ERROR"].contains(c.state ?? "") else { return nil }
             return GitHubFailedCheck(name: name, url: c.targetUrl ?? "", jobID: nil, step: nil, completedAt: c.createdAt.flatMap(iso.date))
         }
-        return GitHubFailedChecks(sha: commit.oid, failed: failed)
+        let all = commit.statusCheckRollup?.contexts.nodes ?? []
+        let passing = all.filter { ["SUCCESS", "NEUTRAL", "SKIPPED"].contains($0.conclusion ?? "") || $0.state == "SUCCESS" }.count
+        let running = all.filter { ($0.name != nil && $0.status != "COMPLETED") || ["PENDING", "EXPECTED"].contains($0.state ?? "") }.count
+        return GitHubFailedChecks(sha: commit.oid, failed: failed, passing: passing, running: running)
     }
 
     /// The end of an Actions job's log: `bytes` at most, and whether its start was left out.
