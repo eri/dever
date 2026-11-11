@@ -233,6 +233,43 @@ extension LinearClient {
         return issue
     }
 
+    /// What a new issue is made of.
+    struct NewIssue: Equatable {
+        var projectID: String
+        var title: String
+        var description: String
+        /// Linear's 0–4: none, urgent, high, medium, low.
+        var priority: Int
+    }
+
+    /// The teams a project belongs to: a new issue needs one.
+    func projectTeamIDs(id: String) async throws -> [String] {
+        struct R: Decodable {
+            struct T: Decodable { var id: String }
+            struct Teams: Decodable { var nodes: [T] }
+            struct P: Decodable { var teams: Teams }
+            var project: P
+        }
+        return try await query("query($id: String!) { project(id: $id) { teams { nodes { id } } } }",
+                               variables: ["id": id], as: R.self).project.teams.nodes.map(\.id)
+    }
+
+    /// Creates an issue in a project, in the team's default state; the returned row is Linear's.
+    func createIssue(_ new: NewIssue, teamID: String) async throws -> LinearIssue {
+        struct R: Decodable {
+            struct P: Decodable { var success: Bool; var issue: LinearIssue? }
+            var issueCreate: P
+        }
+        var input: [String: Any] = ["teamId": teamID, "projectId": new.projectID, "title": new.title, "priority": new.priority]
+        if !new.description.isEmpty { input["description"] = new.description }
+        let r = try await query("""
+        mutation($input: IssueCreateInput!) { issueCreate(input: $input) {
+          success issue { \(Self.issueRowFields) } } }
+        """, variables: ["input": input], as: R.self).issueCreate
+        guard r.success, let issue = r.issue else { throw AppError.message("Linear did not create the issue.") }
+        return issue
+    }
+
     /// Adds the bearer token for pictures on `uploads.linear.app`, which refuse anonymous requests.
     func authorize(_ req: inout URLRequest) {
         guard let host = req.url?.host, host.hasSuffix("linear.app") else { return }

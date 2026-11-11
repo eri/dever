@@ -379,6 +379,8 @@ struct SlackMessageActions {
     var replies: (SlackMessage) async throws -> [SlackMessage] = { _ in [] }
     /// The replies already held for a thread, shown while they are read again.
     var cachedReplies: (SlackMessage) -> [SlackMessage]? = { _ in nil }
+    /// Opens the sheet that makes a Linear issue of a message; nil when the project has no Linear.
+    var createIssue: ((SlackMessage) -> Void)? = nil
 }
 
 /// The channel's latest messages read like Slack: oldest at the top, newest at the bottom,
@@ -1509,6 +1511,9 @@ private struct MessageRow: View {
             Menu {
                 Button("Reply in thread") {
                     if let openThread { openThread(message) } else { replying = true }
+                }
+                if let createIssue = actions.createIssue {
+                    Button("Create an issue") { createIssue(message) }
                 }
                 if let permalink { Link("Open in Slack", destination: permalink) }
                 if let permalink {

@@ -169,7 +169,10 @@ enum Snapshotter {
         var galleries: [(name: String, view: AnyView)] = []
         if ProcessInfo.processInfo.environment["DEVER_SNAPSHOT_GALLERY"] == "1" {
             galleries.append(("buttons", AnyView(ButtonGallery())))
-            if IntelligenceStatus.snapshotOverride != nil { galleries.append(("generated", AnyView(GeneratedGallery()))) }
+            if IntelligenceStatus.snapshotOverride != nil {
+                galleries.append(("generated", AnyView(GeneratedGallery())))
+                galleries.append(("issue-sheet", AnyView(IssueFromMessageSheet.sample.environmentObject(AppState()))))
+            }
         }
         for gallery in galleries {
             for (themeName, appearance) in [("dark", NSAppearance.Name.darkAqua), ("light", .aqua)] {

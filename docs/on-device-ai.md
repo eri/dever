@@ -147,17 +147,26 @@ Someone speaks of the user, or asks something of them, without a Slack mention.
 
 ### 5.3 Issue from a message
 
-- **Where:** "Create an issue" in the ⋯ menu of a Slack message.
-- **What:** a sheet with title, description and priority filled from the message and its thread, a line
-  "✦ Filled from the message of <author>", every field editable. "Create" creates the issue in the
-  project's Linear project and puts a link to the Slack message in it; the mark does not go to Linear.
-- **Needs first:** issue creation in `LinearClient` (`issueCreate`; team, state and priority from the
-  team context `IssueStore` already holds). Today Dever only updates issues.
-- **Without the model:** the menu item stays and the sheet opens with the message text as description
-  and an empty title: the feature is a write path of its own, the model only fills it.
-- **Write:** optimistic row in `IssueStore`, reconciled with the answer, removed on refusal; invalidates
-  the project's issue list, the Delivery plan and the Overview counts.
-- **Language:** the language of the project's existing issue titles.
+- **Where:** "Create an issue" in the ⋯ menu of a Slack message, when the project has a Linear project.
+- **What:** a sheet with title, description and priority, every field editable. It opens at once with
+  the message as its description; when the model is there, "Reading <author>'s message" shows while it
+  writes, then the fields are filled and the line reads "✦ Filled from <author>'s message". The mark goes
+  as soon as the user types over the text. If the user has started to type before the model answers,
+  the proposal is dropped.
+- **"Create"** creates the issue in the project's Linear project, in the team's default state, with a
+  link to the Slack message at the end of the description. The mark does not go to Linear.
+- **Title:** an action that starts with a verb, ten words at most (`IssueDraft`, guided generation).
+- **Priority is checked, not trusted:** the model read "to fix before the release" as Urgent. Its
+  priority is kept only when the message has a word for urgency (`IssueDraft.saysHowUrgent`: urgent,
+  blocking, bloquant, critical…); otherwise None, for the user to set.
+- **Without the model** (or with its switch off): the same sheet, the message as description, an empty
+  title. The feature is a write path of its own; the model only fills it.
+- **Write:** `IssueStore.create` → `issueCreate`. Not optimistic: an issue has no identifier to show
+  before Linear answers, so the button reads "Creating" and the sheet stays until it does. On success
+  Linear's row is put first in the project's list (`IssueStore.insert`), so the Delivery board follows at
+  once; on refusal the sheet stays, with the reason, nothing changed.
+- **Language:** the language of the project's issue titles, detected on the Mac; English when unknown.
+- **Measured:** 2.4 to 3.7 s for a draft.
 
 ### 5.4 Draft a reply
 
@@ -239,8 +248,8 @@ Summaries
   Issue summary                         [on]
   Language            [ Source | English ]
 Writing
-  Draft a reply                         [on]
   Issue from a message                  [on]
+  Draft a reply                         [on]   (not built yet)
 Pipelines
   Explain a failure                     [on]
 ```
@@ -297,7 +306,7 @@ Pipelines
 | 0. Ground | **Done.** `Intelligence` service and availability gating, `IntelligenceStore`, the mark and the generated block, Settings › Intelligence, the one-time invitation, snapshot states, tests, measurements (section 2). | |
 | 1. Slack catch-up | **Dropped** after four forms on real channels (5.1). | 0 |
 | 1b. Long messages | **Built:** 5.7, with kinds and the arrow for what is asked of the user, tuned on real channels. | 0 |
-| 2. Writing | `issueCreate` and the sheet (useful without the model), its filling (5.3), then the reply draft (5.4). | 0; the sheet itself depends on nothing |
+| 2. Writing | **Built:** issue creation and its sheet (useful without the model) and its filling (5.3). **Left:** the reply draft (5.4); the onboarding line "never posts on your behalf". | 0; the sheet itself depends on nothing |
 | 3. Issue summary | 5.5. | 0 |
 | 4. Pipeline failure | job and log reads, then 5.6. | 0 |
 

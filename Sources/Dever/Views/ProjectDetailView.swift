@@ -12,6 +12,8 @@ struct ProjectDetailView: View {
     @ObservedObject private var slackStore = SlackStore.shared
     @ObservedObject private var intelligence = IntelligenceStore.shared
     @ObservedObject private var intelligenceStatus = IntelligenceStatus.shared
+    /// The message a Linear issue is being made of.
+    @State private var issueSource: IssueFromMessageSheet.Source?
     @State private var shownMessages = 8
     @State private var loadingEarlier = false
     @State private var slackExpanded = false
@@ -182,6 +184,11 @@ struct ProjectDetailView: View {
             if LookAgain.shared.isDue(lastLoad) { Task { await load(quiet: true) } }
         }
         .sheet(isPresented: $flow.githubSheet) { GitHubLoginSheet() }
+        .sheet(item: $issueSource) { source in
+            if let linear = project.linear {
+                IssueFromMessageSheet(source: source, linear: linear, language: issueLanguage)
+            }
+        }
         .onChange(of: summariesTrigger, initial: true) { _, _ in refreshMessageSummaries() }
         // Another channel: the messages and the read cursor of the previous one do not carry over.
         .onChange(of: project.slack?.id) { _, _ in
@@ -945,6 +952,26 @@ struct ProjectDetailView: View {
         }
     }
 
+    /// What the "New issue" sheet opens on: the message in plain text, its author, its link.
+    private func issueSource(for message: SlackMessage) -> IssueFromMessageSheet.Source {
+        var link: URL?
+        if let domain = app.slack?.domain, let channel = project.slack?.id {
+            link = URL(string: "https://\(domain).slack.com/archives/\(channel)/p\(message.ts.replacingOccurrences(of: ".", with: ""))")
+        }
+        return .init(message: message, author: message.user.flatMap { users[$0]?.name } ?? "Someone",
+                     text: SlackPlain.text(message.text ?? "", users: users)
+                        .replacingOccurrences(of: "*", with: "").replacingOccurrences(of: "`", with: ""),
+                     permalink: link)
+    }
+
+    /// The language the project's issues are written in, from their titles; English when it
+    /// cannot be told.
+    private var issueLanguage: String {
+        let titles = issueStore.issues(project: project.linear?.id ?? "").prefix(30).map(\.title).joined(separator: "\n")
+        let code = Intelligence.language(of: titles) ?? "en"
+        return Locale(identifier: "en_US").localizedString(forLanguageCode: code) ?? "English"
+    }
+
     /// A reply and a reaction change what they touch: the thread is read again by its pane
     /// (its parent's count follows), the reaction is applied to its message. The channel is
     /// not read again for either.
@@ -965,7 +992,8 @@ struct ProjectDetailView: View {
             },
             cachedReplies: { m in
                 project.slack.flatMap { slackStore.cachedThread($0.id, parent: m.ts) }
-            })
+            },
+            createIssue: project.linear == nil ? nil : { m in issueSource = issueSource(for: m) })
     }
 
     /// The work panel has what it needs: the page loaded, or the stores already hold the

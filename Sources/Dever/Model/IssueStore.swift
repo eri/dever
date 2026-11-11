@@ -154,6 +154,37 @@ final class IssueStore: ObservableObject {
         }
     }
 
+    /// Creates an issue in a project and adds Linear's row to the project's list, so the Delivery
+    /// board and the counts that are derived from it follow at once. Nothing is shown before
+    /// Linear answers: a new issue has no identifier to show until then.
+    @discardableResult
+    func create(_ new: LinearClient.NewIssue, app: AppState) async throws -> LinearIssue {
+        var team = issues(project: new.projectID).lazy.compactMap(\.team?.id).first
+        if team == nil {
+            team = try await app.withLinear { try await $0.projectTeamIDs(id: new.projectID) }.first
+        }
+        guard let team else { throw AppError.message("This Linear project has no team to create an issue in.") }
+        let issue = try await app.withLinear { try await $0.createIssue(new, teamID: team) }
+        insert(issue, project: new.projectID)
+        return issue
+    }
+
+    /// Takes a project's issues as just read: what a load does once Linear has answered.
+    func adopt(_ issues: [LinearIssue], project id: String) {
+        let list = issues.sorted { $0.updatedAt > $1.updatedAt }
+        projects[id] = ProjectIssues(issues: list, lastFullLoad: Date(), newest: list.first?.updatedAt)
+    }
+
+    /// Adds a row Linear just returned to a project's list, newest first. A project not read
+    /// yet stays unread: its first load brings the issue.
+    func insert(_ issue: LinearIssue, project id: String) {
+        guard var held = projects[id] else { return }
+        held.issues.removeAll { $0.id == issue.id }
+        held.issues.insert(issue, at: 0)
+        held.newest = max(held.newest ?? "", issue.updatedAt)
+        projects[id] = held
+    }
+
     /// Applies a change on the server. The caller has already shown the new value; on failure
     /// the previous row is restored and the error rethrown.
     func update(_ id: String, change: LinearClient.IssueChange, optimistic: LinearIssue, previous: LinearIssue, app: AppState) async throws {

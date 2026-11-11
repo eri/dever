@@ -333,6 +333,10 @@ Covered by the project page rows. In addition: an open thread refreshes its repl
 appends new messages at the bottom without moving the reading position (the "jump to latest" control
 already exists for this).
 
+| Exit or action | May have changed | Today | Target |
+| --- | --- | --- | --- |
+| "Create an issue" from a message (the "New issue" sheet) | The project's issues, the Delivery board, the Overview's counts | Linear's row is put first in `IssueStore`'s list of the project on success; the board follows at once, the Overview at its next cycle | Keep; the Overview derives its counts from the store |
+
 ### Sheets (new project, import, editor, pickers)
 
 | Exit or action | May have changed | Today | Target |
