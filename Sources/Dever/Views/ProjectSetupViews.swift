@@ -75,6 +75,7 @@ struct ProjectEditorSheet: View {
     @State private var privateChannel = false
     @State private var teamPick: String?
     @State private var saving = false
+    @State private var confirmingRemove = false
     @State private var error: String?
 
     // Lists are built once per load, not on every keystroke.
@@ -162,6 +163,19 @@ struct ProjectEditorSheet: View {
         }
         .onChange(of: channelsNarrowed) { _, _ in buildRows() }
         .onChange(of: page) { _, _ in query = "" }
+        .confirmationDialog("Remove \u{201C}\(project.name)\u{201D} from Dever?", isPresented: $confirmingRemove) {
+            Button("Remove project", role: .destructive) { remove() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Dever stops tracking it. The Slack channel and the Linear project are not changed.")
+        }
+    }
+
+    /// Leaves the project's page first, so nothing is left showing a project that is gone.
+    private func remove() {
+        NotificationCenter.default.post(name: .showScreen, object: SidebarItem.overview)
+        app.delete(project)
+        dismiss()
     }
 
     private static func snapshotChoice(_ raw: String) -> Choice? {
@@ -596,10 +610,22 @@ struct ProjectEditorSheet: View {
             }
             .frame(maxHeight: .infinity)
             VStack(alignment: .leading, spacing: 8) {
-                Button(saving ? "Saving…" : isNew ? "Create project" : "Save") { Task { await save() } }
-                    .buttonStyle(PrimaryButton(size: .sheet))
-                    .keyboardShortcut(.defaultAction)
-                    .disabled(saving || !nameOK)
+                HStack(spacing: 16) {
+                    Button(saving ? "Saving…" : isNew ? "Create project" : "Save") { Task { await save() } }
+                        .buttonStyle(PrimaryButton(size: .sheet))
+                        .keyboardShortcut(.defaultAction)
+                        .disabled(saving || !nameOK)
+                    if !isNew {
+                        Spacer(minLength: 0)
+                        // The same question as the rail's "Remove from Dever", asked from the sheet.
+                        Button { confirmingRemove = true } label: {
+                            Label("Remove project", systemImage: "trash")
+                        }
+                        .buttonStyle(DestructiveButton(size: .sheet))
+                        .disabled(saving)
+                        .accessibilityHint("Asks before removing the project from Dever")
+                    }
+                }
                 ForEach(catalog.errors + [error].compactMap { $0 }, id: \.self) { ErrorLabel($0) }
             }
         }

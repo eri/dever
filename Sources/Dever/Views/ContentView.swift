@@ -129,11 +129,12 @@ struct ContentView: View {
             if let dir = Snapshotter.directory { await Snapshotter.run(in: dir, projects: app.projects, app: app) }
         }
         .onReceive(NotificationCenter.default.publisher(for: .showSheet)) { note in
-            importSource = nil; showNew = false; githubSheet = false
+            importSource = nil; showNew = false; githubSheet = false; editing = nil
             switch note.object as? String {
             case "import-slack": importSource = .slack
             case "import-linear": importSource = .linear
             case "new-project": showNew = true
+            case "edit-project": editing = app.projects.first
             case "github": githubSheet = true
             default: break
             }

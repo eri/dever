@@ -134,7 +134,8 @@ enum Snapshotter {
             NSApp.appearance = NSAppearance(named: light ? .aqua : .darkAqua)
             NotificationCenter.default.post(name: .showScreen, object: SidebarItem.overview)
             for (name, sheet) in [("sheet-import-slack", "import-slack"), ("sheet-import-linear", "import-linear"),
-                                  ("sheet-new-project", "new-project"), ("sheet-github", "github")] {
+                                  ("sheet-new-project", "new-project"), ("sheet-edit-project", "edit-project"),
+                                  ("sheet-github", "github")] {
                 NotificationCenter.default.post(name: .showSheet, object: sheet)
                 try? await Task.sleep(nanoseconds: 6_000_000_000)
                 capture(to: dir.appendingPathComponent("\(name).png"))
