@@ -284,7 +284,10 @@ names them and, under the first, one generated sentence.
 - **Never over what is being read:** a message opened with "Show more" before its summary was wanted
   stays open, with "Show summary" under it. An edited message keeps its old sentence under
   "Summarising" until the new one lands.
-- **What:** the kind of message at the head of the block and one short sentence of at most 14 words that
+- **Compact:** the sparkle, the kind and the sentence are one text, the kind at the head of the first
+  line, in a block with small margins: two lines take about 52 pt. The kind had a line of its own at
+  first (about 80 pt), which the user found took too much room for something meant to save some.
+- **What:** the kind of message at the head of the sentence and one short sentence of at most 14 words that
   stands on its own: who or what it is about, then what is asked, wrong, decided or announced. Names,
   numbers and ticket identifiers kept. Guided generation; the kind is chosen after the sentence.
 - **Asked of the user:** a lime arrow before the kind when the message is a Request or a Question and

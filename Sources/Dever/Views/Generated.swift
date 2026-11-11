@@ -115,51 +115,52 @@ struct SummarisedMessage: View {
                                                        removal: .opacity.animation(Motion.exit))
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            // One head at a time: the kind takes the place of "Summarising".
-            ZStack(alignment: .leading) {
-                if writing {
-                    HStack(spacing: 6) {
-                        Image(systemName: "sparkles").font(.system(size: 11, weight: .semibold))
-                        Text("Summarising").font(.system(size: 11, weight: .semibold))
-                    }
-                    .modifier(Glint(on: active))
-                    .transition(Self.swap)
-                } else {
-                    HStack(spacing: 6) {
-                        Image(systemName: "sparkles").font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(Soot.muted).help(GeneratedMark.meaning)
-                        if asked {
-                            Image(systemName: "arrow.right").font(.system(size: 10, weight: .bold))
-                                .foregroundStyle(Soot.lime).help("Asked of you")
-                        }
-                        Text(kind).font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(pressing ? Soot.ink : Soot.muted)
-                    }
-                    .transition(Self.swap)
-                }
-            }
+        // One or the other: "Summarising" on its line, then the kind and the sentence as one
+        // text, the kind at the head of the first line. No line of its own for the kind: a
+        // summary must take less room than the message it stands for.
+        ZStack(alignment: .topLeading) {
             if let sentence {
-                Text(sentence)
-                    .font(.system(size: 14)).foregroundStyle(Soot.ink.opacity(0.92))
+                written(sentence)
+                    .font(.system(size: 14))
                     .lineSpacing(3)
                     .fixedSize(horizontal: false, vertical: true)
                     .textSelection(.enabled)
                     .id(sentence)
                     // Revealed by the block as it grows; it does not travel.
-                    .transition(.opacity.animation(Motion.ui.delay(0.12)))
+                    .transition(Self.swap)
+            } else {
+                HStack(spacing: 6) {
+                    Image(systemName: "sparkles").font(.system(size: 11, weight: .semibold))
+                    Text("Summarising").font(.system(size: 11, weight: .semibold))
+                }
+                .frame(minHeight: 17)
+                .modifier(Glint(on: active))
+                .transition(Self.swap)
             }
         }
-        .padding(.horizontal, 12).padding(.vertical, 10)
+        .padding(.horizontal, 10).padding(.vertical, 7)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Soot.ground, in: RoundedRectangle(cornerRadius: 8))
         .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Soot.line))
         .clipShape(RoundedRectangle(cornerRadius: 8))
+        .help(sentence == nil ? "" : GeneratedMark.meaning)
         .dissolveWhenReduced(value: sentence)
-        .dissolveWhenReduced(value: writing)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(spoken)
         .accessibilityHint(sentence == nil ? "" : GeneratedMark.meaning)
+    }
+
+    /// The sparkle, the arrow when it is asked of the reader, the kind, then the sentence.
+    private func written(_ sentence: String) -> Text {
+        let small = Font.system(size: 11, weight: .semibold)
+        var head = Text(Image(systemName: "sparkles")).font(small).foregroundColor(Soot.muted) + Text("  ")
+        if asked {
+            head = head + Text(Image(systemName: "arrow.right")).font(.system(size: 10, weight: .bold)).foregroundColor(Soot.lime) + Text("  ")
+        }
+        return head
+            + Text(kind).font(small).foregroundColor(pressing ? Soot.ink : Soot.muted)
+            + Text("  ")
+            + Text(sentence).foregroundColor(Soot.ink.opacity(0.92))
     }
 
     /// What it is first, the caveat last (the hint): "Summary, Request, asked of you: …".

@@ -128,5 +128,9 @@ another in a still frame reads as nothing happening. Two changes, both theirs:
   summarised again: removed when read, after the "Quiet" days of Settings, or with the switch. This
   lifts "memory only" for this one kind of generated text (on-device-ai.md, rule 3).
 
+- **Shorter and smaller,** after more use: the sentence is 14 words and 120 characters at most (20 and
+  180 before), and the kind sits at the head of the sentence instead of on a line of its own, with
+  smaller margins: a two-line summary takes about 52 pt, from about 80.
+
 Not verified: a real rail with real messages after these changes, the real model's pace, the glint
 and the growth in movement (captures are stills), VoiceOver by ear, and the toggle's movement.
