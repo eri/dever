@@ -274,16 +274,19 @@ class YieldingTextView: NSTextView {
 /// A cursor for the area of a view, through AppKit's cursor rects: reliable where
 /// pushing cursors on hover is not. Clicks pass through.
 ///
-/// Areas drawn over others (a card floating over a list) still receive the moves of the
-/// areas under them, so each claim waits a little longer the higher its priority: the area
-/// in front sets the cursor last. The priority comes from `cursorPriority(_:)`.
+/// Areas under a floating surface (a card over a list) still receive the mouse moves. An area
+/// therefore leaves the cursor alone while an area of higher priority covers the pointer:
+/// the card's arrow over the rows, the card's links over its arrow. The priority comes from
+/// `cursorPriority(_:)`; the page is 0.
 struct CursorArea: NSViewRepresentable {
     let cursor: NSCursor
     var priority: Int? = nil
 
     final class CursorView: NSView {
         var cursor: NSCursor = .arrow
-        var priority = 0
+        var priority = 0 { didSet { if priority > 0 { Self.floating.add(self) } else { Self.floating.remove(self) } } }
+        /// The live areas of floating surfaces, weakly held.
+        private static let floating = NSHashTable<CursorView>.weakObjects()
         override func hitTest(_ point: NSPoint) -> NSView? { nil }
         override func resetCursorRects() { addCursorRect(bounds, cursor: cursor) }
 
@@ -298,10 +301,19 @@ struct CursorArea: NSViewRepresentable {
         override func mouseEntered(with event: NSEvent) { claim() }
         override func mouseMoved(with event: NSEvent) { claim() }
         private func claim() {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.012 * Double(priority)) { [weak self] in
-                guard let self, let window = self.window,
-                      self.bounds.contains(self.convert(window.mouseLocationOutsideOfEventStream, from: nil)) else { return }
+            DispatchQueue.main.async { [weak self] in
+                guard let self, let window = self.window else { return }
+                let point = window.mouseLocationOutsideOfEventStream
+                guard self.bounds.contains(self.convert(point, from: nil)), !self.covered(at: point, in: window) else { return }
                 self.cursor.set()
+            }
+        }
+
+        /// An area of higher priority lies under the pointer: it decides.
+        private func covered(at point: NSPoint, in window: NSWindow) -> Bool {
+            Self.floating.allObjects.contains { other in
+                other !== self && other.priority > priority && other.window === window
+                    && other.bounds.contains(other.convert(point, from: nil))
             }
         }
     }
