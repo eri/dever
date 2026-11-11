@@ -225,17 +225,20 @@ final class OverviewStore: ObservableObject {
     private var lastAttempt: Date?
     private var failures = 0
 
-    /// Snapshots older than this are refreshed when the overview appears (Settings › Refresh every).
-    static var staleAfter: TimeInterval { TimeInterval(Preferences.refreshMinutes) * 60 }
+    /// How old the rows may get while nobody looks: set by Dever, not by a setting
+    /// (`RefreshCadence.background`).
+    var staleAfter: TimeInterval {
+        RefreshCadence.background(projects: app?.projects.count ?? 0, lowPower: ProcessInfo.processInfo.isLowPowerModeEnabled)
+    }
 
     /// Due for a refresh. After a failed cycle the next try comes sooner than the setting:
     /// 30 s, then twice as long each time, up to the setting.
     var isStale: Bool {
         if refreshFailed, let lastAttempt {
-            let wait = min(Self.staleAfter, 30 * pow(2, Double(max(0, failures - 1))))
+            let wait = min(staleAfter, 30 * pow(2, Double(max(0, failures - 1))))
             return Date().timeIntervalSince(lastAttempt) > wait
         }
-        let budget = inFront && NSApp.isActive ? min(Self.staleAfter, RefreshCadence.overviewInFront) : Self.staleAfter
+        let budget = inFront && NSApp.isActive ? min(staleAfter, RefreshCadence.overviewInFront) : staleAfter
         return lastRefresh.map { Date().timeIntervalSince($0) > budget } ?? true
     }
 

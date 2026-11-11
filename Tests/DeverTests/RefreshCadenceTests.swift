@@ -44,6 +44,23 @@ final class RefreshCadenceTests: XCTestCase {
         XCTAssertTrue(RefreshCadence.isDue(.slackNew, last: t0, failures: 2, now: t0.addingTimeInterval(80)))
     }
 
+    func testTheBackgroundCycleSetsItself() {
+        // Two minutes: how late an alert may be while Dever is behind another app.
+        XCTAssertEqual(RefreshCadence.background(projects: 0, lowPower: false), 120)
+        XCTAssertEqual(RefreshCadence.background(projects: 4, lowPower: false), 120)
+        XCTAssertEqual(RefreshCadence.background(projects: 20, lowPower: false), 120)
+        // Many projects: three Slack calls each a cycle stay under 30 a minute.
+        XCTAssertEqual(RefreshCadence.background(projects: 40, lowPower: false), 240)
+        XCTAssertEqual(RefreshCadence.background(projects: 100, lowPower: false), 600)
+        for projects in [1, 20, 40, 100, 400] {
+            let perMinute = Double(projects * 3) / (RefreshCadence.background(projects: projects, lowPower: false) / 60)
+            XCTAssertLessThanOrEqual(perMinute, 30)
+        }
+        // Low Power Mode: ten minutes at least.
+        XCTAssertEqual(RefreshCadence.background(projects: 4, lowPower: true), 600)
+        XCTAssertEqual(RefreshCadence.background(projects: 100, lowPower: true), 1_800)
+    }
+
     func testEachKindBelongsToItsTool() {
         XCTAssertEqual(RefreshCadence.Kind.slackNew.service, .slack)
         XCTAssertEqual(RefreshCadence.Kind.slackPage.service, .slack)

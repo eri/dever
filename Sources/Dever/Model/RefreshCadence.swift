@@ -38,9 +38,18 @@ enum RefreshCadence {
         }
     }
 
-    /// The Overview's cycle while the Overview is the screen in front (Settings › Refresh in
-    /// the background every, when that is shorter).
+    /// The Overview's cycle while the Overview is the screen in front.
     static let overviewInFront: TimeInterval = 60
+
+    /// The cycle that reads every project while nobody looks (Dever behind another app, or a
+    /// project page in front): what alerts are sent from. Two minutes, which is how late an
+    /// alert may be; longer with many projects, so that a cycle's Slack calls (three a
+    /// project) stay well under what Slack allows a minute; and three times as long, ten
+    /// minutes at least, in Low Power Mode.
+    static func background(projects: Int, lowPower: Bool) -> TimeInterval {
+        let pace = max(120, TimeInterval(projects) * 6)
+        return lowPower ? max(600, pace * 3) : pace
+    }
 
     /// A tool that keeps failing is asked less and less often, up to this.
     static let longestWait: TimeInterval = 300

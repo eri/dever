@@ -1,19 +1,11 @@
 import Foundation
 import ServiceManagement
 
-/// Settings that live in UserDefaults and are read outside of views: the refresh cadence,
-/// where the app opens, launch at login. Each key is named here once.
+/// Settings that live in UserDefaults and are read outside of views: where the app opens,
+/// launch at login. Each key is named here once.
 enum Preferences {
-    static let refreshMinutesKey = "refreshMinutes"
     static let landingKey = "landing"
     static let lastProjectKey = "lastProjectID"
-
-    /// Minutes between two refreshes of every project; 5 unless set.
-    static var refreshMinutes: Int {
-        get { UserDefaults.standard.object(forKey: refreshMinutesKey) as? Int ?? 5 }
-        set { UserDefaults.standard.set(newValue, forKey: refreshMinutesKey) }
-    }
-    static let refreshChoices = [1, 5, 15, 30]
 
     /// Days without a Slack message before a project reads "Quiet"; 14 unless set.
     static let quietAfterDaysKey = "quietAfterDays"

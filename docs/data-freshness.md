@@ -386,6 +386,13 @@ Safest and most felt first. Each phase ships on its own and leaves the app bette
 | 4 | **Done** | `Model/RefreshCadence.swift` (the budgets and the backoff), `ProjectDetailView.keepCurrent / poll`, `SlackStore.poll`, `GitHubStore.refreshChecks`, `OverviewStore.inFront`, `AppError.rateLimited` |
 | 5, 6 | Not started (optional) | |
 
+The "Refresh every" setting is gone. Once the screen in front was read every minute and everything was
+read on return, it only set how late an alert could be while Dever is behind another app, against a cost
+that phase 2 had divided by about fifty: a question nobody can answer by picking 1, 5, 15 or 30 minutes.
+The background cycle now sets itself (`RefreshCadence.background`): every two minutes, longer with many
+projects so that a cycle's Slack calls stay under 30 a minute, and three times as long (ten minutes at
+least) in Low Power Mode. Where this document says "the setting" for the background cadence, read that.
+
 After step 1 of phase 3 a repository is read once for the Overview and every project page that follows
 it (a read within 20 s serves all of them), a project whose issues and repositories are already held
 opens without a skeleton for its work panel, an open project page follows the Overview's cycle, and a
@@ -409,8 +416,7 @@ app: messages that arrived since the newest one held and the read cursor every 2
 nothing published when nothing changed), the channel's latest page, the issues' delta and the
 repositories every minute, the checks of the pull requests whose checks are running every 15 s (one
 query of under a kilobyte, measured 0.7 KB for six pull requests), a moving preview every 15 s. The
-Overview in front runs its cycle every minute, quietly; behind, at Settings › Refresh in the background
-every. A tool that fails is asked half as often each time, up to five minutes, and a rate limit
+Overview in front runs its cycle every minute, quietly; behind, every two minutes (below). A tool that fails is asked half as often each time, up to five minutes, and a rate limit
 (`Retry-After`) pauses every call to that tool until it lifts.
 
 Measured after phase 2 on the same repository, with the app's own client code

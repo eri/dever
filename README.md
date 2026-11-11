@@ -45,7 +45,7 @@ Tokens are stored in the macOS Keychain (`io.github.eri.dever`), projects in `~/
   API's health, probed with a HEAD request on `pr-<N>-<target>.<domain>`, the domain being `preview.domain` in `config/dever.json`). Deploy (one click, or with
   options from the More menu), redeploy, protect and delete post the team's own commands as PR comments
   (`/preview [--nb-api-pods=N] [--nb-app-pods=N] [--prod] [--autoscale] [--keep]`, `/delete-preview`); the state is
-  read back from the workflows' result comments and runs, refreshed with the overview every 5 minutes and every 30 s
+  read back from the workflows' result comments and runs, refreshed with the overview (every two minutes in the background, every minute on screen) and every 30 s
   after a command until the workflow answers.
 
 ## Data freshness
