@@ -12,9 +12,6 @@ enum MessageSummary {
 
     /// Same test as the rail's "Show more": only a message the rail would cut is shown as its summary.
     static let minimumLength = 240
-    /// The Overview's test: a mention its one line would cut. Lower than the rail's, which shows
-    /// four lines of a message before it cuts.
-    static let lineLength = 120
     /// Longest summary worth showing, as a share of the original: past it, the original reads as fast.
     static let longestShare = 0.7
     /// And in characters: a summary is two lines of the rail, and most of one line of the
@@ -79,9 +76,8 @@ enum MessageSummary {
     }
 
     /// The input for a message, or nil when it is not one the rail cuts.
-    static func input(_ message: SlackMessage, users: [String: SlackUser], minimumLength: Int = minimumLength,
-                      languageCode: (String) -> String) -> Input? {
-        guard (message.text?.count ?? 0) > minimumLength, !message.isSystem else { return nil }
+    static func input(_ message: SlackMessage, users: [String: SlackUser], languageCode: (String) -> String) -> Input? {
+        guard isLong(message) else { return nil }
         let text = plain(message, users: users)
         guard text.count > minimumLength else { return nil }
         let language = Locale(identifier: "en_US").localizedString(forLanguageCode: languageCode(text)) ?? "English"

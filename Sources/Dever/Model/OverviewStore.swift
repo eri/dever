@@ -41,8 +41,7 @@ struct ProjectSnapshot {
             var text: String
             var date: Date
             /// What the Mac's model would read to shorten the message; nil for a message short
-            /// enough to be read on the item's line (`MessageSummary.lineLength`). The same input,
-            /// so the same version, as the rail's for a message the rail summarises too.
+            /// enough to be read as it is. The same input, so the same version, as the rail's.
             var summary: MessageSummary.Input? = nil
 
             init(ts: String, author: String, text: String, date: Date, summary: MessageSummary.Input? = nil) {
@@ -53,8 +52,7 @@ struct ProjectSnapshot {
             init(_ message: SlackMessage, users: [String: SlackUser], languageCode: (String) -> String) {
                 self.init(ts: message.ts, author: message.user.flatMap { users[$0]?.name } ?? "Someone",
                           text: SlackPlain.text(message.text ?? "", users: users), date: message.date,
-                          summary: MessageSummary.input(message, users: users, minimumLength: MessageSummary.lineLength,
-                                                        languageCode: languageCode))
+                          summary: MessageSummary.input(message, users: users, languageCode: languageCode))
             }
         }
     }

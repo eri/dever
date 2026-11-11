@@ -27,16 +27,6 @@ final class WaitingSummaryTests: XCTestCase {
         XCTAssertTrue(items[0].text.hasPrefix("Alex: @U2 Le rapport"))
     }
 
-    func testAMentionTheLineWouldCutIsSummarisedThoughTheRailShowsItWhole() {
-        // Over a line of the Overview, under the four lines of the rail.
-        let middling = "<@U2> " + String(repeating: "Review faite, deux questions ouvertes de mon côté. ", count: 3)
-        let message = SlackMessage(ts: "2", user: "U1", text: middling)
-        XCTAssertNotNil(mention("2", middling).summary)
-        XCTAssertNil(MessageSummary.input(message, users: users, languageCode: { _ in "fr" }), "the rail does not ask for it")
-        XCTAssertFalse(MessageSummary.isSummarised(message, users: users), "and never shows it as a summary")
-        XCTAssertNil(mention("1", "<@U2> " + String(repeating: "mot ", count: 25)).summary, "it fits the line")
-    }
-
     func testTheEntryIsTheOneTheRailWrites() throws {
         let message = SlackMessage(ts: "2", user: "U1", text: long)
         let rail = try XCTUnwrap(MessageSummary.input(message, users: users, languageCode: { _ in "fr" }))

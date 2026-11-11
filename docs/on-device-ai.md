@@ -305,10 +305,10 @@ generated sentence, and the link to the real log.
 - **Reads:** the message already in `SlackStore`. Derived data keyed by channel, message and text (an
   edit is another version), in `IntelligenceStore`, and on disk while the message is unread
   (`SummaryCache`). No network request.
-- **Also in the Overview,** and nowhere else: a "for you" item that comes from a message its line would cut (a
-  mention over 120 characters, `MessageSummary.lineLength`: lower than the rail's 240, asked for by the
-  user after a 215-character mention stayed cut on its line; the rail still shows such a message
-  whole) shows who wrote it, the sparkle, the kind
+- **Also in the Overview,** and nowhere else: a "for you" item that comes from a long message (a
+  mention over 240 characters, the same test as the rail's; 120 was tried so that a mention cut on the
+  line would be summarised too, and given up: on a message that short the model keeps one of its two
+  points, a different one at each run, or mixes them) shows who wrote it, the sparkle, the kind
   and the sentence, on the item's one line, in place of the cut message. No block and no taller row:
   the line is too small to be taken for the message, and the mark says what it is. Until the sentence
   is written, and when the model stays silent, the line is the start of the message as before; the
