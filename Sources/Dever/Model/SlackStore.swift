@@ -17,7 +17,8 @@ final class SlackStore: ObservableObject {
         var lastRead: String?
         /// The newest message that has been on screen in the room, on its way to the cursor.
         var seenUpTo: String?
-        /// The last successful read of the channel's latest page.
+        /// The last complete read: the latest page, the cursor and the names. Nil until the
+        /// first one ends, and a page waits for it before showing the channel.
         var fetchedAt: Date?
         /// Replies of the threads that were opened, oldest first, by their parent's `ts`.
         var threads: [String: [SlackMessage]] = [:]
@@ -116,7 +117,6 @@ final class SlackStore: ObservableObject {
     private func fetch(_ id: String, app: AppState) async throws {
         let page = try await app.withSlack { try await $0.historyPage(id, limit: 20) }
         channels[id, default: Channel()].takeLatest(page)
-        channels[id]?.fetchedAt = Date()
         let linked = Set(page.messages.flatMap { $0.linkedChannelIDs }).subtracting([id])
         if !linked.isSubset(of: Set(channelNames.keys)),
            let names = try? await app.withSlack({ await SlackDirectory.shared.channelNames(linked, via: $0) }) {
@@ -133,6 +133,9 @@ final class SlackStore: ObservableObject {
                 customEmoji = (try? await app.withSlack { await SlackDirectory.shared.customEmoji(team: team, via: $0) }) ?? [:]
             }
         }
+        // Read only now: a page shows the channel once its cursor and its names are known,
+        // so the first thing on screen is what is unread, not every message of the week.
+        channels[id]?.fetchedAt = Date()
     }
 
     /// Reads the page before the oldest message held.
