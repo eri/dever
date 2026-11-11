@@ -37,6 +37,15 @@ protocol LanguageModel: Sendable {
     /// A catch-up of numbered messages, in the shape the model is held to (guided generation):
     /// free text in two labelled lines came back mislabelled or translated one time in two.
     func catchUp(instructions: String, prompt: String) async throws -> CatchUpAnswer
+    /// One message shortened: what kind of message it is, and its point in a sentence.
+    func summarise(instructions: String, prompt: String) async throws -> MessageSummaryAnswer
+}
+
+/// What the model says of one message.
+struct MessageSummaryAnswer: Equatable, Sendable {
+    /// One of `MessageSummary.kinds`.
+    var kind: String
+    var summary: String
 }
 
 /// What the model says of a run of numbered messages.
@@ -63,10 +72,20 @@ private struct CatchUpPoint {
 
 @available(macOS 26.0, *)
 @Generable
+private struct MessageSummaryShape {
+    @Guide(description: "The point of the message in one full sentence of at most 20 words, understandable by someone who has not read the channel: who or what it is about, and what is asked, wrong, decided or announced")
+    var summary: String
+    @Guide(description: "Request: the author asks someone to do, send, check, answer or decide something. Warning: the author reports a bug, a failure, a delay or a risk. Decision: the author states a choice that has already been made. Info: anything else, such as news, a welcome, an explanation, a report with no problem",
+           .anyOf(["Request", "Warning", "Decision", "Info"]))
+    var kind: String
+}
+
+@available(macOS 26.0, *)
+@Generable
 private struct CatchUpShape {
     @Guide(description: "The reader's to-do list: one item per thing a message asks of them, each a short action that starts with a verb in the infinitive, never a question. Empty when no message asks anything of the reader", .maximumCount(2))
     var actions: [CatchUpPoint]
-    @Guide(description: "The most important other things said or decided, the most important first", .count(1...2))
+    @Guide(description: "The most important other things said or decided, the most important first: each a full sentence in your own words that names what it is about. No quotation, no message number inside the sentence", .count(1...2))
     var rest: [CatchUpPoint]
 }
 #endif
@@ -131,6 +150,19 @@ struct SystemLanguageModelClient: LanguageModel {
                                                   options: GenerationOptions(maximumResponseTokens: 300)).content
             let asked = shape.actions.map { CatchUpAnswer.Point(sentence: $0.sentence, message: $0.message) }
             return CatchUpAnswer(asked: asked, rest: shape.rest.map { .init(sentence: $0.sentence, message: $0.message) })
+        }
+        #endif
+        throw IntelligenceError.unavailable
+    }
+
+    func summarise(instructions: String, prompt: String) async throws -> MessageSummaryAnswer {
+        #if canImport(FoundationModels)
+        if #available(macOS 26.0, *) {
+            guard SystemLanguageModel.default.availability == .available else { throw IntelligenceError.unavailable }
+            let session = LanguageModelSession(instructions: instructions)
+            let shape = try await session.respond(to: prompt, generating: MessageSummaryShape.self,
+                                                  options: GenerationOptions(maximumResponseTokens: 100)).content
+            return MessageSummaryAnswer(kind: shape.kind, summary: shape.summary)
         }
         #endif
         throw IntelligenceError.unavailable

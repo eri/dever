@@ -648,6 +648,7 @@ struct SlackThreadView: View {
                                newReplies: readUpTo.map { r in m.latest_reply.map { !SlackTS.isAtOrBefore($0, r) } ?? false } ?? false,
                                permalink: permalink(m),
                                summary: wide ? nil : channelID.flatMap { intelligence.text(MessageSummary.subject(channel: $0, ts: m.ts)) },
+                               summarising: !wide && (channelID.map { intelligence.isWriting(MessageSummary.subject(channel: $0, ts: m.ts)) } ?? false),
                                actions: actions, openThread: wide ? { setThread($0) } : nil, openWide: openWide)
                         .padding(.top, grouped ? 2 : (newDay ? 0 : (wide ? 18 : 14)))
                         .id(m.ts)
@@ -1312,6 +1313,8 @@ private struct MessageRow: View {
     let permalink: URL?
     /// The rail only: the message's summary, shown in its place until "Show original".
     var summary: GeneratedText? = nil
+    /// The summary is being written: the message shows meanwhile, with a line that says so.
+    var summarising = false
     @State private var showOriginal = false
     let actions: SlackMessageActions
     /// In the wide view the thread opens in a pane beside the list instead of inline.
@@ -1374,13 +1377,15 @@ private struct MessageRow: View {
                 }
                 Group {
                     if let summary, !showOriginal {
-                        SummarisedMessage(text: summary).padding(.top, 2).transition(.opacity)
+                        SummarisedMessage(text: summary).padding(.top, 2).transition(Motion.pop)
                     } else {
                         MessageBody(message: message, users: users, channels: channels, expanded: wide ? .constant(true) : $expanded)
                             .transition(.opacity)
+                        if summarising { SummarisingLine().padding(.top, 2).transition(.opacity) }
                     }
                 }
-                .motion(Motion.ui, fade: true, value: summary != nil && !showOriginal)
+                .motion(Motion.move, value: summary != nil && !showOriginal)
+                .motion(Motion.ui, fade: true, value: summarising)
                 MessageExtras(message: message, channels: channels, users: users, showCards: summary == nil || showOriginal)
                 if !reactions.isEmpty {
                     ReactionPills(reactions: reactions, me: me, customEmoji: customEmoji, users: users) { toggle($0) }

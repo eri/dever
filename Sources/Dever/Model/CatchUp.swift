@@ -80,7 +80,7 @@ enum CatchUp {
         You help \(input.reader) catch up on a team chat channel they have not read. The messages are numbered. \(input.reader) is the reader.
         List what \(input.reader) has to do, if anything, then the one or two most important other things that were said or decided. Do not repeat what \(input.reader) has to do in the rest.
         Something is asked of \(input.reader) when a message tells or asks them to do, check, review or answer something. That includes a message written to someone else that says \(input.reader) should, must or could do it ("\(input.reader) should look at it", "il faudrait que \(input.reader) regarde"), with or without an @. A piece of news, a decision or a reminder to all is not a request. One action per request, the most pressing first, two at most. Write each as a to-do item that starts with a verb in the infinitive ("Vérifier le front avant midi", "Review the pull request"): never a question, never "you" or "vous".
-        Every sentence you write is in \(input.language), whatever language the messages are in: translate when they differ. Short plain sentences in your own words, not copies of the messages. Never name \(input.reader). Use only what the messages say.
+        Every sentence you write is in \(input.language), whatever language the messages are in: translate when they differ. Short plain sentences in your own words, never a quotation of a message: say what happened ("The QA of the feature is complete, three bugs are left"), not what a message contains. Each sentence names what it is about, so that it is understood without the messages. Never name \(input.reader). Use only what the messages say.
         """
     }
 
@@ -121,6 +121,9 @@ enum CatchUp {
     /// to-do item: no closing punctuation, and a question mark the model left is dropped.
     private static func tidy(_ raw: String, action: Bool = false) -> String? {
         var text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        // The model sometimes copies a message in quotes and leaves its number behind: `…XP", 2.`
+        text = text.replacingOccurrences(of: #"["”’']?,?\s*\[?\d{1,2}\]?\.?$"#, with: "", options: .regularExpression)
+        text = text.trimmingCharacters(in: CharacterSet(charactersIn: "\"“”‘’' "))
         if action { text = text.trimmingCharacters(in: CharacterSet(charactersIn: " .?!\u{202F}\u{00A0}")) }
         guard text.count > 2 else { return nil }
         text = text.prefix(1).uppercased() + text.dropFirst()

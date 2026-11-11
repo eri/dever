@@ -98,7 +98,8 @@ struct SummarisedMessage: View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 6) {
                 GeneratedMark(size: 11)
-                Text("Summary").font(.system(size: 11, weight: .semibold)).foregroundStyle(Soot.muted)
+                Text(text.kind ?? "Summary").font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(text.kind == "Warning" || text.kind == "Request" ? Soot.ink : Soot.muted)
             }
             Text(text.sentences.map(\.text).joined(separator: " "))
                 .font(.system(size: 14)).foregroundStyle(Soot.ink.opacity(0.92))
@@ -111,6 +112,31 @@ struct SummarisedMessage: View {
         .background(Soot.ground, in: RoundedRectangle(cornerRadius: 10))
         .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Soot.line))
         .accessibilityElement(children: .combine)
+    }
+}
+
+/// Under a long message while its summary is being written: the sparkle breathes and the word
+/// says what is happening, so the swap to the block is expected. Still under Reduce Motion.
+struct SummarisingLine: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        // Computed from the clock, like `Skeleton`: an implicit animation here would also catch
+        // the layout of the rows around it.
+        TimelineView(.animation(minimumInterval: 1.0 / 30, paused: reduceMotion)) { context in
+            let wave = reduceMotion ? 1 : 0.5 + 0.5 * cos(context.date.timeIntervalSinceReferenceDate * .pi / 0.7)
+            HStack(spacing: 6) {
+                Image(systemName: "sparkles").font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(Soot.lime)
+                    .opacity(0.45 + 0.55 * wave)
+                    .scaleEffect(0.9 + 0.15 * wave)
+                Text("Summarising").font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(Soot.muted)
+                    .opacity(0.6 + 0.4 * wave)
+            }
+        }
+        .accessibilityElement()
+        .accessibilityLabel("Writing a summary of this message")
     }
 }
 
@@ -174,6 +200,7 @@ struct GeneratedGallery: View {
             }
             row("Being written") { GeneratedBlock(text: nil, writing: true) }
             row("Written") { GeneratedBlock(text: sample, open: { _ in }) }
+            row("A long message, being summarised") { SummarisingLine() }
             row("A long message, summarised") { SummarisedMessage(text: MessageSummary.sample) }
             row("Invitation, off") { IntelligenceInvitation(forced: .off) }
             row("Invitation, not ready") { IntelligenceInvitation(forced: .notReady) }

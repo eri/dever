@@ -99,7 +99,7 @@ message is not clickable.
 A detected mention uses `@` with the sparkle, where a Slack mention uses `@` alone.
 
 A summary that stands in the place of a message (5.7) is the one generated text in a block of its own
-(`SummarisedMessage`: ground tone, hairline edge, the sparkle and the word "Summary"), so that it is
+(`SummarisedMessage`: ground tone, hairline edge, the sparkle and the kind of message), so that it is
 never taken for the message.
 
 ```
@@ -214,9 +214,12 @@ Someone speaks of the user, or asks something of them, without a Slack mention.
 - **Where:** the Slack rail, in the place of each message it would cut ("Show more", over 240
   characters). Not in the room, not for short messages.
 - **When:** by itself, for the messages the rail shows, the newest first, one at a time behind the
-  catch-up. The original shows until the summary is ready, then fades to the block.
-- **What:** one sentence of at most 20 words, a second only when the message asks for something;
-  names, numbers and ticket identifiers kept. Never more than 180 characters: whole sentences are kept
+  catch-up. The original shows until the summary is ready, with a line under it ("Summarising", the
+  sparkle breathing) so that the swap is expected; then the block takes its place.
+- **What:** the kind of message at the head of the block (Request, Warning, Decision or Info) and one
+  sentence of at most 20 words that stands on its own: who or what it is about, then what is asked,
+  wrong, decided or announced. Names, numbers and ticket identifiers kept. Guided generation; the kind
+  is chosen after the sentence, and a "Decision" whose sentence asks to decide is shown as a Request. Never more than 180 characters: whole sentences are kept
   as far as they fit. "Show original" opens the message in full, "Show summary" goes back.
 - **Folded with it:** the link previews of the message, which come back with the original. Pictures,
   files, reactions and the thread link stay under the summary.

@@ -19,6 +19,12 @@ private final class FakeModel: LanguageModel, @unchecked Sendable {
         return "answer to \(prompt)"
     }
 
+    var summary = MessageSummaryAnswer(kind: "Info", summary: "A summary.")
+    func summarise(instructions: String, prompt: String) async throws -> MessageSummaryAnswer {
+        lock.withLock { order.append(prompt) }
+        return summary
+    }
+
     var answer = CatchUpAnswer(asked: [], rest: [])
     func catchUp(instructions: String, prompt: String) async throws -> CatchUpAnswer {
         lock.withLock { order.append(prompt) }
@@ -341,6 +347,13 @@ final class CatchUpTests: XCTestCase {
         XCTAssertEqual(input.lines.map(\.namesReader), [false, false, false, false, false, true, true])
     }
 
+    func testAQuotedCopyAndItsLeftoverNumberAreCleaned() throws {
+        let answer = CatchUpAnswer(asked: [], rest: [.init(sentence: "“The feature gives +2 XP”, 2.", message: 2),
+                                                     .init(sentence: "Testing is complete, covering all 24 criteria\", 6.", message: 6)])
+        let text = try XCTUnwrap(CatchUp.text(from: answer, lines: lines))
+        XCTAssertEqual(text.sentences.map(\.text), ["The feature gives +2 XP.", "Testing is complete, covering all 24 criteria."])
+    }
+
     func testEmptyAndRepeatedSentencesAreDropped() {
         XCTAssertNil(CatchUp.text(from: .init(asked: [.init(sentence: " ", message: 1)], rest: [.init(sentence: "", message: 2)]), lines: lines))
         let twice = CatchUp.text(from: .init(asked: [], rest: [.init(sentence: "Same thing", message: 1), .init(sentence: "same thing.", message: 2)]), lines: lines)
@@ -428,10 +441,14 @@ final class MessageSummaryTests: XCTestCase {
         XCTAssertNotEqual(a.version, b.version)
     }
 
+    private func shown(_ summary: String, kind: String = "Info", original: String) -> GeneratedText? {
+        MessageSummary.text(from: .init(kind: kind, summary: summary), original: original)
+    }
+
     func testASummaryNearlyAsLongAsTheMessageIsNotShown() {
-        XCTAssertNil(MessageSummary.text(from: String(long.prefix(230)), original: String(long.prefix(241))))
-        XCTAssertNil(MessageSummary.text(from: "  ", original: long))
-        XCTAssertEqual(MessageSummary.text(from: "Le *rapport* couvre\ntous les critères.", original: long)?.sentences.map(\.text),
+        XCTAssertNil(shown(String(long.prefix(230)), original: String(long.prefix(241))))
+        XCTAssertNil(shown("  ", original: long))
+        XCTAssertEqual(shown("le *rapport* couvre\ntous les critères.", original: long)?.sentences.map(\.text),
                        ["Le rapport couvre tous les critères."])
     }
 
@@ -440,8 +457,17 @@ final class MessageSummaryTests: XCTestCase {
         let first = "Le rapport de QA est terminé et vingt et un critères sur vingt-quatre passent sur la preview."
         let second = "SUP-931 est à corriger avant la mise en production, les deux autres peuvent attendre."
         let third = "Le détail complet des cas de test est dans le canvas du canal."
-        XCTAssertEqual(MessageSummary.text(from: "\(first) \(second) \(third)", original: original)?.sentences.map(\.text), ["\(first) \(second)"])
-        XCTAssertNil(MessageSummary.text(from: String(repeating: "mot ", count: 80), original: original), "one endless sentence")
+        XCTAssertEqual(shown("\(first) \(second) \(third)", original: original)?.sentences.map(\.text), ["\(first) \(second)"])
+        XCTAssertNil(shown(String(repeating: "mot ", count: 80), original: original), "one endless sentence")
+    }
+
+    func testTheKindHeadsTheBlockAndIsNotRepeatedInTheSentence() {
+        let text = shown("Request: get two screenshots of the feature before the weekly.", kind: "request", original: long)
+        XCTAssertEqual(text?.kind, "Request")
+        XCTAssertEqual(text?.sentences.map(\.text), ["Get two screenshots of the feature before the weekly."])
+        XCTAssertNil(shown("Something else entirely.", kind: "Poem", original: long)?.kind)
+        XCTAssertEqual(shown("The team should decide whether to optimise the sync.", kind: "Decision", original: long)?.kind, "Request")
+        XCTAssertEqual(shown("The export leaves this release.", kind: "Decision", original: long)?.kind, "Decision")
     }
 
     func testSubjectsAreOnePerMessage() {
@@ -456,10 +482,19 @@ extension RealModelTests {
         let report = """
         Hi team, final QA report for the tips feature (QA-27). Scope: all test cases executed, covering all 24 acceptance criteria. Tested on preview PR-4714 in the web extension and the back office. Result: 21 criteria pass, 3 fail. SUP-931: the tips list isn't refreshed after a language change, learners see and open tips in the previous language. SUP-928: visual flickering in the tip content text when toggling the favorite heart. SUP-929: sync latency of about 40 seconds for backend tip changes. None is blocking for the demo, but SUP-931 should be fixed before the release. Full report in the canvas.
         """
+        let others = [
+            ("Estelle", "Hey team, I have the customer weekly tomorrow at 11am and I'd love to show them what's coming with AI Tips. Could someone send me 2 or 3 screenshots of the feature in the web extension before tomorrow morning? Nothing fancy, the tip page and the success screen would be perfect. Thanks a lot!"),
+            ("Marco", "Hi Kyryl, welcome! You can start testing AI tips. FYI: tips are a new kind of content we're pushing on Mendo. They are short, hands-on AI tips that learners validate with a 'Nailed it!' button to earn +2 XP. The acceptance criteria are in the Linear project and the preview is deployed on PR-4714. Ping me if anything is unclear."),
+            ("Kyryl", "One more thing on sync: when I change a tip in the back office, it takes 1 to 2 minutes before the change shows in the web extension. It is not a bug strictly speaking, the cache is refreshed on a timer, but for editors it feels broken because they do not see their fix. I think we should decide whether we optimize for faster sync before the release or document the delay."),
+        ]
+        for (author, message) in others {
+            let text = try await MessageSummary.write(.init(author: author, text: message, language: "English"))
+            print("summary: [\(text.kind ?? "-")] \(text.sentences.first?.text ?? "")")
+        }
         for language in ["English", "French"] {
             let start = Date()
             let text = try await MessageSummary.write(.init(author: "Kyryl", text: report, language: language))
-            print("summary (\(language)) in \(String(format: "%.1f", Date().timeIntervalSince(start))) s: \(text.sentences.first?.text ?? "")")
+            print("summary (\(language)) in \(String(format: "%.1f", Date().timeIntervalSince(start))) s: [\(text.kind ?? "-")] \(text.sentences.first?.text ?? "")")
             XCTAssertLessThanOrEqual(text.sentences.first?.text.count ?? .max, MessageSummary.longest)
         }
     }
