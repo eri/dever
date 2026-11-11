@@ -67,8 +67,12 @@ Consequences for the design, true whatever the measurements say:
    replaces, recolours or reorders one. An explanation of a pipeline failure sits next to the link to
    the real log, never instead of it.
 3. **Everything stays on the Mac.** Only the system model. No online AI service, no Slack, Linear or
-   GitHub content sent anywhere else, no generated text written to disk (memory only). The wording in
-   the app: "Runs on this Mac. Nothing leaves it."
+   GitHub content sent anywhere else. Generated text lives in memory, with one exception asked for by
+   the user: the summary of a long message is kept in a file on this Mac (`SummaryCache`, readable by
+   the user alone) so that it is not written again at every launch; it leaves the file when its
+   message is read, when it is older than the days after which Settings calls a channel quiet (14
+   unless set), and when "Long messages" is switched off. The wording in the app: "Runs on this Mac.
+   Nothing leaves it."
 4. **Silent rather than inventive.** Too little material, a refusal, a guardrail or an error: no generated text at all and no error message; the screen is the one of today.
    No system notification is ever built from generated text or triggered by a model's judgement.
    An input too long to read whole is read in part only where the feature says which part and the
@@ -77,11 +81,12 @@ Consequences for the design, true whatever the measurements say:
 6. **Raw data first.** A generated text is added above or beside what it describes; the messages, the
    description and the comments stay where they are, readable at once, and never wait for the model.
    One exception, decided on the first real use: in the rail, where a long message is already cut at
-   four lines, its summary takes the place of the cut (5.7). The block is there from the start, with
-   the first two lines of the message in it until the sentence is written; "Show original" gives the
-   message in full at any moment, written or not; the room always shows messages.
+   four lines, its summary takes the place of the cut (5.7). The block is there from the start, one
+   line that says "Summarising" until the sentence is written; "Show original" gives the message in
+   full at any moment, written or not; the room always shows messages.
 7. **Skeletons, not spinners,** and a generated text never makes content move when it arrives: its
-   place is reserved.
+   place is reserved. One exception, the user's choice: a long message's block grows from its one
+   line to the sentence when it lands, in one movement with the rows under it (5.7).
 
 ## 4. The mark and the source
 
@@ -97,10 +102,10 @@ A detected mention uses `@` with the sparkle, where a Slack mention uses `@` alo
 
 A summary that stands in the place of a message (5.7) is the one generated text in a block of its own
 (`SummarisedMessage`: ground tone, hairline edge, the sparkle and the kind of message), so that it is
-never taken for the message. The block holds its place before the summary exists: "Summarising" at its
-head and the start of the message in muted ink, at the height the sentence will take, so that nothing
-in the rail moves when it lands (rule 7). The sparkle breathes, in lime, on the one summary the model
-is writing and nowhere else; VoiceOver hears "Summary, Request, asked of you: …", the caveat as the hint.
+never taken for the message. The block is there before the summary exists, as one line: the sparkle
+and "Summarising". On the one summary the model is writing they are lime and a glint runs through
+them; on those that wait they are muted and still. VoiceOver hears "Summary, Request, asked of you: …",
+the caveat as the hint.
 
 ```
 ✦ → Your answer on the front end is awaited before noon.   ↗
@@ -204,13 +209,21 @@ time; a bolder one would speak for the user. Writing on the user's behalf is not
 - **Where:** the Slack rail, in the place of each message it would cut ("Show more", over 240
   characters). Not in the room, not for short messages.
 - **When:** by itself, for the messages the rail shows, the newest first, one at a time. The block is
-  in the message's place at once: "Summarising" at its head and the first two lines of the message,
-  muted, where the sentence will be. Only the one being written has a breathing sparkle; the others
-  wait, still. When the sentence lands the excerpt fades out (150 ms) and the sentence and its kind
-  fade in (200 ms) in the same frame: the rail does not move, or by one line when the sentence takes
-  three, and then the rows under it follow on `Motion.move`. Under Reduce Motion the sparkle is still
-  and the swap is a dissolve. The first form (the cut message, a "Summarising" line under it, then
-  the block) moved the rail at every arrival: see [reviews/message-summaries.md](reviews/message-summaries.md).
+  in the message's place at once, one line high: "Summarising", in lime with a glint running through
+  it (1 s across, every 1.6 s) on the one being written, muted and still on those that wait. When
+  the sentence lands, "Summarising" gives way to the kind (150 ms out, 200 ms in), the block grows to
+  the sentence and the rows under it follow, in one movement (`Motion.move`); the sentence fades in
+  as it is uncovered. Under Reduce Motion nothing runs or moves and the swap is a dissolve. Two
+  earlier forms were set aside: the cut message with a "Summarising" line under it, then the block
+  (the rail jumped at every arrival), and a block holding the sentence's height with the start of
+  the message in it (still, but the user found the arrival flat): see
+  [reviews/message-summaries.md](reviews/message-summaries.md).
+- **Kept between launches:** a summary, or the model's silence, is saved with the version of its
+  input (`SummaryCache`, a file in the app's folder): at the next launch the same message shows its
+  summary at once and the model is not asked. Removed when the message is read (Slack's cursor
+  passes it; what is on screen stays until the app quits), after the days Settings gives a channel
+  before it is "Quiet" (14 unless set) whether read or not, and when the switch is turned off. An
+  edited message is another version and is written again.
 - **Given up:** when the model has nothing to show, the block gives the place back to the message,
   cut at four lines as before.
 - **Never over what is being read:** a message opened with "Show more" before its summary was wanted
@@ -240,7 +253,8 @@ time; a bolder one would speak for the user. Writing on the user's behalf is not
   blocks the release" of a message that said nothing blocked. The instructions ask for full sentences
   and for no statement stronger than the message's.
 - **Reads:** the message already in `SlackStore`. Derived data keyed by channel, message and text (an
-  edit is another version), in `IntelligenceStore`, memory only. No network request.
+  edit is another version), in `IntelligenceStore`, and on disk while the message is unread
+  (`SummaryCache`). No network request.
 - **Also in the Overview,** and nowhere else: a "for you" item that comes from a long message (a
   mention over 240 characters, the same test as the rail's) shows who wrote it, the sparkle, the kind
   and the sentence, on the item's one line, in place of the cut message. No block and no taller row:
@@ -333,7 +347,7 @@ Summaries
   could run the model but it is off or not ready: what Dever would do here (shorten long messages) and
   a link to System Settings. Dismissed once, never shown again.
 - **Slow:** skeleton lines in the reserved place; the content under it is usable at once. A long
-  message's block holds its place with the start of the message; "Show original" does not wait.
+  message's block says "Summarising" on one line; "Show original" does not wait.
 - **Failing** (refusal, guardrail, context exceeded, rate limit, unsupported language): rule 4. The
   place closes without a message; the next change of the input may try again, the same input does not.
 - Availability is observed (`SystemLanguageModel` is `Observable`): features appear when the model
@@ -345,7 +359,8 @@ Summaries
   enum the rest of the app can read on macOS 14; a serial queue with two priorities (on screen,
   background); one function per use, each with its instructions, its `@Generable` output and its input
   budget. Token counts with `tokenCount(for:)` where it exists, a character estimate before 26.4.
-- `Model/IntelligenceStore.swift`: app-lifetime, memory only. Holds what the model wrote by key
+- `Model/IntelligenceStore.swift`: app-lifetime, in memory (summaries of long messages also in
+  `Model/SummaryCache.swift`, a file, until read or old). Holds what the model wrote by key
   (summaries, failure explanations); views read it, never call the model (rule 1 of CLAUDE.md).
 - Prompts are English instructions that name the output language; inputs are plain text
   (`SlackPlain.text`), with authors' display names, never ids.

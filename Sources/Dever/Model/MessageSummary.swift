@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import os
 
@@ -21,8 +22,12 @@ enum MessageSummary {
         let text: String
         /// English name of the language to write in ("French").
         let language: String
-        /// An edited message is another input.
-        var version: String { "\(language)-\(text.count)-\(text.hashValue)" }
+        /// An edited message is another input. The same from one launch to the next (a summary
+        /// kept on disk is found again), which `hashValue` is not.
+        var version: String {
+            let digest = SHA256.hash(data: Data(text.utf8)).prefix(8).map { String(format: "%02x", $0) }.joined()
+            return "\(language)-\(text.count)-\(digest)"
+        }
     }
 
     static func isLong(_ message: SlackMessage) -> Bool {
@@ -48,8 +53,7 @@ enum MessageSummary {
         return !words(text).isDisjoint(with: words(reader))
     }
 
-    /// The message as plain words on one line: what the model reads, and what stands in the
-    /// summary's place while it is written. Slack's marks for bold and code are noise to the
+    /// The message as plain words on one line: what the model reads. Slack's marks for bold and code are noise to the
     /// model, and it copies them out.
     static func plain(_ message: SlackMessage, users: [String: SlackUser]) -> String {
         SlackPlain.text(message.text ?? "", users: users)
@@ -60,11 +64,6 @@ enum MessageSummary {
     /// The rail holds the summary's place from the start for these, and only for these.
     static func isSummarised(_ message: SlackMessage, users: [String: SlackUser]) -> Bool {
         isLong(message) && plain(message, users: users).count > minimumLength
-    }
-
-    /// The start of the message, for the place held while its summary is written.
-    static func excerpt(_ message: SlackMessage, users: [String: SlackUser]) -> String {
-        String(plain(message, users: users).prefix(400))
     }
 
     static func subject(channel: String, ts: String) -> IntelligenceStore.Subject {
@@ -148,8 +147,6 @@ enum MessageSummary {
     static let sampleRequest = GeneratedText(sentences: [
         .init(text: "Kyryl asks Sam to fix SUP-931 before the release.")
     ], kind: "Request")
-
-    static let sampleExcerpt = "Hello team, here is the final QA report for AI Tips. We went through the 24 criteria this morning and three of them still fail on the staging build, the rest pass. The details are in the sheet."
 
     /// A made-up summary for captures (`DEVER_SNAPSHOT_INTELLIGENCE`).
     static let sample = GeneratedText(sentences: [

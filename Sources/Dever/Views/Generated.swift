@@ -90,77 +90,71 @@ struct GeneratedBlock: View {
 }
 
 /// A long message as its summary, in the message's own place: a block that cannot be taken for
-/// the message itself. The block is there from the start, so the rail does not move when the
-/// summary lands: while it is written the header says so and the start of the message stands,
-/// muted, where the sentence will be. The original is one click away (the row's "Show original").
+/// the message itself. While the summary is written the block is one line, "Summarising", lit
+/// in lime with a glint that runs through it on the one the model is on; when the sentence
+/// lands the block grows to it in one movement. The original is one click away (the row's
+/// "Show original"), written or not.
 struct SummarisedMessage: View {
     /// The summary; nil until the first one is written.
     let text: GeneratedText?
-    /// The start of the message, shown while there is no summary yet.
-    var excerpt = ""
     /// A summary is wanted and not there yet, or a newer one after an edit.
     var writing = false
-    /// The model is on this one now: its sparkle breathes. The others wait, still.
+    /// The model is on this one now. The others wait, still and muted.
     var active = false
     /// A request or a question in a message that names the reader: an arrow says so.
     var forYou = false
-
-    /// The lines the excerpt takes: what most summaries take at the rail's width. A longer
-    /// sentence grows the block by a line, and the rows under it follow.
-    static let heldLines = 2
-
-    /// What was there leaves first (150 ms ease-in), then what replaces it comes (200 ms
-    /// ease-out): two texts are never read through each other. Opacity only.
-    private static let leaves = AnyTransition.opacity.animation(Motion.exit)
-    private static let comes = AnyTransition.opacity.animation(Motion.ui.delay(0.12))
-    private static let swap = AnyTransition.asymmetric(insertion: comes, removal: leaves)
 
     private var sentence: String? { text?.sentences.map(\.text).joined(separator: " ") }
     private var kind: String { text?.kind ?? "Summary" }
     private var pressing: Bool { text?.kind.map(MessageSummary.pressing.contains) ?? false }
     private var asked: Bool { forYou && !writing }
 
+    /// What was there leaves first (150 ms ease-in), then what replaces it comes (200 ms
+    /// ease-out): two words are never read through each other. Opacity only.
+    private static let swap = AnyTransition.asymmetric(insertion: .opacity.animation(Motion.ui.delay(0.12)),
+                                                       removal: .opacity.animation(Motion.exit))
+
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 6) {
-                BreathingSparkle(on: writing && active).help(GeneratedMark.meaning)
-                if asked {
-                    Image(systemName: "arrow.right").font(.system(size: 10, weight: .bold))
-                        .foregroundStyle(Soot.lime).help("Asked of you").transition(Self.swap)
-                }
-                // One word at a time: the kind takes the place of "Summarising".
-                ZStack(alignment: .leading) {
-                    if writing {
-                        Text("Summarising").foregroundStyle(Soot.muted).transition(Self.swap)
-                    } else {
-                        Text(kind).foregroundStyle(pressing ? Soot.ink : Soot.muted).transition(Self.swap)
+            // One head at a time: the kind takes the place of "Summarising".
+            ZStack(alignment: .leading) {
+                if writing {
+                    HStack(spacing: 6) {
+                        Image(systemName: "sparkles").font(.system(size: 11, weight: .semibold))
+                        Text("Summarising").font(.system(size: 11, weight: .semibold))
                     }
-                }
-                .font(.system(size: 11, weight: .semibold))
-            }
-            ZStack(alignment: .topLeading) {
-                if let sentence {
-                    Text(sentence)
-                        .font(.system(size: 14)).foregroundStyle(Soot.ink.opacity(0.92))
-                        .lineSpacing(3)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .textSelection(.enabled)
-                        .id(sentence)
-                        .transition(Self.swap)
+                    .modifier(Glint(on: active))
+                    .transition(Self.swap)
                 } else {
-                    Text(excerpt)
-                        .font(.system(size: 14)).foregroundStyle(Soot.muted)
-                        .lineSpacing(3)
-                        .lineLimit(Self.heldLines)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .transition(Self.swap)
+                    HStack(spacing: 6) {
+                        Image(systemName: "sparkles").font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(Soot.muted).help(GeneratedMark.meaning)
+                        if asked {
+                            Image(systemName: "arrow.right").font(.system(size: 10, weight: .bold))
+                                .foregroundStyle(Soot.lime).help("Asked of you")
+                        }
+                        Text(kind).font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(pressing ? Soot.ink : Soot.muted)
+                    }
+                    .transition(Self.swap)
                 }
+            }
+            if let sentence {
+                Text(sentence)
+                    .font(.system(size: 14)).foregroundStyle(Soot.ink.opacity(0.92))
+                    .lineSpacing(3)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .textSelection(.enabled)
+                    .id(sentence)
+                    // Revealed by the block as it grows; it does not travel.
+                    .transition(.opacity.animation(Motion.ui.delay(0.12)))
             }
         }
         .padding(.horizontal, 12).padding(.vertical, 10)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Soot.ground, in: RoundedRectangle(cornerRadius: 8))
         .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Soot.line))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
         .dissolveWhenReduced(value: sentence)
         .dissolveWhenReduced(value: writing)
         .accessibilityElement(children: .ignore)
@@ -170,36 +164,45 @@ struct SummarisedMessage: View {
 
     /// What it is first, the caveat last (the hint): "Summary, Request, asked of you: …".
     private var spoken: String {
-        guard let sentence else { return "Writing a summary of this message. It starts: \(excerpt.prefix(160))" }
+        guard let sentence else { return "Writing a summary of this message" }
         let head = ["Summary", text?.kind, asked ? "asked of you" : nil, writing ? "being rewritten" : nil]
             .compactMap { $0 }.joined(separator: ", ")
         return "\(head): \(sentence)"
     }
 }
 
-/// The sparkle at the head of a summary. It breathes, in lime, on the one summary the model is
-/// writing: the only loop here, and it says work is being done. Lime and still under Reduce
-/// Motion; muted while a summary waits its turn and once it is written, like every other mark.
-private struct BreathingSparkle: View {
+/// "Summarising" while the model is on it: lime, with a glint of ink that runs through the
+/// sparkle and the word, once every 1.6 s. The only loop here, and it says work is being done.
+/// Lime and still under Reduce Motion; muted and still while a summary waits its turn. The text
+/// under the glint is always at full strength, so it reads at every instant.
+private struct Glint: ViewModifier {
     let on: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    private var glyph: some View {
-        Image(systemName: "sparkles").font(.system(size: 11, weight: .semibold))
-    }
-
-    var body: some View {
+    func body(content: Content) -> some View {
         if on && !reduceMotion {
             // Computed from the clock, like `Skeleton`: an implicit animation here would also
             // catch the layout of the rows around it.
             TimelineView(.animation(minimumInterval: 1.0 / 30)) { context in
-                let wave = 0.5 + 0.5 * cos(context.date.timeIntervalSinceReferenceDate * .pi / 0.7)
-                glyph.foregroundStyle(Soot.lime)
-                    .opacity(0.45 + 0.55 * wave)
-                    .scaleEffect(0.9 + 0.15 * wave)
+                // One second across, then a rest; eased at both ends.
+                let t = min(1, context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 1.6))
+                let phase = t * t * (3 - 2 * t)
+                content.foregroundStyle(Soot.lime)
+                    .overlay {
+                        content.foregroundStyle(Soot.ink)
+                            .mask {
+                                GeometryReader { geo in
+                                    let band = max(24, geo.size.width * 0.45)
+                                    LinearGradient(colors: [.clear, .black, .clear], startPoint: .leading, endPoint: .trailing)
+                                        .frame(width: band)
+                                        .offset(x: -band + phase * (geo.size.width + band))
+                                }
+                            }
+                            .accessibilityHidden(true)
+                    }
             }
         } else {
-            glyph.foregroundStyle(on ? Soot.lime : Soot.muted)
+            content.foregroundStyle(on ? Soot.lime : Soot.muted)
         }
     }
 }
@@ -265,10 +268,10 @@ struct GeneratedGallery: View {
             row("Being written") { GeneratedBlock(text: nil, writing: true) }
             row("Written") { GeneratedBlock(text: sample, open: { _ in }) }
             row("A long message, its summary being written") {
-                SummarisedMessage(text: nil, excerpt: MessageSummary.sampleExcerpt, writing: true, active: true)
+                SummarisedMessage(text: nil, writing: true, active: true)
             }
             row("A long message, waiting its turn") {
-                SummarisedMessage(text: nil, excerpt: MessageSummary.sampleExcerpt, writing: true)
+                SummarisedMessage(text: nil, writing: true)
             }
             row("A long message, summarised") { SummarisedMessage(text: MessageSummary.sample) }
             row("A long message that asks something of you") { SummarisedMessage(text: MessageSummary.sampleRequest, forYou: true) }

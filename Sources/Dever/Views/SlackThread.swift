@@ -701,9 +701,9 @@ struct SlackThreadView: View {
                 .help("Read the whole conversation (⌘⇧E)")
             }
         }
-        // The rows under a summary follow it when its height changes (a sentence a line longer
-        // or shorter than the place held, a summary given up). Nothing moves under Reduce Motion;
-        // the block dissolves by itself.
+        // A summary lands: its block grows from one line to the sentence and the rows under it
+        // follow, in one movement. The same when a summary is given up. Nothing moves under
+        // Reduce Motion; the block dissolves by itself.
         .motion(Motion.move, value: landed)
     }
 
@@ -1432,8 +1432,7 @@ private struct MessageRow: View {
                 }
                 Group {
                     if inBlock {
-                        SummarisedMessage(text: summary, excerpt: MessageSummary.excerpt(message, users: users),
-                                          writing: summarising, active: summarisingNow,
+                        SummarisedMessage(text: summary, writing: summarising, active: summarisingNow,
                                           forYou: MessageSummary.isForReader(message, kind: summary?.kind, me: me, users: users))
                             .padding(.top, 2).transition(.opacity)
                     } else {

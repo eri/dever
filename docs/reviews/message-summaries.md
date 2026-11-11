@@ -111,6 +111,22 @@ generation), otherwise one more in the queue, behind the rail's. Not built here:
 files were being changed by another piece of work. The Slack room and the thread pane stay as they
 are: they are where messages are read.
 
-Not verified: a real rail with real messages, the real model's pace (how long "Summarising" stays,
-how often a sentence takes three lines at the rail's width), VoiceOver by ear, and the toggle's
-movement, which no capture films.
+## 4. After the first try on real channels
+
+The user tried the held place on their channels and was not taken by the arrival: a text replaced by
+another in a still frame reads as nothing happening. Two changes, both theirs:
+
+- **The block is small while it waits and grows with the result.** One line, "Summarising", in lime
+  with a glint running through the sparkle and the word on the one being written (ink over lime, so
+  the word is at full contrast at every instant; 1 s across, every 1.6 s, eased), muted and still on
+  those that wait. When the sentence lands the block grows to it and the rows under it follow on
+  `Motion.move`; the kind takes the place of "Summarising". This gives up finding 2's still rail on
+  purpose: the movement is now one smooth growth per summary instead of a jump, and it is the
+  feedback the user was missing. The excerpt of the message is gone from the block. The glint is the
+  shimmer rejected in section 2, moved from the text being read to the label of the wait.
+- **Summaries are kept between launches** (`SummaryCache`), so a message that has not changed is not
+  summarised again: removed when read, after the "Quiet" days of Settings, or with the switch. This
+  lifts "memory only" for this one kind of generated text (on-device-ai.md, rule 3).
+
+Not verified: a real rail with real messages after these changes, the real model's pace, the glint
+and the growth in movement (captures are stills), VoiceOver by ear, and the toggle's movement.

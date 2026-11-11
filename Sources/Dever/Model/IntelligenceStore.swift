@@ -1,9 +1,10 @@
 import AppKit
 import Foundation
 
-// What the Mac's model wrote, for the whole app's lifetime and in memory only: nothing generated
-// is ever written to disk (docs/on-device-ai.md, rule 3). Views read this store; they never call
-// the model themselves.
+// What the Mac's model wrote, for the whole app's lifetime. In memory, with one exception: the
+// summary of a long message is also kept on disk until its message is read or it grows old, so
+// that it is not written again at every launch (`SummaryCache`; docs/on-device-ai.md, rule 3).
+// Views read this store; they never call the model themselves.
 
 /// One use of the model. Each has its own switch in Settings › Intelligence, on by default.
 enum IntelligenceFeature: String, CaseIterable, Identifiable, Sendable {
@@ -217,7 +218,15 @@ struct GeneratedText: Equatable, Sendable {
 
 @MainActor
 final class IntelligenceStore: ObservableObject {
-    static let shared = IntelligenceStore()
+    /// Captures never read or write the user's summaries.
+    static let shared = IntelligenceStore(cache: SummaryCache(url: IntelligenceStatus.snapshotOverride == nil ? SummaryCache.defaultURL : nil))
+
+    /// Summaries of long messages, kept between launches. In memory only unless given a file.
+    private(set) var cache: SummaryCache
+    /// Slack's read cursor by channel, as last told: a summary of a read message is not kept.
+    private var readUpTo: [String: String] = [:]
+
+    init(cache: SummaryCache = SummaryCache(url: nil)) { self.cache = cache }
 
     /// What a text is about: a feature and its subject (a channel id, an issue id, a run id).
     struct Subject: Hashable, Sendable {
@@ -265,16 +274,20 @@ final class IntelligenceStore: ObservableObject {
               write: @escaping @Sendable () async throws -> GeneratedText) {
         guard isOn(subject.feature) else { return drop(subject) }
         if let entry = entries[subject], entry.version == version { return }
+        // Written at an earlier launch from the same input: shown at once, the model is not asked.
+        if subject.feature == .messageSummary, let kept = cache.record(subject.id, version: version) {
+            tasks.removeValue(forKey: subject)?.cancel()
+            entries[subject] = Entry(version: version, text: kept.text, silent: kept.text == nil)
+            return
+        }
         tasks[subject]?.cancel()
         entries[subject] = Entry(version: version, text: entries[subject]?.text, writing: true)
         tasks[subject] = Task { [weak self] in
             let text = try? await write()
             guard !Task.isCancelled, let self, self.entries[subject]?.version == version else { return }
-            if let text, !text.isEmpty {
-                self.entries[subject] = Entry(version: version, text: text)
-            } else {
-                self.entries[subject] = Entry(version: version, text: nil, silent: true)
-            }
+            let written = text.flatMap { $0.isEmpty ? nil : $0 }
+            self.entries[subject] = Entry(version: version, text: written, silent: written == nil)
+            self.keep(subject, version: version, text: written)
             self.tasks[subject] = nil
         }
     }
@@ -285,9 +298,26 @@ final class IntelligenceStore: ObservableObject {
         entries[subject] = nil
     }
 
-    /// A switch was turned off: what the feature wrote goes with it.
+    /// A switch was turned off: what the feature wrote goes with it, on disk too.
     func drop(_ feature: IntelligenceFeature) {
         for subject in entries.keys where subject.feature == feature { drop(subject) }
+        if feature == .messageSummary { cache.removeAll() }
+    }
+
+    /// A summary (or the model's silence) goes to disk while its message is unread.
+    private func keep(_ subject: Subject, version: String, text: GeneratedText?) {
+        guard subject.feature == .messageSummary, let slash = subject.id.lastIndex(of: "/") else { return }
+        let channel = String(subject.id[..<slash]), ts = String(subject.id[subject.id.index(after: slash)...])
+        if let cursor = readUpTo[channel], SummaryCache.isAtOrBefore(ts, cursor) { return }
+        cache.save(subject.id, version: version, text: text)
+    }
+
+    /// The channel has been read up to `ts`: the summaries kept on disk for those messages have
+    /// served and go, with any that has outlived the limit. What is on screen stays, in memory.
+    func read(channel: String, upTo ts: String) {
+        readUpTo[channel] = ts
+        cache.dropRead(channel: channel, upTo: ts)
+        cache.prune()
     }
 
     /// Waits for whatever is being written; tests only.

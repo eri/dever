@@ -142,6 +142,79 @@ final class IntelligenceStoreTests: XCTestCase {
         XCTAssertFalse(store.isPending(subject))
     }
 
+    func testASummaryKeptOnDiskIsNotWrittenAgain() async throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("dever-summaries-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: url) }
+        let message = MessageSummary.subject(channel: "C1", ts: "200.000100")
+        let first = IntelligenceStore(cache: SummaryCache(url: url))
+        first.isOn = { _ in true }
+        first.want(message, version: "1") { GeneratedText(sentences: [.init(text: "one")], kind: "Problem") }
+        await first.settle()
+
+        // Another launch: the same input is read from the file, the model is not asked.
+        let second = IntelligenceStore(cache: SummaryCache(url: url))
+        second.isOn = { _ in true }
+        second.want(message, version: "1") { XCTFail("written again"); throw IntelligenceError.unavailable }
+        XCTAssertEqual(second.text(message), GeneratedText(sentences: [.init(text: "one")], kind: "Problem"))
+        XCTAssertFalse(second.isPending(message))
+        // An edited message is written again.
+        second.want(message, version: "2") { GeneratedText(sentences: [.init(text: "two")]) }
+        XCTAssertTrue(second.isPending(message))
+        await second.settle()
+        XCTAssertEqual(SummaryCache(url: url).record(message.id, version: "2")?.sentence, "two")
+    }
+
+    func testSilenceIsKeptTooAndOtherFeaturesStayInMemory() async {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("dever-summaries-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: url) }
+        let store = IntelligenceStore(cache: SummaryCache(url: url))
+        store.isOn = { _ in true }
+        let message = MessageSummary.subject(channel: "C1", ts: "200.000100")
+        let issue = IntelligenceStore.Subject(feature: .issueSummary, id: "C1/200.000100")
+        store.want(message, version: "1") { throw IntelligenceError.unavailable }
+        store.want(issue, version: "1") { GeneratedText(sentences: [.init(text: "issue")]) }
+        await store.settle()
+        let kept = SummaryCache(url: url)
+        XCTAssertEqual(kept.records.count, 1)
+        XCTAssertNotNil(kept.record(message.id, version: "1"))
+        XCTAssertNil(kept.record(message.id, version: "1")?.text, "silence: not asked again at the next launch")
+    }
+
+    func testAReadMessagesSummaryLeavesTheDisk() async {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("dever-summaries-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: url) }
+        let store = IntelligenceStore(cache: SummaryCache(url: url))
+        store.isOn = { _ in true }
+        let old = MessageSummary.subject(channel: "C1", ts: "100.000000")
+        let new = MessageSummary.subject(channel: "C1", ts: "300.000000")
+        let other = MessageSummary.subject(channel: "C2", ts: "100.000000")
+        for subject in [old, new, other] { store.want(subject, version: "1") { GeneratedText(sentences: [.init(text: "s")]) } }
+        await store.settle()
+        store.read(channel: "C1", upTo: "200.000000")
+        XCTAssertEqual(Set(SummaryCache(url: url).records.keys), [new.id, other.id])
+        XCTAssertNotNil(store.text(old), "what is on screen stays until the app quits")
+        // A summary written for a message already read is not kept at all.
+        let late = MessageSummary.subject(channel: "C1", ts: "150.000000")
+        store.want(late, version: "1") { GeneratedText(sentences: [.init(text: "late")]) }
+        await store.settle()
+        XCTAssertNil(SummaryCache(url: url).records[late.id])
+        // The switch turned off: nothing stays.
+        store.drop(.messageSummary)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: url.path))
+    }
+
+    func testNothingStaysOnDiskPastTheLimit() {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("dever-summaries-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: url) }
+        let now = Date()
+        var cache = SummaryCache(url: url)
+        cache.save("C1/1", version: "1", text: GeneratedText(sentences: [.init(text: "old")]), now: now.addingTimeInterval(-15 * 86_400))
+        cache.save("C1/2", version: "1", text: GeneratedText(sentences: [.init(text: "recent")]), now: now.addingTimeInterval(-2 * 86_400))
+        let loaded = SummaryCache(url: url, now: now, maxAge: 14 * 86_400)
+        XCTAssertEqual(Array(loaded.records.keys), ["C1/2"])
+        XCTAssertEqual(Array(SummaryCache(url: url, now: now, maxAge: .infinity).records.keys), ["C1/2"], "and the file was rewritten")
+    }
+
     func testOlderTextStaysWhileTheNewerIsWritten() async {
         let store = IntelligenceStore()
         store.isOn = { _ in true }
@@ -251,17 +324,12 @@ final class MessageSummaryTests: XCTestCase {
         XCTAssertFalse(MessageSummary.isSummarised(SlackMessage(ts: "3", user: "U1", text: "Ok pour moi."), users: users))
     }
 
-    func testTheExcerptIsTheMessagesOwnWordsWithoutItsMarks() {
-        let message = SlackMessage(ts: "1", user: "U1", text: "*Rapport* de `QA` pour <@U1>\nsuite\n" + String(repeating: "mot ", count: 200))
-        let excerpt = MessageSummary.excerpt(message, users: users)
-        XCTAssertTrue(excerpt.hasPrefix("Rapport de QA pour @Alex suite mot"))
-        XCTAssertEqual(excerpt.count, 400)
-    }
-
     func testAnEditedMessageIsAnotherVersion() throws {
         let a = try XCTUnwrap(MessageSummary.input(SlackMessage(ts: "3", user: "U1", text: long), users: users, languageCode: { _ in "fr" }))
         let b = try XCTUnwrap(MessageSummary.input(SlackMessage(ts: "3", user: "U1", text: long + " Corrigé."), users: users, languageCode: { _ in "fr" }))
         XCTAssertNotEqual(a.version, b.version)
+        // The same at every launch, so a summary kept on disk is found again.
+        XCTAssertEqual(MessageSummary.Input(author: "A", text: "abc", language: "French").version, "French-3-ba7816bf8f01cfea")
     }
 
     private func shown(_ summary: String, kind: String = "Update", original: String) -> GeneratedText? {

@@ -870,6 +870,8 @@ struct ProjectDetailView: View {
     /// first is written first. One at a time. No network request.
     private func refreshMessageSummaries() {
         guard let channel = project.slack?.id, intelligenceStatus.offers(.messageSummary) else { return }
+        // Summaries kept on disk for messages now read have served.
+        if let lastRead { intelligence.read(channel: channel, upTo: lastRead) }
         for message in railPlan.messages {
             guard let input = MessageSummary.input(message, users: users,
                                                    languageCode: { IntelligencePreferences.language(forSummaryOf: $0) }) else { continue }
