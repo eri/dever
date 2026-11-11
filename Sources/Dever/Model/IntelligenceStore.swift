@@ -7,12 +7,13 @@ import Foundation
 
 /// One use of the model. Each has its own switch in Settings › Intelligence, on by default.
 enum IntelligenceFeature: String, CaseIterable, Identifiable, Sendable {
-    case catchUp, detectedMentions, issueSummary, draftReply, issueFromMessage, explainFailure
+    case catchUp, messageSummary, detectedMentions, issueSummary, draftReply, issueFromMessage, explainFailure
     var id: String { rawValue }
 
     var title: String {
         switch self {
         case .catchUp: "Slack catch-up"
+        case .messageSummary: "Long messages"
         case .detectedMentions: "Detected mentions"
         case .issueSummary: "Issue summary"
         case .draftReply: "Draft a reply"
@@ -24,6 +25,7 @@ enum IntelligenceFeature: String, CaseIterable, Identifiable, Sendable {
     /// One line under the title, only where the title does not say it.
     var detail: String? {
         switch self {
+        case .messageSummary: "A summary in their place, the original one click away"
         case .detectedMentions: "Someone speaks of you without an @"
         default: nil
         }
@@ -37,7 +39,7 @@ enum IntelligenceFeature: String, CaseIterable, Identifiable, Sendable {
 
     var group: Group {
         switch self {
-        case .catchUp, .detectedMentions, .issueSummary: .summaries
+        case .catchUp, .messageSummary, .detectedMentions, .issueSummary: .summaries
         case .draftReply, .issueFromMessage: .writing
         case .explainFailure: .pipelines
         }
@@ -47,7 +49,7 @@ enum IntelligenceFeature: String, CaseIterable, Identifiable, Sendable {
 
     /// The features that exist in this build. A feature not listed has no switch, no interface
     /// and no invitation; each phase of docs/on-device-ai.md adds its own here.
-    static let built: Set<IntelligenceFeature> = [.catchUp]
+    static let built: Set<IntelligenceFeature> = [.catchUp, .messageSummary]
 
     /// Built, or shown for a capture (`DEVER_SNAPSHOT_INTELLIGENCE`).
     static var shipped: Set<IntelligenceFeature> {

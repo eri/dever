@@ -89,6 +89,31 @@ struct GeneratedBlock: View {
     }
 }
 
+/// A long message as its summary, in the message's own place: a block that cannot be taken for
+/// the message itself. The original is one click away (the row's "Show original").
+struct SummarisedMessage: View {
+    let text: GeneratedText
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                GeneratedMark(size: 11)
+                Text("Summary").font(.system(size: 11, weight: .semibold)).foregroundStyle(Soot.muted)
+            }
+            Text(text.sentences.map(\.text).joined(separator: " "))
+                .font(.system(size: 14)).foregroundStyle(Soot.ink.opacity(0.92))
+                .lineSpacing(3)
+                .fixedSize(horizontal: false, vertical: true)
+                .textSelection(.enabled)
+        }
+        .padding(.horizontal, 12).padding(.vertical, 10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Soot.ground, in: RoundedRectangle(cornerRadius: 10))
+        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Soot.line))
+        .accessibilityElement(children: .combine)
+    }
+}
+
 /// Once, where Dever would sum up what was missed: the Mac can run the model but it is off or
 /// not ready. Dismissed for good; never shown on a Mac that cannot run it.
 struct IntelligenceInvitation: View {
@@ -149,6 +174,7 @@ struct GeneratedGallery: View {
             }
             row("Being written") { GeneratedBlock(text: nil, writing: true) }
             row("Written") { GeneratedBlock(text: sample, open: { _ in }) }
+            row("A long message, summarised") { SummarisedMessage(text: MessageSummary.sample) }
             row("Invitation, off") { IntelligenceInvitation(forced: .off) }
             row("Invitation, not ready") { IntelligenceInvitation(forced: .notReady) }
         }

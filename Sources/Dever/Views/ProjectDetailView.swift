@@ -184,7 +184,10 @@ struct ProjectDetailView: View {
             if LookAgain.shared.isDue(lastLoad) { Task { await load(quiet: true) } }
         }
         .sheet(isPresented: $flow.githubSheet) { GitHubLoginSheet() }
-        .onChange(of: catchUpTrigger, initial: true) { _, _ in refreshCatchUp() }
+        .onChange(of: catchUpTrigger, initial: true) { _, _ in
+            refreshCatchUp()
+            refreshMessageSummaries()
+        }
         // Another channel: the messages and the read cursor of the previous one do not carry over.
         .onChange(of: project.slack?.id) { _, _ in
             shownMessages = 8
@@ -884,7 +887,7 @@ struct ProjectDetailView: View {
 
     /// Changes when the unread messages, the cursor or the model's readiness do.
     private var catchUpTrigger: String {
-        "\(project.slack?.id ?? "")|\(lastRead ?? "")|\(messages.first?.ts ?? "")|\(messages.count)|\(intelligenceStatus.offers(.catchUp))|\(countedFirstUnread ?? "")"
+        "\(project.slack?.id ?? "")|\(lastRead ?? "")|\(messages.first?.ts ?? "")|\(messages.count)|\(intelligenceStatus.offers(.catchUp))|\(countedFirstUnread ?? "")|\(intelligenceStatus.offers(.messageSummary))|\(users.count)"
     }
 
     /// Asks the store for a catch-up of the unread messages when there are enough of them, and
@@ -903,6 +906,19 @@ struct ProjectDetailView: View {
             intelligence.want(subject, version: input.version) { try await CatchUp.write(input) }
         } else {
             intelligence.drop(subject)
+        }
+    }
+
+    /// Asks for the summary of each long message the rail shows, the newest first: what is seen
+    /// first is written first. One at a time, behind the catch-up. No network request.
+    private func refreshMessageSummaries() {
+        guard let channel = project.slack?.id, intelligenceStatus.offers(.messageSummary) else { return }
+        for message in railPlan.messages {
+            guard let input = MessageSummary.input(message, users: users,
+                                                   languageCode: { IntelligencePreferences.language(forSummaryOf: $0) }) else { continue }
+            intelligence.want(MessageSummary.subject(channel: channel, ts: message.ts), version: input.version) {
+                try await MessageSummary.write(input)
+            }
         }
     }
 

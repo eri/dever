@@ -20,6 +20,7 @@ board already answers it.
 | Kept | Where | Trigger |
 | --- | --- | --- |
 | Slack catch-up | Slack rail of the project page, above the unread messages | automatic, from a threshold of unread |
+| Long messages as summaries | Slack rail, in the place of each message the rail cuts | automatic, newest first |
 | Detected mentions | the catch-up, and the "for you" items of the Overview | automatic |
 | Issue from a message | ⋯ menu of a Slack message | on demand |
 | Draft a reply | thread composer | on demand, one click |
@@ -79,6 +80,9 @@ Consequences for the design, true whatever the measurements say:
 5. **Always marked, always traceable** (section 4).
 6. **Raw data first.** A generated text is added above or beside what it describes; the messages, the
    description and the comments stay where they are, readable at once, and never wait for the model.
+   One exception, decided on the first real use: in the rail, where a long message is already cut at
+   four lines, its summary takes the place of the cut (5.7). The message shows first and is replaced
+   when the summary is ready; "Show original" brings it back in full; the room always shows messages.
 7. **Skeletons, not spinners,** and a generated text never makes content move when it arrives: its
    place is reserved.
 
@@ -93,6 +97,10 @@ and lights it, the way arriving from an Overview item does today. A sentence tha
 message is not clickable.
 
 A detected mention uses `@` with the sparkle, where a Slack mention uses `@` alone.
+
+A summary that stands in the place of a message (5.7) is the one generated text in a block of its own
+(`SummarisedMessage`: ground tone, hairline edge, the sparkle and the word "Summary"), so that it is
+never taken for the message.
 
 ```
 ✦ → Your answer on the front end is awaited before noon.   ↗
@@ -201,6 +209,20 @@ Someone speaks of the user, or asks something of them, without a Slack mention.
 - **Kept:** per run id, in memory; a new run drops it. The explanation carries the run's age like any
   pipeline state.
 
+### 5.7 Long messages as summaries
+
+- **Where:** the Slack rail, in the place of each message it would cut ("Show more", over 240
+  characters). Not in the room, not for short messages.
+- **When:** by itself, for the messages the rail shows, the newest first, one at a time behind the
+  catch-up. The original shows until the summary is ready, then fades to the block.
+- **What:** one or two sentences, names, numbers and ticket identifiers kept. "Show original" opens the
+  message in full, "Show summary" goes back. Attachments, reactions and the thread link stay under it.
+- **Not shown:** a summary that is not clearly shorter than the message (over 70% of its length), or
+  empty, or refused.
+- **Reads:** the message already in `SlackStore`. Derived data keyed by channel, message and text (an
+  edit is another version), in `IntelligenceStore`, memory only. No network request.
+- **Measured:** 2 to 3 s for a 700-character report.
+
 ## 6. Settings › Intelligence
 
 A new page between Notifications and Launch, built like the others (`SectionHead`, `SettingRows`,
@@ -212,6 +234,7 @@ Runs on this Mac. Nothing leaves it.
 
 Summaries
   Slack catch-up                        [on]
+  Long messages                         [on]
   Detected mentions  @✦                 [on]
   Issue summary                         [on]
   Language            [ Source | English ]
@@ -273,6 +296,7 @@ Pipelines
 | --- | --- | --- |
 | 0. Ground | **Done.** `Intelligence` service and availability gating, `IntelligenceStore`, the mark and the generated block, Settings › Intelligence, the one-time invitation, snapshot states, tests, measurements (section 2). | |
 | 1. Slack catch-up | **Built:** 5.1 in the rail, with its "for you" line (the first form of 5.2), tuned on the real model. **Left:** look at it on real channels; 5.2 as `@✦` items in the Overview. | 0 |
+| 1b. Long messages | **Built:** 5.7, tried on the real model. **Left:** look at it on real channels. | 0 |
 | 2. Writing | `issueCreate` and the sheet (useful without the model), its filling (5.3), then the reply draft (5.4). | 0; the sheet itself depends on nothing |
 | 3. Issue summary | 5.5. | 0 |
 | 4. Pipeline failure | job and log reads, then 5.6. | 0 |

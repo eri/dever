@@ -406,3 +406,52 @@ final class RealModelTests: XCTestCase {
         XCTAssertFalse(text.sentences.contains { $0.forYou })
     }
 }
+
+final class MessageSummaryTests: XCTestCase {
+    private let users = ["U1": SlackUser(id: "U1", name: "Alex", avatar: nil, isBot: false)]
+    private let long = String(repeating: "Le rapport de QA couvre tous les critères d'acceptation. ", count: 8)
+
+    func testOnlyAMessageTheRailCutsIsSummarised() {
+        let short = SlackMessage(ts: "1", user: "U1", text: "Ok pour moi.")
+        XCTAssertNil(MessageSummary.input(short, users: users, languageCode: { _ in "fr" }))
+        var system = SlackMessage(ts: "2", user: "U1", text: long)
+        system.subtype = "channel_topic"
+        XCTAssertNil(MessageSummary.input(system, users: users, languageCode: { _ in "fr" }))
+        let input = MessageSummary.input(SlackMessage(ts: "3", user: "U1", text: long), users: users, languageCode: { _ in "fr" })
+        XCTAssertEqual(input?.author, "Alex")
+        XCTAssertEqual(input?.language, "French")
+    }
+
+    func testAnEditedMessageIsAnotherVersion() throws {
+        let a = try XCTUnwrap(MessageSummary.input(SlackMessage(ts: "3", user: "U1", text: long), users: users, languageCode: { _ in "fr" }))
+        let b = try XCTUnwrap(MessageSummary.input(SlackMessage(ts: "3", user: "U1", text: long + " Corrigé."), users: users, languageCode: { _ in "fr" }))
+        XCTAssertNotEqual(a.version, b.version)
+    }
+
+    func testASummaryNearlyAsLongAsTheMessageIsNotShown() {
+        XCTAssertNil(MessageSummary.text(from: String(long.prefix(400)), original: long))
+        XCTAssertNil(MessageSummary.text(from: "  ", original: long))
+        XCTAssertEqual(MessageSummary.text(from: "Le rapport couvre\ntous les critères.", original: long)?.sentences.map(\.text),
+                       ["Le rapport couvre tous les critères."])
+    }
+
+    func testSubjectsAreOnePerMessage() {
+        XCTAssertNotEqual(MessageSummary.subject(channel: "C1", ts: "1"), MessageSummary.subject(channel: "C1", ts: "2"))
+        XCTAssertEqual(MessageSummary.subject(channel: "C1", ts: "1").feature, .messageSummary)
+    }
+}
+
+extension RealModelTests {
+    func testSummaryOfALongMessage() async throws {
+        try XCTSkipUnless(ProcessInfo.processInfo.environment["DEVER_TEST_REAL_MODEL"] == "1", "needs the system model")
+        let report = """
+        Hi team, final QA report for the tips feature (QA-27). Scope: all test cases executed, covering all 24 acceptance criteria. Tested on preview PR-4714 in the web extension and the back office. Result: 21 criteria pass, 3 fail. SUP-931: the tips list isn't refreshed after a language change, learners see and open tips in the previous language. SUP-928: visual flickering in the tip content text when toggling the favorite heart. SUP-929: sync latency of about 40 seconds for backend tip changes. None is blocking for the demo, but SUP-931 should be fixed before the release. Full report in the canvas.
+        """
+        for language in ["English", "French"] {
+            let start = Date()
+            let text = try await MessageSummary.write(.init(author: "Kyryl", text: report, language: language))
+            print("summary (\(language)) in \(String(format: "%.1f", Date().timeIntervalSince(start))) s: \(text.sentences.first?.text ?? "")")
+            XCTAssertLessThan(text.sentences.first?.text.count ?? .max, report.count * 7 / 10)
+        }
+    }
+}

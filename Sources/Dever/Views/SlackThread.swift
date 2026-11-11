@@ -402,6 +402,8 @@ struct SlackThreadView: View {
     var readUpTo: String?
     /// Nothing unread: the rail says so instead of listing messages.
     var railCaughtUp = false
+    /// What the Mac's model wrote: the rail shows a long message as its summary.
+    @ObservedObject private var intelligence = IntelligenceStore.shared
     @State private var railContentHeight: CGFloat = 0
     /// Called from the room with the `ts` of a message that has stayed on screen for a moment.
     var onSeen: ((String) -> Void)?
@@ -645,6 +647,7 @@ struct SlackThreadView: View {
                                read: readUpTo.map { SlackTS.isAtOrBefore(m.ts, $0) } ?? true,
                                newReplies: readUpTo.map { r in m.latest_reply.map { !SlackTS.isAtOrBefore($0, r) } ?? false } ?? false,
                                permalink: permalink(m),
+                               summary: wide ? nil : channelID.flatMap { intelligence.text(MessageSummary.subject(channel: $0, ts: m.ts)) },
                                actions: actions, openThread: wide ? { setThread($0) } : nil, openWide: openWide)
                         .padding(.top, grouped ? 2 : (newDay ? 0 : (wide ? 18 : 14)))
                         .id(m.ts)
@@ -1307,6 +1310,9 @@ private struct MessageRow: View {
     /// The thread has replies newer than the cursor.
     var newReplies = false
     let permalink: URL?
+    /// The rail only: the message's summary, shown in its place until "Show original".
+    var summary: GeneratedText? = nil
+    @State private var showOriginal = false
     let actions: SlackMessageActions
     /// In the wide view the thread opens in a pane beside the list instead of inline.
     var openThread: ((SlackMessage) -> Void)? = nil
@@ -1366,13 +1372,29 @@ private struct MessageRow: View {
                             .help(message.date.formatted(date: .abbreviated, time: .shortened))
                     }
                 }
-                MessageBody(message: message, users: users, channels: channels, expanded: wide ? .constant(true) : $expanded)
+                Group {
+                    if let summary, !showOriginal {
+                        SummarisedMessage(text: summary).padding(.top, 2).transition(.opacity)
+                    } else {
+                        MessageBody(message: message, users: users, channels: channels, expanded: wide ? .constant(true) : $expanded)
+                            .transition(.opacity)
+                    }
+                }
+                .motion(Motion.ui, fade: true, value: summary != nil && !showOriginal)
                 MessageExtras(message: message, channels: channels, users: users)
                 if !reactions.isEmpty {
                     ReactionPills(reactions: reactions, me: me, customEmoji: customEmoji, users: users) { toggle($0) }
                 }
                 HStack(spacing: 12) {
-                    if !wide, (message.text?.count ?? 0) > 240 {
+                    if summary != nil {
+                        // The original in full, or back to its summary.
+                        Button(showOriginal ? "Show summary" : "Show original") {
+                            showOriginal.toggle()
+                            expanded = showOriginal
+                        }
+                            .buttonStyle(TertiaryButton(tint: .muted, lift: Soot.surface, font: .system(size: 12, weight: .semibold)))
+                            .padding(.leading, -8)
+                    } else if !wide, (message.text?.count ?? 0) > 240 {
                         Button(expanded ? "Show less" : "Show more") { expanded.toggle() }
                             .buttonStyle(TertiaryButton(tint: .muted, lift: Soot.surface, font: .system(size: 12, weight: .semibold)))
                             .padding(.leading, -8)
