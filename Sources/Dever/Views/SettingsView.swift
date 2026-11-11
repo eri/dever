@@ -1261,7 +1261,7 @@ private struct IntelligenceSection: View {
 
     private var headline: String {
         switch status.availability {
-        case .available: mark == .none ? "Runs on this Mac. Nothing leaves it." : IntelligenceFeature.betaMeaning
+        case .available: mark == .none ? IntelligenceFeature.purpose + " Nothing leaves it." : IntelligenceFeature.betaHeadline
         case .off: "Apple Intelligence is off on this Mac"
         case .notReady: "Apple Intelligence is not ready on this Mac yet"
         case .unsupported: "Apple Intelligence is not available on this Mac"

@@ -66,7 +66,7 @@ struct ComingSoonBlock: View {
     }
 
     private var spoken: String {
-        let promises = LocalModelOutlook.Promise.allCases.map(\.rawValue).joined(separator: "; ")
+        let promises = LocalModelOutlook.Promise.allCases.map(\.rawValue).joined(separator: ", ")
         let terms = LocalModelOutlook.terms.joined(separator: ". ")
         return "Coming soon. \(LocalModelOutlook.title). \(LocalModelOutlook.reason(today: today)) \(promises). \(terms)."
     }

@@ -58,8 +58,12 @@ enum IntelligenceFeature: String, CaseIterable, Identifiable, Sendable {
         return beta == 0 ? .none : beta == shown.count ? .page : .rows
     }
 
-    /// What "Beta" means here, in one line.
-    static let betaMeaning = "Runs on this Mac. It can be wrong: the original is always one click away."
+    /// What "Beta" means here, in short sentences.
+    static let betaMeaning = "Runs on this Mac. It can be wrong. The original is always one click away."
+
+    /// Under the page's title: what Intelligence is for, then what Beta means.
+    static let purpose = "Dever reads the long parts for you, on this Mac."
+    static let betaHeadline = purpose + " It can be wrong. The original is always one click away."
 
     /// The features that exist in this build. A feature not listed has no switch, no interface
     /// and no invitation; each phase of docs/on-device-ai.md adds its own here.

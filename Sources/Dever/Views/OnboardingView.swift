@@ -189,7 +189,7 @@ private struct ConnectControls: View {
                 Label("Stays on this Mac", systemImage: "lock")
                     .font(.system(size: 13))
                     .foregroundStyle(Soot.muted)
-                    .help("No Dever server: tokens stay in your Keychain, and Dever posts only what you write and send.")
+                    .help("No Dever server. Tokens stay in your Keychain, and Dever posts only what you write and send.")
             }
             IntelligenceLine()
         }
@@ -208,7 +208,7 @@ private struct IntelligenceLine: View {
     }
     private var detail: String {
         IntelligenceFeature.betaMeaning
-            + (LocalModelOutlook.announced() ? " Coming soon: a whole channel, issue or pipeline, with an optional download." : "")
+            + (LocalModelOutlook.announced() ? " Soon, an optional download will take on a whole channel, issue or pipeline." : "")
     }
 
     var body: some View {

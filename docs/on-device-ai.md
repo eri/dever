@@ -250,7 +250,7 @@ A page between Notifications and Launch, built like the others (`SectionHead`, `
 
 ```
 Intelligence  (Beta)
-Runs on this Mac. It can be wrong: the original is always one click away.
+Dever reads the long parts for you, on this Mac. It can be wrong. The original is always one click away.
 
 Summaries
   Long messages                         [on]
@@ -274,8 +274,9 @@ Summaries
   of them today. `IntelligenceFeature.betaMark(among:)` decides where the word shows for the features
   the page lists: once, beside the page's title, while all of them are beta (a tag on every row would
   say the same thing four times); on each beta row once some have left beta. The line under the title
-  says what it means here (`betaMeaning`): it runs on this Mac, it can be wrong, the original is always
-  one click away. A feature added to `built` is marked without touching the page.
+  says first what Intelligence is for, then what Beta means here (`betaHeadline`): Dever reads the long
+  parts for you on this Mac, it can be wrong, the original is always one click away. Short sentences,
+  no colon and no semicolon in what the user reads. A feature added to `built` is marked without touching the page.
 - **Coming soon.** The local model of docs/local-model-benchmark.md is announced, not built
   (`LocalModelOutlook`, `ComingSoonBlock`). A dashed frame, so that it reads as a place kept and never as
   a disabled control: no switch, no button, nothing dimmed, nothing clickable. Its title is the benefit
