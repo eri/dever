@@ -155,7 +155,7 @@ Captures: `…/scratchpad/shots8/{live,deploying,failed,notdeployed,none}/projec
 | MEDIUM | Layout | `PanelEmpty`, `ConnectPanelBody` (every panel) | A tile on the ground colour with a 28 pt logo | One muted line and the button, no tile, no second logo | Same reason, for "link Linear / a repository / a channel" and "connect" on every panel |
 | HIGH | Data | Delivery, Linear not connected | The invitation row, then every open pull request of the repository (hundreds) under "Pull requests" | The header is the invitation (pitch as subtitle, "Connect Linear" on the right, no "Open ↗"); no pull requests until the issues can be read (`ProjectPulls.waitsForIssues`), unless the project takes the whole repository | A project that follows its issues cannot tell its pull requests from the others' without them; listing the repository's showed other projects' work as its own |
 
-Not changed: the Overview still counts a per-project repository's pull requests while Linear fails (it leaves GitHub
-out only on the shared repository).
+The Overview follows the same rule (`waitsForIssues`): its GitHub column reads "Needs Linear" rather than counting
+the repository's pull requests while the project's issues cannot be read.
 
 Captures: `…/scratchpad/shots9/{live,deploying,none,disc2}/project-{dark,light}.png`. Verdict: Approve.

@@ -384,12 +384,13 @@ final class OverviewStore: ObservableObject {
             s.errors[.linear] = await app.failure(e, .linear)
         }
         let projectIssues = issues
-        // On the shared repository only the pull requests of the project's issues are its own;
-        // without issues to match (no Linear project, or Linear failed) GitHub is left out.
-        let shared = await app.followsSharedRepository(p)
+        // A project that follows its issues (always so on the shared repository) owns only their
+        // pull requests; without issues to match (no Linear project, not connected, or failed)
+        // GitHub is left out, as on the project page.
         let whole = await app.showsWholeRepository(p)
-        let repositories = shared && issues == nil ? [] : await app.repositories(for: p)
-        if shared && issues == nil, !(await app.repositories(for: p)).isEmpty { s.githubNeedsLinear = true }
+        let waits = ProjectPulls.waitsForIssues(issues, wholeRepository: whole)
+        let repositories = waits ? [] : await app.repositories(for: p)
+        if waits, !(await app.repositories(for: p)).isEmpty { s.githubNeedsLinear = true }
         let login = await app.github?.login
         async let github = loadGitHub(p, repositories, repos, issues: projectIssues, whole: whole, login: login)
         switch await slack {

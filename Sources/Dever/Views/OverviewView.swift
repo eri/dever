@@ -832,8 +832,7 @@ private struct ProjectRow: View {
             dash("No repository linked")
         } else if snapshot?.githubNeedsLinear == true {
             Text("Needs Linear").font(.system(size: 13)).foregroundStyle(Soot.muted)
-                .help("This project shares \(app.workspaceRepository ?? "the workspace repository") with other projects: "
-                      + "its pull requests are the ones linked to its Linear issues")
+                .help("This project's pull requests are the ones linked to its Linear issues")
         } else if let state = snapshot?.errors[.github] {
             unavailable(.github, state)
         } else {
