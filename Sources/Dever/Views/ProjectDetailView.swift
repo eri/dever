@@ -12,8 +12,6 @@ struct ProjectDetailView: View {
     @ObservedObject private var slackStore = SlackStore.shared
     @ObservedObject private var intelligence = IntelligenceStore.shared
     @ObservedObject private var intelligenceStatus = IntelligenceStatus.shared
-    /// What the catch-up of the rail is written from; nil when there is none to write.
-    @State private var catchUp: CatchUp.Input?
     @State private var shownMessages = 8
     @State private var loadingEarlier = false
     @State private var slackExpanded = false
@@ -184,11 +182,7 @@ struct ProjectDetailView: View {
             if LookAgain.shared.isDue(lastLoad) { Task { await load(quiet: true) } }
         }
         .sheet(isPresented: $flow.githubSheet) { GitHubLoginSheet() }
-        .onChange(of: catchUpTrigger, initial: true) { _, _ in
-            // Summaries first: the catch-up is asked for once it knows which ones it waits for.
-            refreshMessageSummaries()
-            refreshCatchUp()
-        }
+        .onChange(of: summariesTrigger, initial: true) { _, _ in refreshMessageSummaries() }
         // Another channel: the messages and the read cursor of the previous one do not carry over.
         .onChange(of: project.slack?.id) { _, _ in
             shownMessages = 8
@@ -601,11 +595,8 @@ struct ProjectDetailView: View {
                 QuietEmpty(symbol: "bubble.left", text: "No messages yet")
             } else {
                 if !slackExpanded { IntelligenceInvitation() }
-                if !slackExpanded, let subject = catchUpSubject, let catchUp,
-                   intelligence.text(subject) != nil || intelligence.isWriting(subject) || catchUp.awaiting > 0 {
-                    GeneratedBlock(text: intelligence.text(subject),
-                                   writing: intelligence.isWriting(subject) || (intelligence.text(subject) == nil && catchUp.awaiting > 0),
-                                   open: { openInRoom($0) })
+                if !slackExpanded, let digest, !digest.isEmpty {
+                    DigestBlock(digest: digest, open: { openInRoom($0) })
                         .padding(.bottom, 14)
                         .overlay(alignment: .bottom) { Rectangle().fill(Soot.line).frame(height: 1) }
                         .padding(.bottom, 14)
@@ -875,10 +866,14 @@ struct ProjectDetailView: View {
         return (Array(messages.prefix(min(recent, 6))), recent, false, nil)
     }
 
-    // MARK: Catch-up (docs/on-device-ai.md, 5.1)
+    // MARK: Catch-up and message summaries (docs/on-device-ai.md, 5.1 and 5.7)
 
-    private var catchUpSubject: IntelligenceStore.Subject? {
-        project.slack.map { .init(feature: .catchUp, id: $0.id) }
+    /// The open matters among the unread messages, put together from their summaries as they
+    /// land. Nothing is generated for it and nothing is fetched.
+    private var digest: CatchUp.Digest? {
+        guard intelligenceStatus.offers(.catchUp) else { return nil }
+        return CatchUp.digest(messages: messages, lastRead: lastRead, hasEarlier: hasEarlier, firstUnread: countedFirstUnread,
+                              users: users, me: app.slack?.userID, summary: { messageSummary($0) })
     }
 
     /// The oldest unread message the Overview counted, unless it stopped counting (200 and more).
@@ -887,55 +882,31 @@ struct ProjectDetailView: View {
         return slack.firstUnreadTS
     }
 
-    /// Changes when the unread messages, the cursor or the model's readiness do.
-    private var catchUpTrigger: String {
-        "\(project.slack?.id ?? "")|\(lastRead ?? "")|\(messages.first?.ts ?? "")|\(messages.count)|\(intelligenceStatus.offers(.catchUp))|\(countedFirstUnread ?? "")|\(intelligenceStatus.offers(.messageSummary))|\(users.count)|\(settledSummaries)"
+    /// Changes when the messages, the cursor, the names or the model's readiness do.
+    private var summariesTrigger: String {
+        "\(project.slack?.id ?? "")|\(lastRead ?? "")|\(messages.first?.ts ?? "")|\(messages.count)|\(users.count)|\(intelligenceStatus.offers(.catchUp))|\(intelligenceStatus.offers(.messageSummary))"
     }
 
-    /// Asks the store for a catch-up of the unread messages when there are enough of them, and
-    /// drops the previous one when there is nothing left to catch up on. No network request.
-    private func refreshCatchUp() {
-        guard let subject = catchUpSubject else { catchUp = nil; return }
-        if !intelligenceStatus.offers(.catchUp) {
-            CatchUp.log.notice("catch-up: not offered, model \(intelligenceStatus.availability.rawValue, privacy: .public), switch \(IntelligencePreferences.isOn(.catchUp))")
-        }
-        let input = !intelligenceStatus.offers(.catchUp) ? nil : CatchUp.input(
-            messages: messages, lastRead: lastRead, hasEarlier: hasEarlier, firstUnread: countedFirstUnread,
-            users: users, me: app.slack?.userID,
-            languageCode: { IntelligencePreferences.language(forSummaryOf: $0) },
-            summary: { messageSummary($0) })
-        catchUp = input
-        if let input, input.awaiting > 0 {
-            // Its long messages are still being summarised: it is written once they are.
-        } else if let input {
-            intelligence.want(subject, version: input.version) { try await CatchUp.write(input) }
-        } else {
-            intelligence.drop(subject)
-        }
-    }
-
-    /// What the store holds for a long message's summary, for the catch-up to read through it.
+    /// What the store holds for a message's summary.
     private func messageSummary(_ message: SlackMessage) -> CatchUp.Summary {
-        guard let channel = project.slack?.id, intelligenceStatus.offers(.messageSummary), MessageSummary.isLong(message),
+        guard let channel = project.slack?.id,
               let entry = intelligence.entries[MessageSummary.subject(channel: channel, ts: message.ts)] else { return .none }
         if let text = entry.text { return .ready(text) }
         return entry.writing ? .pending : .none
     }
 
-    /// How many summaries of this channel are settled, written or not: the catch-up waits for them.
-    private var settledSummaries: Int {
-        guard let channel = project.slack?.id else { return 0 }
-        return intelligence.entries.filter { $0.key.feature == .messageSummary && $0.key.id.hasPrefix(channel + "/") && !$0.value.writing }.count
-    }
-
-    /// Asks for the summary of each long message the rail shows or the catch-up reads (every
-    /// unread one), the newest first: what is seen first is written first. One at a time. No
-    /// network request.
+    /// Asks for the summary of the messages that need one, the newest first (what is seen first
+    /// is written first), one at a time: the long messages the rail shows, for their block, and
+    /// every unread message, for the catch-up. No network request.
     private func refreshMessageSummaries() {
-        guard let channel = project.slack?.id, intelligenceStatus.offers(.messageSummary) else { return }
+        guard let channel = project.slack?.id else { return }
+        let inPlace = intelligenceStatus.offers(.messageSummary), catchUp = intelligenceStatus.offers(.catchUp)
+        guard inPlace || catchUp else { return }
         let shown = Set(railPlan.messages.map(\.ts))
-        for message in messages where shown.contains(message.ts) || !(lastRead.map { SlackTS.isAtOrBefore(message.ts, $0) } ?? true) {
-            guard let input = MessageSummary.input(message, users: users,
+        for message in messages {
+            let unread = !(lastRead.map { SlackTS.isAtOrBefore(message.ts, $0) } ?? true)
+            guard (catchUp && unread) || (inPlace && shown.contains(message.ts) && MessageSummary.isLong(message)),
+                  let input = MessageSummary.input(message, users: users,
                                                    languageCode: { IntelligencePreferences.language(forSummaryOf: $0) }) else { continue }
             intelligence.want(MessageSummary.subject(channel: channel, ts: message.ts), version: input.version) {
                 try await MessageSummary.write(input)

@@ -34,9 +34,6 @@ protocol LanguageModel: Sendable {
     func tokenCount(_ text: String) async -> Int
     /// One answer to one prompt, in a fresh session. Throws on refusal, guardrail, overflow.
     func respond(instructions: String, prompt: String, maximumTokens: Int?) async throws -> String
-    /// A catch-up of numbered messages, in the shape the model is held to (guided generation):
-    /// free text in two labelled lines came back mislabelled or translated one time in two.
-    func catchUp(instructions: String, prompt: String) async throws -> CatchUpAnswer
     /// One message shortened: what kind of message it is, and its point in a sentence.
     func summarise(instructions: String, prompt: String) async throws -> MessageSummaryAnswer
 }
@@ -48,28 +45,7 @@ struct MessageSummaryAnswer: Equatable, Sendable {
     var summary: String
 }
 
-/// What the model says of a run of numbered messages.
-struct CatchUpAnswer: Equatable, Sendable {
-    struct Point: Equatable, Sendable {
-        var sentence: String
-        /// Number of the message it rests on, from 1; anything else ties it to none.
-        var message: Int
-    }
-    /// What the model reads as asked of the reader, one item per request, and where. It lists a
-    /// reminder to all as readily as a request to one: `CatchUp` keeps only the items whose
-    /// message names the reader.
-    var asked: [Point]
-    var rest: [Point]
-}
-
 #if canImport(FoundationModels)
-@available(macOS 26.0, *)
-@Generable
-private struct CatchUpPoint {
-    @Guide(description: "One short sentence") var sentence: String
-    @Guide(description: "Number of the message the sentence rests on") var message: Int
-}
-
 @available(macOS 26.0, *)
 @Generable
 private struct MessageSummaryShape {
@@ -80,14 +56,6 @@ private struct MessageSummaryShape {
     var kind: String
 }
 
-@available(macOS 26.0, *)
-@Generable
-private struct CatchUpShape {
-    @Guide(description: "The reader's to-do list: one item per thing a message asks of them, each a short action that starts with a verb in the infinitive, never a question. Empty when no message asks anything of the reader", .maximumCount(2))
-    var actions: [CatchUpPoint]
-    @Guide(description: "The most important other things said or decided, the most important first: each a full sentence in your own words that names what it is about. No quotation, no message number inside the sentence", .count(1...2))
-    var rest: [CatchUpPoint]
-}
 #endif
 
 enum IntelligenceError: Error, Equatable {
@@ -136,20 +104,6 @@ struct SystemLanguageModelClient: LanguageModel {
             let session = LanguageModelSession(instructions: instructions)
             let options = GenerationOptions(maximumResponseTokens: maximumTokens)
             return try await session.respond(to: prompt, options: options).content
-        }
-        #endif
-        throw IntelligenceError.unavailable
-    }
-
-    func catchUp(instructions: String, prompt: String) async throws -> CatchUpAnswer {
-        #if canImport(FoundationModels)
-        if #available(macOS 26.0, *) {
-            guard SystemLanguageModel.default.availability == .available else { throw IntelligenceError.unavailable }
-            let session = LanguageModelSession(instructions: instructions)
-            let shape = try await session.respond(to: prompt, generating: CatchUpShape.self,
-                                                  options: GenerationOptions(maximumResponseTokens: 300)).content
-            let asked = shape.actions.map { CatchUpAnswer.Point(sentence: $0.sentence, message: $0.message) }
-            return CatchUpAnswer(asked: asked, rest: shape.rest.map { .init(sentence: $0.sentence, message: $0.message) })
         }
         #endif
         throw IntelligenceError.unavailable

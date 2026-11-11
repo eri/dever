@@ -5,8 +5,10 @@ import Foundation
 // original stays one click away, and the room always shows the messages themselves.
 
 enum MessageSummary {
-    /// Same test as the rail's "Show more": only a message the rail would cut is summarised.
+    /// Same test as the rail's "Show more": only a message the rail would cut is shown as its summary.
     static let minimumLength = 240
+    /// Shortest message worth asking the model about: under it ("Fine for me."), nothing is open.
+    static let shortest = 40
     /// Longest summary worth showing, as a share of the original: past it, the original reads as fast.
     static let longestShare = 0.7
     /// And in characters: a summary is two lines of the rail, three at most, whatever the message.
@@ -17,6 +19,8 @@ enum MessageSummary {
         let text: String
         /// English name of the language to write in ("French").
         let language: String
+        /// A message the rail shows whole: only its kind is asked for, its own words stand.
+        var short = false
         /// An edited message is another input.
         var version: String { "\(language)-\(text.count)-\(text.hashValue)" }
     }
@@ -29,15 +33,16 @@ enum MessageSummary {
         .init(feature: .messageSummary, id: "\(channel)/\(ts)")
     }
 
-    /// The input for a message, or nil when it is not one the rail cuts.
+    /// The input for a message, or nil when it is too short to hold anything open.
     static func input(_ message: SlackMessage, users: [String: SlackUser], languageCode: (String) -> String) -> Input? {
-        guard isLong(message) else { return nil }
+        guard !message.isSystem, (message.text?.count ?? 0) >= shortest else { return nil }
         // Slack's marks for bold and code are noise to the model, and it copies them out.
         let text = SlackPlain.text(message.text ?? "", users: users)
             .replacingOccurrences(of: "*", with: "").replacingOccurrences(of: "`", with: "")
-        guard text.count > minimumLength else { return nil }
+        guard text.count >= shortest else { return nil }
         let language = Locale(identifier: "en_US").localizedString(forLanguageCode: languageCode(text)) ?? "English"
-        return Input(author: message.user.flatMap { users[$0]?.name } ?? "Someone", text: text, language: language)
+        return Input(author: message.user.flatMap { users[$0]?.name } ?? "Someone", text: text, language: language,
+                     short: !isLong(message))
     }
 
     /// The kinds a message can be, as shown at the head of its summary.
@@ -56,7 +61,12 @@ enum MessageSummary {
 
     /// The model's answer as shown, or nil when it is not worth the place of the original:
     /// empty, too long for two lines, or nearly as long as the message.
-    static func text(from answer: MessageSummaryAnswer, original: String) -> GeneratedText? {
+    /// A short message keeps its own words: only the kind comes from the model.
+    static func text(from answer: MessageSummaryAnswer, original: String, short: Bool = false) -> GeneratedText? {
+        if short {
+            return GeneratedText(sentences: [.init(text: original)],
+                                 kind: kinds.first { $0.lowercased() == answer.kind.lowercased() })
+        }
         var plain = answer.summary.replacingOccurrences(of: "*", with: "").replacingOccurrences(of: "`", with: "")
             .split(whereSeparator: \.isNewline).joined(separator: " ")
             .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -91,7 +101,7 @@ enum MessageSummary {
             }
             do {
                 let answer = try await model.summarise(instructions: instructions, prompt: prompt)
-                guard let text = text(from: answer, original: input.text) else {
+                guard let text = text(from: answer, original: input.text, short: input.short) else {
                     CatchUp.log.notice("message summary: silent, nothing shorter than the \(input.text.count) characters of the message")
                     throw IntelligenceError.unavailable
                 }

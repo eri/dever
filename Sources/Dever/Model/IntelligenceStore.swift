@@ -175,8 +175,12 @@ final class IntelligenceStore: ObservableObject {
     @Published private(set) var entries: [Subject: Entry] = [:]
     private var tasks: [Subject: Task<Void, Never>] = [:]
 
-    /// Whether features are switched on; replaced in tests.
-    var isOn: (IntelligenceFeature) -> Bool = { IntelligencePreferences.isOn($0) }
+    /// Whether features are switched on; replaced in tests. Message summaries are written for the
+    /// rail's long messages and for the catch-up, which is put together from them.
+    var isOn: (IntelligenceFeature) -> Bool = {
+        $0 == .messageSummary ? IntelligencePreferences.isOn(.messageSummary) || IntelligencePreferences.isOn(.catchUp)
+                              : IntelligencePreferences.isOn($0)
+    }
 
     /// The text to show for a subject, whatever its version: an older one stays until the newer
     /// one lands, so the place never empties and refills.

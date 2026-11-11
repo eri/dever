@@ -611,6 +611,11 @@ struct SlackThreadView: View {
         }
     }
 
+    /// The rail shows this message as its summary: a long one, with "Long messages" switched on.
+    private func inPlace(_ message: SlackMessage, wide: Bool) -> Bool {
+        !wide && MessageSummary.isLong(message) && IntelligenceStatus.shared.offers(.messageSummary)
+    }
+
     private func railList(wide: Bool, shown: Int, visible: [SlackMessage]) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             if wide, hasEarlier || messages.count > shown {
@@ -647,8 +652,8 @@ struct SlackThreadView: View {
                                read: readUpTo.map { SlackTS.isAtOrBefore(m.ts, $0) } ?? true,
                                newReplies: readUpTo.map { r in m.latest_reply.map { !SlackTS.isAtOrBefore($0, r) } ?? false } ?? false,
                                permalink: permalink(m),
-                               summary: wide ? nil : channelID.flatMap { intelligence.text(MessageSummary.subject(channel: $0, ts: m.ts)) },
-                               summarising: !wide && (channelID.map { intelligence.isWriting(MessageSummary.subject(channel: $0, ts: m.ts)) } ?? false),
+                               summary: inPlace(m, wide: wide) ? channelID.flatMap { intelligence.text(MessageSummary.subject(channel: $0, ts: m.ts)) } : nil,
+                               summarising: inPlace(m, wide: wide) && (channelID.map { intelligence.isWriting(MessageSummary.subject(channel: $0, ts: m.ts)) } ?? false),
                                actions: actions, openThread: wide ? { setThread($0) } : nil, openWide: openWide)
                         .padding(.top, grouped ? 2 : (newDay ? 0 : (wide ? 18 : 14)))
                         .id(m.ts)

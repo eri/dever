@@ -89,6 +89,71 @@ struct GeneratedBlock: View {
     }
 }
 
+/// The catch-up above the unread messages: the open matters, one line each, the reader's first.
+/// Each line is the summary of one message and opens the room on it. Put together by Dever; only
+/// the lines themselves were written by the model, hence the mark.
+struct DigestBlock: View {
+    let digest: CatchUp.Digest
+    var open: ((String) -> Void)? = nil
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 8) {
+            GeneratedMark().frame(height: 20)
+            VStack(alignment: .leading, spacing: 2) {
+                ForEach(digest.items) { item in
+                    Button { open?(item.ts) } label: { row(item) }
+                        .buttonStyle(RowButton(lift: .ground, radius: 6))
+                        .padding(.horizontal, -6)
+                        .help("Show the message")
+                        .transition(.opacity)
+                }
+                if digest.items.isEmpty, digest.pending > 0 {
+                    Skeleton(height: 12).frame(height: 20)
+                    Skeleton(width: 180, height: 12).frame(height: 20)
+                }
+                foot
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .motion(Motion.ui, fade: true, value: digest.items)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Catch-up")
+    }
+
+    private func row(_ item: CatchUp.Item) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Image(systemName: "arrow.right").font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(Soot.lime).opacity(item.forYou ? 1 : 0)
+                .accessibilityLabel(item.forYou ? "For you" : "")
+            Text(item.kind).font(.system(size: 11, weight: .semibold)).foregroundStyle(Soot.ink)
+                .frame(width: 56, alignment: .leading)
+            Text(item.text).font(.system(size: 13, weight: item.forYou ? .medium : .regular))
+                .foregroundStyle(item.forYou ? Soot.ink : Soot.ink.opacity(0.8))
+                .lineLimit(2).multilineTextAlignment(.leading)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 6).padding(.vertical, 3)
+        .contentShape(Rectangle())
+    }
+
+    @ViewBuilder
+    private var foot: some View {
+        let parts = [digest.more > 0 && !digest.items.isEmpty ? "+ \(digest.more) more" : nil,
+                     digest.items.isEmpty && digest.pending == 0 ? "Nothing open in \(digest.more) unread messages" : nil,
+                     digest.covers.map(CatchUp.coverage)].compactMap { $0 }
+        if !parts.isEmpty || (digest.pending > 0 && !digest.items.isEmpty) {
+            HStack(spacing: 10) {
+                if !parts.isEmpty {
+                    Text(parts.joined(separator: " · ")).font(.system(size: 11)).foregroundStyle(Soot.muted)
+                }
+                if digest.pending > 0, !digest.items.isEmpty { SummarisingLine() }
+            }
+            .padding(.top, 4)
+        }
+    }
+}
+
 /// A long message as its summary, in the message's own place: a block that cannot be taken for
 /// the message itself. The original is one click away (the row's "Show original").
 struct SummarisedMessage: View {
@@ -200,6 +265,7 @@ struct GeneratedGallery: View {
             }
             row("Being written") { GeneratedBlock(text: nil, writing: true) }
             row("Written") { GeneratedBlock(text: sample, open: { _ in }) }
+            row("Catch-up") { DigestBlock(digest: CatchUp.sample) }
             row("A long message, being summarised") { SummarisingLine() }
             row("A long message, summarised") { SummarisedMessage(text: MessageSummary.sample) }
             row("Invitation, off") { IntelligenceInvitation(forced: .off) }
