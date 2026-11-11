@@ -426,6 +426,12 @@ struct SlackThreadView: View {
     /// Compact view: opens the wide view on the latest messages.
     var expand: (() -> Void)?
     var actions = SlackMessageActions()
+    /// Where the rail must end, in the page's coordinates (`pageSpace`): the rail stops there
+    /// and scrolls inside, so a short window never makes the page scroll for it. Nil: no limit
+    /// but `railMaxHeight` (the stacked layout, where the page scrolls anyway).
+    var railBottom: CGFloat?
+    /// The rail's top in the page's coordinates; it does not depend on the rail's own height.
+    @State private var railTop: CGFloat?
     @State private var openThread: SlackMessage?
     /// The room's last height, so it keeps its layout while hidden behind the rail.
     @State private var roomHeight: CGFloat = 600
@@ -445,6 +451,16 @@ struct SlackThreadView: View {
 
     /// The rail stops growing here and scrolls instead: about six messages' worth.
     static let railMaxHeight: CGFloat = 560
+    /// Never shorter than this, whatever the window: two messages stay readable.
+    static let railMinHeight: CGFloat = 200
+    /// The project page's coordinate space, named on its scrolling content.
+    static let pageSpace = "projectPage"
+
+    /// The rail's cap: the room left above `railBottom`, within the min and max.
+    private var railLimit: CGFloat {
+        guard let railBottom, let railTop else { return Self.railMaxHeight }
+        return min(Self.railMaxHeight, max(Self.railMinHeight, railBottom - railTop))
+    }
 
 
     /// The thread beside the room opens, closes or changes in one movement: slides in from
@@ -477,7 +493,11 @@ struct SlackThreadView: View {
             .defaultScrollAnchor(.bottom)
             .scrollBounceBehavior(.basedOnSize)
             .frame(width: widths?.rail, alignment: .leading)
-            .frame(height: wide ? 0 : min(max(railContentHeight, 1), Self.railMaxHeight), alignment: .top)
+            .frame(height: wide ? 0 : min(max(railContentHeight, 1), railLimit), alignment: .top)
+            .onGeometryChange(for: CGFloat.self, of: { $0.frame(in: .named(Self.pageSpace)).minY }) { top in
+                // Only while the rail is shown: the room's move must not shift the cap mid-animation.
+                if !wide, railBottom != nil { railTop = top }
+            }
                 .opacity(wide ? 0 : 1)
                 .allowsHitTesting(!wide)
                 .accessibilityHidden(wide)

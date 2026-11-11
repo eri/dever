@@ -136,7 +136,10 @@ struct ProjectDetailView: View {
                                 .offset(x: slackExpanded && !reduceMotion ? -40 : 0)
                                 .allowsHitTesting(!slackExpanded)
                                 .accessibilityHidden(slackExpanded)
-                            slackPanel(railWidth: railWidth - 40, wideWidth: geo.size.width - 56 - 40)
+                            // The rail ends above the window's bottom edge (the panel's 20 px and the
+                            // page's 24 px under it), so the page itself does not scroll for it.
+                            slackPanel(railWidth: railWidth - 40, wideWidth: geo.size.width - 56 - 40,
+                                       railBottom: geo.size.height - 44)
                                 .frame(width: slackExpanded ? geo.size.width - 56 : railWidth)
                                 .frame(maxHeight: slackExpanded ? .infinity : nil, alignment: .top)
                         }
@@ -153,6 +156,8 @@ struct ProjectDetailView: View {
                 .padding(.horizontal, 28)
                 .padding(.vertical, 24)
                 .frame(width: geo.size.width, height: slackExpanded ? geo.size.height : nil, alignment: .topLeading)
+                // The page's own coordinates (stable while it scrolls): the rail measures its top here.
+                .coordinateSpace(.named(SlackThreadView.pageSpace))
             }
             .scrollDisabled(slackExpanded)
         }
@@ -525,7 +530,7 @@ struct ProjectDetailView: View {
 
     /// The panel in both layouts. `railWidth` and `wideWidth` are the content widths of each,
     /// so the messages keep their final layout while the panel's frame animates between the two.
-    private func slackPanel(railWidth: CGFloat, wideWidth: CGFloat) -> some View {
+    private func slackPanel(railWidth: CGFloat, wideWidth: CGFloat, railBottom: CGFloat? = nil) -> some View {
         VStack(alignment: .leading, spacing: 16) {
             PanelHeader(service: .slack, title: project.slack.map { "#\($0.name)" } ?? "Slack", subtitle: slackSubtitle,
                         link: slackExpanded ? slackURL : nil, linkHelp: "Open the channel in Slack",
@@ -613,7 +618,7 @@ struct ProjectDetailView: View {
                                     }
                                 },
                                 expand: slackExpanded ? nil : { toggleSlackWide() },
-                                actions: slackActions)
+                                actions: slackActions, railBottom: railBottom)
                     .transition(.opacity)
             }
         }
