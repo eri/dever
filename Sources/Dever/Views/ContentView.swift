@@ -191,9 +191,8 @@ struct ContentView: View {
         GeometryReader { geo in
             if let anchor, let project = menuProject {
                 let bounds = geo[anchor]
-                RailMenu(project: project, isCurrent: selection == .project(project.id),
+                RailMenu(project: project,
                          unread: store.snapshots[project.id]?.slack?.unread,
-                         open: { selection = .project(project.id); menuProject = nil },
                          edit: { menuProject = nil; editing = project },
                          remove: { menuProject = nil; removing = project },
                          close: { menuProject = nil })
@@ -415,14 +414,13 @@ private struct RailMenuKey: PreferenceKey {
     static func reduce(value: inout Anchor<CGRect>?, nextValue: () -> Anchor<CGRect>?) { value = nextValue() ?? value }
 }
 
-/// A project tile's menu, in the app's own panel: open, edit, pin, the tools it links, and
-/// last, in the negative tone, removing it from Dever (the confirmation stays the same).
+/// A project tile's menu, in the app's own panel: edit, pin, the tools it links, and last, in
+/// the negative tone, removing it from Dever (the confirmation stays the same). No "Open":
+/// a left click on the tile already does that.
 private struct RailMenu: View {
     @EnvironmentObject var app: AppState
     let project: Project
-    let isCurrent: Bool
     let unread: Int?
-    let open: () -> Void
     let edit: () -> Void
     let remove: () -> Void
     let close: () -> Void
@@ -445,7 +443,6 @@ private struct RailMenu: View {
     var body: some View {
         MenuPanel(label: "\(project.name) menu") {
             MenuPanelHead(title: project.name, detail: unread.map { $0 > 0 ? "\($0) unread in Slack" : "Nothing unread" })
-            if !isCurrent { MenuPanelRow(symbol: "arrow.right", title: "Open", action: open) }
             MenuPanelRow(symbol: "slider.horizontal.3", title: "Edit project", action: edit)
             MenuPanelRow(symbol: project.favorite == true ? "pin.slash" : "pin",
                          title: project.favorite == true ? "Unpin from top" : "Pin to top") {

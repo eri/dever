@@ -85,7 +85,7 @@ has N H P D F ✋ through its style unless noted.
 |---|---|---|---|
 | — | Overview tile | PressButton + FocusOutline: N P F, selected | Icon (`fill: nil`, radius 10) + hover tone; `sootTip("Overview")` |
 | — | Project tiles (initials) | PressButton + FocusOutline: N P F, selected, system context menu | Icon (`fill: nil`, radius 12); `sootTip(name, detail: health · unread · for you)`; right click / control click / ⌥↩ open the in-window `RailMenu` (`MenuPanel`); VoiceOver gets Edit, Pin/Unpin and Remove as actions on the tile |
-| — | `RailMenu` rows: Open, Edit project, Pin/Unpin, Open in Slack ↗, Open in Linear ↗, Pull requests on GitHub ↗, Remove from Dever… | system `contextMenu` (Edit links…, Remove from Dever…) | `MenuPanelRow` (row role, surface lift; links carry ↗; Remove in the negative tone, same confirmation dialog as the editor's Remove project) |
+| — | `RailMenu` rows: Edit project, Pin/Unpin, Open in Slack ↗, Open in Linear ↗, Pull requests on GitHub ↗, Remove from Dever… | system `contextMenu` (Edit links…, Remove from Dever…) | `MenuPanelRow` (row role, surface lift; links carry ↗; Remove in the negative tone, same confirmation dialog as the editor's Remove project) |
 | — | User / Settings tile | PressButton + FocusOutline | Icon (`fill: nil`, circle); `sootTip(name, detail: accounts hint)` |
 | — | "+" add project | PressButton, no focus ring | Icon (`fill: nil`, radius 10); `sootTip("Add a project", "⌘N")` |
 | — | Dever mark | `.help` | `sootTip("Dever", detail: workspace)` (not a button) |
