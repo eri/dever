@@ -21,7 +21,6 @@ board already answers it.
 | --- | --- | --- |
 | Long messages as summaries | Slack rail, in the place of each message the rail cuts | automatic, newest first |
 | Detected mentions | the catch-up, and the "for you" items of the Overview | automatic |
-| Issue from a message | ⋯ menu of a Slack message | on demand |
 | Draft a reply | thread composer | on demand, one click |
 | Issue summary | top of the Linear issue page | automatic, from a threshold of length |
 | Explain a pipeline failure | "Start here" tile, pull request chip of the issue page | on demand |
@@ -145,19 +144,15 @@ Someone speaks of the user, or asks something of them, without a Slack mention.
   behind anything on screen.
 - **Rule 2 holds:** the count of Slack mentions is unchanged; detected ones are added beside it.
 
-### 5.3 Issue from a message
+### 5.3 Issue from a message (dropped)
 
-- **Where:** "Create an issue" in the ⋯ menu of a Slack message.
-- **What:** a sheet with title, description and priority filled from the message and its thread, a line
-  "✦ Filled from the message of <author>", every field editable. "Create" creates the issue in the
-  project's Linear project and puts a link to the Slack message in it; the mark does not go to Linear.
-- **Needs first:** issue creation in `LinearClient` (`issueCreate`; team, state and priority from the
-  team context `IssueStore` already holds). Today Dever only updates issues.
-- **Without the model:** the menu item stays and the sheet opens with the message text as description
-  and an empty title: the feature is a write path of its own, the model only fills it.
-- **Write:** optimistic row in `IssueStore`, reconciled with the answer, removed on refusal; invalidates
-  the project's issue list, the Delivery plan and the Overview counts.
-- **Language:** the language of the project's existing issue titles.
+"Create an issue" in the ⋯ menu of a Slack message opened a sheet with title, description and priority
+proposed by the model, then created the issue in the project's Linear project. Built whole (issue
+creation in the Linear client and the store, the sheet, the proposal), tried, and removed: it did not
+convince. What it taught, kept for the next features: titles came out well ("Refresh tips list after
+language change"); the description mostly repeated the message; and the priority could not be trusted
+(the model read "to fix before the release" as Urgent), so it was kept only when the message had a word
+for urgency. Dever still has no issue creation.
 
 ### 5.4 Draft a reply
 
@@ -240,7 +235,6 @@ Summaries
   Language            [ Source | English ]
 Writing
   Draft a reply                         [on]
-  Issue from a message                  [on]
 Pipelines
   Explain a failure                     [on]
 ```
@@ -248,7 +242,6 @@ Pipelines
 - **Language** applies to summaries only: "Source" (default) keeps the language of what is summarised,
   "English" forces English. A segment picker, not a system dropdown.
 - A switch turned off removes the feature's interface entirely, and drops what it had generated.
-- "Issue from a message" off removes only the filling; the menu item stays.
 
 ## 7. Unavailable, slow, failing
 
@@ -297,7 +290,7 @@ Pipelines
 | 0. Ground | **Done.** `Intelligence` service and availability gating, `IntelligenceStore`, the mark and the generated block, Settings › Intelligence, the one-time invitation, snapshot states, tests, measurements (section 2). | |
 | 1. Slack catch-up | **Dropped** after four forms on real channels (5.1). | 0 |
 | 1b. Long messages | **Built:** 5.7, with kinds and the arrow for what is asked of the user, tuned on real channels. | 0 |
-| 2. Writing | `issueCreate` and the sheet (useful without the model), its filling (5.3), then the reply draft (5.4). | 0; the sheet itself depends on nothing |
+| 2. Writing | Issue from a message: **dropped** (5.3). Reply draft (5.4): next. | 0 |
 | 3. Issue summary | 5.5. | 0 |
 | 4. Pipeline failure | job and log reads, then 5.6. | 0 |
 
