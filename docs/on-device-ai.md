@@ -111,8 +111,13 @@ the parts already decided.
 - **When:** by itself when the channel holds at least 6 unread messages (`CatchUp.threshold`). Below
   that, nothing: reading three messages is faster than reading about them. Replies inside threads are
   not counted and not read by the catch-up yet (open point).
-- **Content:** first, only if something asks an action of the user, one line "for you" that leads to the
-  message. Then one or two sentences on the rest. No headings, no lists.
+- **Content:** first, only if something is asked of the user, their actions as a short to-do list (two
+  at most, each starting with a verb: "Vérifier le front avant midi"), each leading to its message; never
+  a question, never "you". Then one or two sentences on the rest. No headings.
+- **An action is checked, not trusted:** the model lists a reminder to all as readily as a request to
+  one, and confuses who asks with who is asked. An action is shown only when the message it rests on
+  names the user, with an @ or by a word of their name (`CatchUp.names`). A request made with "tu" alone
+  is not shown as an action: it stays in the rest, or in the messages.
 - **Language:** the language of the messages (detected with `NaturalLanguage` over the unread), or
   English when Settings says so.
 - **Loading:** two skeleton lines beside the sparkle, then the whole text fades in. No word-by-word
@@ -124,9 +129,10 @@ the parts already decided.
   Fewer than 3 messages fitting: no catch-up. One message counts for at most 600 characters. The
   Overview's oldest counted unread message tells whether anything older than the loaded page is unread.
 - **How:** the unread messages go to the model numbered, with the reader's name; guided generation
-  holds the answer to a shape (`CatchUpAnswer`: whether something is asked, what and in which message,
-  then one or two other points with their message). `CatchUp.text(from:)` ties the sentences to their
-  messages. `DEVER_TEST_REAL_MODEL=1 swift test --filter RealModel` runs it on the real model.
+  holds the answer to a shape (`CatchUpAnswer`: the reader's actions with their message, then one or two
+  other points with theirs). `CatchUp.text(from:)` ties the sentences to their messages and drops the
+  actions that fail the check above. `DEVER_TEST_REAL_MODEL=1 swift test --filter RealModel` runs two
+  cases on the real model: a request in the third person, and a channel where nothing is asked.
 - **Reads:** `SlackStore` messages of the channel, `lastRead` / `seenUpTo`, opened threads, user names.
   **New derived data:** the catch-up, keyed by channel and by the timestamps of the first and last unread
   message, held in an app-lifetime store, memory only. A new message invalidates it; "Mark as read"

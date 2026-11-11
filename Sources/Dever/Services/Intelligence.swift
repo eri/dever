@@ -46,8 +46,10 @@ struct CatchUpAnswer: Equatable, Sendable {
         /// Number of the message it rests on, from 1; anything else ties it to none.
         var message: Int
     }
-    /// What is asked of the reader, and where; nil when nothing is.
-    var asked: Point?
+    /// What the model reads as asked of the reader, one item per request, and where. It lists a
+    /// reminder to all as readily as a request to one: `CatchUp` keeps only the items whose
+    /// message names the reader.
+    var asked: [Point]
     var rest: [Point]
 }
 
@@ -62,12 +64,8 @@ private struct CatchUpPoint {
 @available(macOS 26.0, *)
 @Generable
 private struct CatchUpShape {
-    @Guide(description: "True only when a message asks the reader to do, check or answer something, naming them or not")
-    var somethingIsAskedOfTheReader: Bool
-    @Guide(description: "What is asked of the reader, in one short sentence addressed to them. Empty when nothing is asked")
-    var asked: String
-    @Guide(description: "Number of the message that asks it. 0 when nothing is asked")
-    var askedInMessage: Int
+    @Guide(description: "The reader's to-do list: one item per thing a message asks of them, each a short action that starts with a verb in the infinitive, never a question. Empty when no message asks anything of the reader", .maximumCount(2))
+    var actions: [CatchUpPoint]
     @Guide(description: "The most important other things said or decided, the most important first", .count(1...2))
     var rest: [CatchUpPoint]
 }
@@ -131,7 +129,7 @@ struct SystemLanguageModelClient: LanguageModel {
             let session = LanguageModelSession(instructions: instructions)
             let shape = try await session.respond(to: prompt, generating: CatchUpShape.self,
                                                   options: GenerationOptions(maximumResponseTokens: 300)).content
-            let asked = shape.somethingIsAskedOfTheReader ? CatchUpAnswer.Point(sentence: shape.asked, message: shape.askedInMessage) : nil
+            let asked = shape.actions.map { CatchUpAnswer.Point(sentence: $0.sentence, message: $0.message) }
             return CatchUpAnswer(asked: asked, rest: shape.rest.map { .init(sentence: $0.sentence, message: $0.message) })
         }
         #endif

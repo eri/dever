@@ -136,7 +136,8 @@ struct IntelligenceInvitation: View {
 /// `DEVER_SNAPSHOT_INTELLIGENCE` set): generated-dark.png, generated-light.png.
 struct GeneratedGallery: View {
     private let sample = GeneratedText(sentences: [
-        .init(text: "Your answer on the front end is awaited before noon.", source: "1", forYou: true),
+        .init(text: "Answer on the front end before noon", source: "1", forYou: true),
+        .init(text: "Review the migration fix", source: "3", forYou: true),
         .init(text: "The migration breaks billing for older accounts; the CSV export leaves this release.", source: "2"),
         .init(text: "Nobody has told the client about the delay yet."),
     ])

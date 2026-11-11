@@ -19,7 +19,7 @@ private final class FakeModel: LanguageModel, @unchecked Sendable {
         return "answer to \(prompt)"
     }
 
-    var answer = CatchUpAnswer(asked: nil, rest: [])
+    var answer = CatchUpAnswer(asked: [], rest: [])
     func catchUp(instructions: String, prompt: String) async throws -> CatchUpAnswer {
         lock.withLock { order.append(prompt) }
         return answer
@@ -250,7 +250,7 @@ final class CatchUpTests: XCTestCase {
 
     func testAPartialCatchUpSaysWhatItCovers() async throws {
         let model = FakeModel()
-        model.answer = .init(asked: nil, rest: [.init(sentence: "Billing is broken", message: 1)])
+        model.answer = .init(asked: [], rest: [.init(sentence: "Billing is broken", message: 1)])
         let text = try await CatchUp.write(.init(lines: lines, reader: "Sam", language: "English", olderUnread: true),
                                            with: Intelligence(model: model))
         XCTAssertEqual(text.note, "Covers the last 6 unread messages")
@@ -262,7 +262,7 @@ final class CatchUpTests: XCTestCase {
         let model = FakeModel()
         // Room for the instructions, the answer and about four of ten 300-character messages.
         model.contextSize = TextBudget.estimate(CatchUp.instructions(.init(lines: [], reader: "Sam", language: "English"))) + TextBudget.answerReserve + 450
-        model.answer = .init(asked: nil, rest: [.init(sentence: "The newest kept", message: 4), .init(sentence: "The oldest kept", message: 1)])
+        model.answer = .init(asked: [], rest: [.init(sentence: "The newest kept", message: 4), .init(sentence: "The oldest kept", message: 1)])
         let ten = (1...10).map { CatchUp.Line(ts: "\($0)", author: "Alex", text: String(repeating: "mot ", count: 75)) }
         let text = try await CatchUp.write(.init(lines: ten, reader: "Sam", language: "English"), with: Intelligence(model: model))
         XCTAssertEqual(text.sentences.map(\.source), ["10", "7"])
@@ -296,40 +296,60 @@ final class CatchUpTests: XCTestCase {
         XCTAssertTrue(CatchUp.instructions(input).contains("French"))
     }
 
-    private var lines: [CatchUp.Line] { (1...6).map { CatchUp.Line(ts: "\($0)", author: "Alex", text: "m\($0)") } }
+    private var lines: [CatchUp.Line] { (1...6).map { CatchUp.Line(ts: "\($0)", author: "Alex", text: "m\($0)", namesReader: $0 == 6) } }
 
     func testTheLineForYouComesFirstAndSentencesAreTiedAndTidied() throws {
-        let answer = CatchUpAnswer(asked: .init(sentence: "peux-tu regarder le front ?", message: 6),
+        let answer = CatchUpAnswer(asked: [.init(sentence: "peux-tu regarder le front ?", message: 6)],
                                    rest: [.init(sentence: "la migration casse la facturation", message: 1),
                                           .init(sentence: "Pas d'export CSV dans cette version.", message: 4)])
         let text = try XCTUnwrap(CatchUp.text(from: answer, lines: lines))
         XCTAssertEqual(text.sentences, [
-            .init(text: "Peux-tu regarder le front ?", source: "6", forYou: true),
+            .init(text: "Peux-tu regarder le front", source: "6", forYou: true),
             .init(text: "La migration casse la facturation.", source: "1"),
             .init(text: "Pas d'export CSV dans cette version.", source: "4"),
         ])
     }
 
     func testNothingAskedMeansNoLineForYou() throws {
-        let text = try XCTUnwrap(CatchUp.text(from: .init(asked: nil, rest: [.init(sentence: "The export leaves the release", message: 2)]), lines: lines))
+        let text = try XCTUnwrap(CatchUp.text(from: .init(asked: [], rest: [.init(sentence: "The export leaves the release", message: 2)]), lines: lines))
         XCTAssertEqual(text.sentences, [.init(text: "The export leaves the release.", source: "2")])
     }
 
     func testANumberOutOfRangeLeavesTheSentenceUntied() throws {
-        let text = try XCTUnwrap(CatchUp.text(from: .init(asked: .init(sentence: "Check the screen", message: 0),
+        let text = try XCTUnwrap(CatchUp.text(from: .init(asked: [.init(sentence: "Check the screen", message: 0)],
                                                            rest: [.init(sentence: "Billing is broken", message: 42)]), lines: lines))
-        XCTAssertEqual(text.sentences, [.init(text: "Check the screen.", forYou: true), .init(text: "Billing is broken.")])
+        // An action tied to no message cannot be checked against one that names the reader: dropped.
+        XCTAssertEqual(text.sentences, [.init(text: "Billing is broken.")])
+    }
+
+    func testAnActionStandsOnlyOnAMessageThatNamesTheReader() throws {
+        let answer = CatchUpAnswer(asked: [.init(sentence: "Read the sprint notes", message: 3), .init(sentence: "Vérifier le front", message: 6)],
+                                   rest: [.init(sentence: "Billing is broken", message: 1)])
+        let text = try XCTUnwrap(CatchUp.text(from: answer, lines: lines))
+        XCTAssertEqual(text.sentences, [.init(text: "Vérifier le front", source: "6", forYou: true), .init(text: "Billing is broken.", source: "1")])
+    }
+
+    func testAMessageNamesTheReaderWithOrWithoutAnAt() throws {
+        XCTAssertTrue(CatchUp.names("Il faudrait que sam regarde le front", reader: "Sam Rivers"))
+        XCTAssertTrue(CatchUp.names("@Sam Rivers tu peux relire ?", reader: "Sam Rivers"))
+        XCTAssertFalse(CatchUp.names("Le même problème qu'hier", reader: "Sam Rivers"))
+        XCTAssertFalse(CatchUp.names("samedi on livre", reader: "Sam Rivers"))
+        var list = messages(7)
+        list[0].text = "<@U2> tu peux relire la PR ?"
+        list[1].text = "il faudrait que Sam regarde le front"
+        let input = try XCTUnwrap(input(list, lastRead: "0.500000"))
+        XCTAssertEqual(input.lines.map(\.namesReader), [false, false, false, false, false, true, true])
     }
 
     func testEmptyAndRepeatedSentencesAreDropped() {
-        XCTAssertNil(CatchUp.text(from: .init(asked: .init(sentence: " ", message: 1), rest: [.init(sentence: "", message: 2)]), lines: lines))
-        let twice = CatchUp.text(from: .init(asked: nil, rest: [.init(sentence: "Same thing", message: 1), .init(sentence: "same thing.", message: 2)]), lines: lines)
+        XCTAssertNil(CatchUp.text(from: .init(asked: [.init(sentence: " ", message: 1)], rest: [.init(sentence: "", message: 2)]), lines: lines))
+        let twice = CatchUp.text(from: .init(asked: [], rest: [.init(sentence: "Same thing", message: 1), .init(sentence: "same thing.", message: 2)]), lines: lines)
         XCTAssertEqual(twice?.sentences.count, 1)
     }
 
     func testWriteAsksTheModelAndTiesItsAnswer() async throws {
         let model = FakeModel()
-        model.answer = .init(asked: .init(sentence: "Answer before noon", message: 6), rest: [.init(sentence: "Billing is broken", message: 1)])
+        model.answer = .init(asked: [.init(sentence: "Answer before noon", message: 6)], rest: [.init(sentence: "Billing is broken", message: 1)])
         let text = try await CatchUp.write(.init(lines: lines, reader: "Sam", language: "English"), with: Intelligence(model: model))
         XCTAssertEqual(text.sentences.map(\.source), ["6", "1"])
         XCTAssertEqual(model.order.count, 1)
@@ -360,13 +380,29 @@ final class RealModelTests: XCTestCase {
             ("Charlie", "Ok, décision : pas d'export CSV dans cette version."),
             ("Alex", "Il faudrait que Sam regarde le front avant midi, c'est lui qui a fait l'écran de facturation."),
         ]
-        let lines = said.enumerated().map { CatchUp.Line(ts: "\($0.offset + 1)", author: $0.element.0, text: $0.element.1) }
+        let lines = said.enumerated().map { CatchUp.Line(ts: "\($0.offset + 1)", author: $0.element.0, text: $0.element.1, namesReader: CatchUp.names($0.element.1, reader: "Sam")) }
         let start = Date()
         let text = try await CatchUp.write(.init(lines: lines, reader: "Sam", language: "French"))
         print("catch-up in \(String(format: "%.1f", Date().timeIntervalSince(start))) s:")
         for s in text.sentences { print(s.forYou ? " → " : "   ", s.text, "[\(s.source ?? "-")]") }
         XCTAssertEqual(text.sentences.first?.forYou, true)
         XCTAssertEqual(text.sentences.first?.source, "6")
-        XCTAssertLessThanOrEqual(text.sentences.count, 3)
+        XCTAssertLessThanOrEqual(text.sentences.count, 4)
+    }
+
+    func testNothingAskedInAnEnglishChannel() async throws {
+        try XCTSkipUnless(ProcessInfo.processInfo.environment["DEVER_TEST_REAL_MODEL"] == "1", "needs the system model")
+        let said = [
+            ("Alex", "The staging deploy is green again."),
+            ("Robin", "Nice. I merged the retry fix this morning."),
+            ("Charlie", "Docs for the new webhook are up."),
+            ("Alex", "Reminder: sprint review moves to Thursday."),
+            ("Robin", "Fine for me."),
+            ("Charlie", "Same."),
+        ]
+        let lines = said.enumerated().map { CatchUp.Line(ts: "\($0.offset + 1)", author: $0.element.0, text: $0.element.1, namesReader: CatchUp.names($0.element.1, reader: "Sam")) }
+        let text = try await CatchUp.write(.init(lines: lines, reader: "Sam", language: "English"))
+        for s in text.sentences { print(s.forYou ? " → " : "   ", s.text, "[\(s.source ?? "-")]") }
+        XCTAssertFalse(text.sentences.contains { $0.forYou })
     }
 }

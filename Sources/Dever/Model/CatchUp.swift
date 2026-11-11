@@ -18,6 +18,9 @@ enum CatchUp {
         let ts: String
         let author: String
         let text: String
+        /// The message names the reader, with an @ or without. Read from the text, not asked of
+        /// the model: only such a message can put a line "for you" in the catch-up.
+        var namesReader = false
     }
 
     /// Everything the model is given, and what tells one input from the next.
@@ -40,6 +43,7 @@ enum CatchUp {
     /// page whose every loaded message is unread can still tell that nothing older is.
     static func input(messages: [SlackMessage], lastRead: String?, hasEarlier: Bool, firstUnread: String? = nil,
                       users: [String: SlackUser], me: String?, languageCode: (String) -> String) -> Input? {
+        let reader = me.flatMap { users[$0]?.name } ?? ""
         guard let lastRead, let oldest = messages.last else {
             log.notice("catch-up: none, no read cursor or no message (\(messages.count) loaded)")
             return nil
@@ -52,7 +56,8 @@ enum CatchUp {
             let text = SlackPlain.text(m.text ?? "", users: users)
             guard !text.isEmpty else { return nil }
             return Line(ts: m.ts, author: m.user.flatMap { users[$0]?.name } ?? "Someone",
-                        text: String(text.prefix(messageLimit)))
+                        text: String(text.prefix(messageLimit)),
+                        namesReader: me.map { (m.text ?? "").contains("<@\($0)") } ?? false || names(text, reader: reader))
         }
         guard lines.count >= threshold else {
             log.notice("catch-up: none, \(lines.count) unread of \(messages.count) loaded, under \(threshold)")
@@ -60,7 +65,7 @@ enum CatchUp {
         }
         let code = languageCode(lines.map(\.text).joined(separator: "\n"))
         let language = Locale(identifier: "en_US").localizedString(forLanguageCode: code) ?? "English"
-        return Input(lines: lines, reader: me.flatMap { users[$0]?.name } ?? "the reader", language: language,
+        return Input(lines: lines, reader: reader.isEmpty ? "the reader" : reader, language: language,
                      olderUnread: olderUnread)
     }
 
@@ -73,9 +78,9 @@ enum CatchUp {
     static func instructions(_ input: Input) -> String {
         """
         You help \(input.reader) catch up on a team chat channel they have not read. The messages are numbered. \(input.reader) is the reader.
-        Say what is asked of \(input.reader), if anything, then the one or two most important other things that were said or decided. Do not repeat what is asked of \(input.reader) in the rest.
-        Something is asked of \(input.reader) when a message tells or asks them to do, check, review or answer something. That includes a message written to someone else that says \(input.reader) should, must or could do it ("\(input.reader) should look at it", "il faudrait que \(input.reader) regarde"), with or without an @. When several messages ask, keep the latest.
-        Every sentence you write is in \(input.language), whatever language the messages are in: translate when they differ. Short plain sentences in your own words, not copies of the messages. Speak to \(input.reader) directly: "you" (in French "tu", never "vous"), never their name. Use only what the messages say.
+        List what \(input.reader) has to do, if anything, then the one or two most important other things that were said or decided. Do not repeat what \(input.reader) has to do in the rest.
+        Something is asked of \(input.reader) when a message tells or asks them to do, check, review or answer something. That includes a message written to someone else that says \(input.reader) should, must or could do it ("\(input.reader) should look at it", "il faudrait que \(input.reader) regarde"), with or without an @. A piece of news, a decision or a reminder to all is not a request. One action per request, the most pressing first, two at most. Write each as a to-do item that starts with a verb in the infinitive ("Vérifier le front avant midi", "Review the pull request"): never a question, never "you" or "vous".
+        Every sentence you write is in \(input.language), whatever language the messages are in: translate when they differ. Short plain sentences in your own words, not copies of the messages. Never name \(input.reader). Use only what the messages say.
         """
     }
 
@@ -89,8 +94,11 @@ enum CatchUp {
     static func text(from answer: CatchUpAnswer, lines: [Line]) -> GeneratedText? {
         func source(_ number: Int) -> String? { lines.indices.contains(number - 1) ? lines[number - 1].ts : nil }
         var sentences: [GeneratedText.Sentence] = []
-        if let asked = answer.asked, let text = tidy(asked.sentence) {
-            sentences.append(.init(text: text, source: source(asked.message), forYou: true))
+        // An action stands only on a message that names the reader.
+        let mine = answer.asked.filter { lines.indices.contains($0.message - 1) && lines[$0.message - 1].namesReader }
+        for action in mine.prefix(2) {
+            guard let text = tidy(action.sentence, action: true), !sentences.contains(where: { $0.text == text }) else { continue }
+            sentences.append(.init(text: text, source: source(action.message), forYou: true))
         }
         for point in answer.rest.prefix(2) {
             guard let text = tidy(point.sentence), !sentences.contains(where: { $0.text == text }) else { continue }
@@ -99,12 +107,24 @@ enum CatchUp {
         return sentences.isEmpty ? nil : GeneratedText(sentences: sentences)
     }
 
-    /// A sentence as it is shown: trimmed, a capital first, closed by a full stop.
-    private static func tidy(_ raw: String) -> String? {
+    /// `text` holds a word of the reader's name ("Sam" for "Sam Rivers"), as a whole word, whatever
+    /// the case and the accents. Words of one or two letters do not count.
+    static func names(_ text: String, reader: String) -> Bool {
+        func words(_ s: String) -> Set<String> {
+            Set(s.lowercased().folding(options: .diacriticInsensitive, locale: nil)
+                .split(whereSeparator: { !$0.isLetter && !$0.isNumber }).map(String.init).filter { $0.count > 2 })
+        }
+        return !words(text).isDisjoint(with: words(reader))
+    }
+
+    /// A sentence as it is shown: trimmed, a capital first, closed by a full stop. An action is a
+    /// to-do item: no closing punctuation, and a question mark the model left is dropped.
+    private static func tidy(_ raw: String, action: Bool = false) -> String? {
         var text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        if action { text = text.trimmingCharacters(in: CharacterSet(charactersIn: " .?!\u{202F}\u{00A0}")) }
         guard text.count > 2 else { return nil }
         text = text.prefix(1).uppercased() + text.dropFirst()
-        if let last = text.last, !".!?…".contains(last) { text += "." }
+        if !action, let last = text.last, !".!?…".contains(last) { text += "." }
         return text
     }
 
@@ -145,7 +165,7 @@ enum CatchUp {
     /// A made-up catch-up for captures (`DEVER_SNAPSHOT_INTELLIGENCE`), tied to real messages.
     static func sample(_ input: Input) -> GeneratedText {
         GeneratedText(sentences: [
-            .init(text: "Your answer on the front end is awaited before noon.", source: input.lines.last?.ts, forYou: true),
+            .init(text: "Answer on the front end before noon", source: input.lines.last?.ts, forYou: true),
             .init(text: "The migration breaks billing for older accounts.", source: input.lines.first?.ts),
             .init(text: "The CSV export leaves this release."),
         ], note: input.olderUnread ? coverage(kept: input.lines.count) : nil)
