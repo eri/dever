@@ -1,3 +1,4 @@
+import AppKit
 import Combine
 import Foundation
 
@@ -208,7 +209,14 @@ extension Project {
 @MainActor
 final class OverviewStore: ObservableObject {
     @Published private(set) var snapshots: [UUID: ProjectSnapshot] = [:]
+    /// A refresh someone asked for is running (the button, the first load). The cycles that
+    /// keep the rows current run without it: nothing on the page moves but the rows.
     @Published private(set) var isRefreshing = false
+    /// A cycle is running, asked for or not.
+    private var cycling = false
+    /// The Overview is the screen in front: its rows are read again every minute while Dever
+    /// is the active app, whatever the background setting.
+    var inFront = false
     /// When the last refresh that reached the tools ended. A cycle in which every call failed
     /// does not count: the rows are as old as this says.
     @Published private(set) var lastRefresh: Date?
@@ -227,7 +235,8 @@ final class OverviewStore: ObservableObject {
             let wait = min(Self.staleAfter, 30 * pow(2, Double(max(0, failures - 1))))
             return Date().timeIntervalSince(lastAttempt) > wait
         }
-        return lastRefresh.map { Date().timeIntervalSince($0) > Self.staleAfter } ?? true
+        let budget = inFront && NSApp.isActive ? min(Self.staleAfter, RefreshCadence.overviewInFront) : Self.staleAfter
+        return lastRefresh.map { Date().timeIntervalSince($0) > budget } ?? true
     }
 
     private var autoRefresh: Task<Void, Never>?
@@ -249,8 +258,8 @@ final class OverviewStore: ObservableObject {
         autoRefresh = Task { [weak self] in
             while !Task.isCancelled {
                 guard let self else { return }
-                if self.isStale { await self.refresh(app) }
-                try? await Task.sleep(nanoseconds: 60 * 1_000_000_000)
+                if self.isStale { await self.refresh(app, quiet: true) }
+                try? await Task.sleep(nanoseconds: 15 * 1_000_000_000)
             }
         }
     }
@@ -258,7 +267,7 @@ final class OverviewStore: ObservableObject {
     /// Works each row's Linear and GitHub parts out again from what the stores hold, without
     /// a request. A row whose tool is failing, or whose data the stores do not hold, is left.
     func rederive() {
-        guard let app, !isRefreshing, OverviewDemo.scene == nil else { return }
+        guard let app, !cycling, OverviewDemo.scene == nil else { return }
         let login = app.github?.login
         for p in app.projects {
             guard var s = snapshots[p.id], s.errors[.linear] == nil, s.errors[.github] == nil else { continue }
@@ -289,7 +298,9 @@ final class OverviewStore: ObservableObject {
         snapshots[project]?.slack = s
     }
 
-    func refresh(_ app: AppState) async {
+    /// - Parameter quiet: a cycle nobody asked for: the Refresh button and the header stay
+    ///   still (the very first load always shows).
+    func refresh(_ app: AppState, quiet: Bool = false) async {
         // Snapshots: a made-up workspace instead of the linked one (Support/OverviewDemo.swift).
         if let demo = OverviewDemo.scene {
             if app.projects.map(\.id) != demo.projects.map(\.id) { app.projects = demo.projects }
@@ -297,9 +308,10 @@ final class OverviewStore: ObservableObject {
             lastRefresh = Date()
             return
         }
-        guard !isRefreshing else { return }
-        isRefreshing = true
-        defer { isRefreshing = false }
+        if !quiet || lastRefresh == nil { isRefreshing = true }
+        guard !cycling else { return }
+        cycling = true
+        defer { cycling = false; isRefreshing = false }
 
         let projects = app.projects
         let repos = Result { RepoCache(client: try app.githubClient()) }

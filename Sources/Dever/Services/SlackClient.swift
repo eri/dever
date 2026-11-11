@@ -270,6 +270,11 @@ struct SlackClient {
         let obj = (try JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
         if obj["ok"] as? Bool == true { return obj }
         let err = obj["error"] as? String ?? "unknown_error"
+        let http = resp as? HTTPURLResponse
+        if http?.statusCode == 429 || err == "ratelimited" {
+            let wait = http?.value(forHTTPHeaderField: "Retry-After").flatMap(Double.init) ?? 30
+            throw AppError.rateLimited(.slack, retryAfter: min(max(wait, 1), 3600))
+        }
         if ["invalid_auth", "not_authed", "token_revoked", "token_expired"].contains(err) {
             throw AppError.unauthorized(.slack)
         }

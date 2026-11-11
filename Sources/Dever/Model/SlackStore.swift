@@ -138,6 +138,24 @@ final class SlackStore: ObservableObject {
         channels[id]?.fetchedAt = Date()
     }
 
+    /// Reads what arrived since the newest message held, and the read cursor: two small
+    /// requests, for a channel that is on screen. Nothing is published when nothing changed.
+    /// A channel not read yet is read in full.
+    func poll(_ id: String, app: AppState) async throws {
+        guard let held = channels[id], held.fetchedAt != nil, let newest = held.messages.first?.ts else {
+            return try await load(id, app: app)
+        }
+        if let running = loads[id] { return try await running.value }
+        let page = try await app.withSlack { try await $0.historyAfter(id, ts: newest) }
+        let cursor = try? await app.withSlack { try await $0.lastRead(id) }
+        var next = channels[id] ?? held
+        if !page.messages.isEmpty { next.merge(page.messages) }
+        if let cursor { next.cursor(fromSlack: cursor) }
+        guard !page.messages.isEmpty || next.lastRead != channels[id]?.lastRead else { return }
+        next.fetchedAt = Date()
+        channels[id] = next
+    }
+
     /// Reads the page before the oldest message held.
     func loadEarlier(_ id: String, app: AppState) async throws {
         guard let oldest = channels[id]?.messages.last?.ts else { return }

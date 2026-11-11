@@ -258,8 +258,9 @@ Refresh every. "Volatile" is the cadence while something is in flight.
 | Open pull requests, review decision, requested reviewers | 60 s | | activation, opened externally | GraphQL |
 | Merged pull requests | 5 min | | a pull request left the open list | GraphQL |
 | Default-branch health | 5 min | 30 s while running | activation | GraphQL |
-| Preview environment | 60 s | 15 to 30 s while deploying, updating or deleting (whoever started it) | command posted, activation | ETag |
-| Slack channel messages | 20 s | | reply sent, activation | `oldest` cursor |
+| Preview environment | 60 s | 15 s while deploying, updating or deleting (30 s after a command posted from Dever) | command posted, activation | ETag |
+| Slack channel: new messages | 20 s | | reply sent, activation | `oldest` cursor |
+| Slack channel: edits, reactions, reply counts of what is shown | 60 s | | reaction or reply made here (local, at once) | latest page |
 | Slack read cursor, unread, mentions | 20 s | | mark read (local, at once), activation | `conversations.info` |
 | Thread replies (open thread) | 20 s | | reply sent | `conversations.replies` |
 | Linear issue rows, blockers | 60 s | | any issue write (local, at once), activation | `updatedAt` delta |
@@ -382,7 +383,8 @@ Safest and most felt first. Each phase ships on its own and leaves the app bette
 | 3, step 1: GitHub | **Done** | `Model/ResourceCache.swift` (the shared helper), `Model/GitHubStore.swift`; the Overview (`RepoCache`) and the project page (`derivePulls`, `loadGitHub`) read it |
 | 3, step 2: the Overview row derived from the stores | **Done** | `Model/OverviewRow.swift` (pure functions), `OverviewStore.rederive`, `IssueStore.load(maxAge:)` and `facts` |
 | 3, step 3: Slack | **Done** | `Model/SlackStore.swift` (messages, cursor, opened threads per channel); `ProjectDetailView` keeps only view state |
-| 4 to 6 | Not started | |
+| 4 | **Done** | `Model/RefreshCadence.swift` (the budgets and the backoff), `ProjectDetailView.keepCurrent / poll`, `SlackStore.poll`, `GitHubStore.refreshChecks`, `OverviewStore.inFront`, `AppError.rateLimited` |
+| 5, 6 | Not started (optional) | |
 
 After step 1 of phase 3 a repository is read once for the Overview and every project page that follows
 it (a read within 20 s serves all of them), a project whose issues and repositories are already held
@@ -401,6 +403,15 @@ its messages, names and read position at once (F4), a reply reads its thread aga
 parent's count, a reaction changes its one message, and neither reads the channel again (F8). An opened
 thread shows the replies it had while they are read again. Still separate: the Overview's own Slack read
 (this week's messages, unread and mentions), which does not go through the store yet.
+
+After phase 4 the open project page reads each kind of data at its own pace while Dever is the active
+app: messages that arrived since the newest one held and the read cursor every 20 s (two small requests,
+nothing published when nothing changed), the channel's latest page, the issues' delta and the
+repositories every minute, the checks of the pull requests whose checks are running every 15 s (one
+query of under a kilobyte, measured 0.7 KB for six pull requests), a moving preview every 15 s. The
+Overview in front runs its cycle every minute, quietly; behind, at Settings › Refresh in the background
+every. A tool that fails is asked half as often each time, up to five minutes, and a rate limit
+(`Retry-After`) pauses every call to that tool until it lifts.
 
 Measured after phase 2 on the same repository, with the app's own client code
 (`DEVER_TRACE_REQUESTS=1`): one repository costs **3 requests, 112 KB, 5.4 s** (open pull requests with

@@ -38,6 +38,28 @@ final class GitHubStore: ObservableObject {
         }
     }
 
+    /// Reads the checks of the pull requests `numbers` again and puts them on the pull
+    /// requests held: what a screen asks every few seconds while checks are running. True
+    /// when one of them is no longer open (merged or closed): the repository is then marked
+    /// to be read in full.
+    @discardableResult
+    func refreshChecks(_ repo: String, numbers: [Int], client: GitHubClient) async throws -> Bool {
+        let found = try await client.checks(repo, numbers: numbers)
+        let changed = cache.value(repo)?.state.pulls.contains { pull in
+            found[pull.number].map { $0.checks != pull.checks } ?? false
+        } ?? false
+        if changed {
+            cache.update(repo) { held in
+                for i in held.state.pulls.indices {
+                    if let now = found[held.state.pulls[i].number] { held.state.pulls[i].checks = now.checks }
+                }
+            }
+        }
+        let gone = found.values.contains { !$0.open }
+        if gone { cache.invalidate(repo) }
+        return gone
+    }
+
     /// A pull request of `repo` was opened on GitHub: the next reader fetches whatever its age.
     func invalidate(_ repo: String) { cache.invalidate(repo) }
 

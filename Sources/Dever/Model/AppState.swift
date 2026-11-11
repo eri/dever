@@ -24,10 +24,14 @@ enum AppError: LocalizedError {
     case message(String)
     case unauthorized(ServiceKind)
     case notConnected(ServiceKind)
+    /// The service asked for fewer requests: nothing is sent to it for `retryAfter` seconds.
+    case rateLimited(ServiceKind, retryAfter: TimeInterval)
 
     var errorDescription: String? {
         switch self {
         case .message(let m): m
+        case .rateLimited(let s, let wait):
+            "\(s.label) asked Dever to slow down. Trying again in \(Int(wait.rounded(.up))) s."
         case .unauthorized(let s): "\(s.label): session expired, please reconnect the account."
         case .notConnected(let s): "\(s.label) is not connected."
         }
@@ -363,6 +367,9 @@ final class AppState: ObservableObject {
     /// Nil for a cancelled call (the page went away), which says nothing about the service.
     func failure(_ error: Error, _ s: ServiceKind) -> ServiceState? {
         if error is CancellationError || (error as? URLError)?.code == .cancelled { return nil }
+        if case AppError.rateLimited(let service, let wait) = error {
+            pausedUntil[service] = max(pausedUntil[service] ?? .distantPast, Date().addingTimeInterval(wait))
+        }
         let state = ServiceState(error)
         if state == .unauthorized, !expired.contains(s) { expired.insert(s) }
         return state
@@ -443,15 +450,28 @@ final class AppState: ObservableObject {
 
     // MARK: Clients
 
+    /// Until when each service asked not to be called (its `Retry-After`).
+    private var pausedUntil: [ServiceKind: Date] = [:]
+
+    /// While a service's pause lasts, calls to it fail here instead of being sent.
+    private func respectPause(_ s: ServiceKind) throws {
+        guard let until = pausedUntil[s] else { return }
+        let left = until.timeIntervalSinceNow
+        if left > 0 { throw AppError.rateLimited(s, retryAfter: left) }
+        pausedUntil[s] = nil
+    }
+
     func githubClient() throws -> GitHubClient {
         guard let github else { throw AppError.notConnected(.github) }
         try simulateFailure(.github)
+        try respectPause(.github)
         return GitHubClient(token: github.token)
     }
 
     func withSlack<T>(_ body: (SlackClient) async throws -> T) async throws -> T {
         guard let slack else { throw AppError.notConnected(.slack) }
         try simulateFailure(.slack)
+        try respectPause(.slack)
         let value = try await body(SlackClient(creds: slack))
         succeeded(.slack)
         return value
@@ -490,6 +510,7 @@ final class AppState: ObservableObject {
     func withLinear<T>(_ body: (LinearClient) async throws -> T) async throws -> T {
         guard linear != nil else { throw AppError.notConnected(.linear) }
         try simulateFailure(.linear)
+        try respectPause(.linear)
         let creds = try await refreshedLinear(force: false)
         let value: T
         do {

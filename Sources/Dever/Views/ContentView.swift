@@ -113,8 +113,10 @@ struct ContentView: View {
         .onReceive(NotificationCenter.default.publisher(for: .lookAgain)) { _ in
             guard Snapshotter.directory == nil else { return }
             let due = selection == .overview && path.isEmpty ? LookAgain.shared.isDue(store.lastRefresh) : store.isStale
-            if due { Task { await store.refresh(app) } }
+            if due { Task { await store.refresh(app, quiet: true) } }
         }
+        // The Overview in front reads its rows again every minute; behind, at the setting.
+        .onChange(of: selection == .overview && path.isEmpty, initial: true) { _, front in store.inFront = front }
         .task {
             LookAgain.shared.start()
             store.startAutoRefresh(app)

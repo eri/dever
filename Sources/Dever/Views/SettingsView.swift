@@ -1232,7 +1232,9 @@ private struct LaunchSection: View {
                                   options: Preferences.Landing.allCases.map { (label: $0.label, value: $0.rawValue) },
                                   selection: $landing)
                 }
-                SettingRow(title: "Refresh every", detail: "Alerts follow the same beat", divided: false) {
+                SettingRow(title: "Refresh in the background every",
+                           detail: "The screen in front is read again every minute. Alerts follow this beat",
+                           divided: false) {
                     SegmentPicker(label: "Refresh interval",
                                   options: Preferences.refreshChoices.map { (label: "\($0) min", value: $0) },
                                   selection: $minutes)

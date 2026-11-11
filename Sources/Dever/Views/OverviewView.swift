@@ -137,7 +137,8 @@ struct OverviewView: View {
         .background(Soot.ground)
         .navigationTitle("Overview")
         .windowTitleHidden()
-        .task { if store.isStale { await store.refresh(app) } }
+        // Rows that are already there are read again behind them; only the first load shows.
+        .task { if store.isStale { await store.refresh(app, quiet: true) } }
         .onAppear {
             withAnimation(reduceMotion ? .easeOut(duration: 0.2) : .easeOut(duration: 0.3)) { appeared = true }
             // Snapshots: DEVER_SNAPSHOT_OVERVIEW_VIEW=1 opens the View popover.

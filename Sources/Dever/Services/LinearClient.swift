@@ -183,6 +183,13 @@ struct LinearClient {
         let status = (resp as? HTTPURLResponse)?.statusCode ?? 0
         RequestLog.record("linear", "graphql", status: status, bytes: data.count, since: started)
         let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
+        let limited = (json["errors"] as? [[String: Any]])?.contains {
+            (($0["extensions"] as? [String: Any])?["code"] as? String) == "RATELIMITED"
+        } ?? false
+        if status == 429 || limited {
+            let wait = (resp as? HTTPURLResponse)?.value(forHTTPHeaderField: "Retry-After").flatMap(Double.init) ?? 60
+            throw AppError.rateLimited(.linear, retryAfter: min(max(wait, 1), 3600))
+        }
         if let errors = json["errors"] as? [[String: Any]], !errors.isEmpty {
             let isAuth = errors.contains {
                 (($0["extensions"] as? [String: Any])?["code"] as? String) == "AUTHENTICATION_ERROR"

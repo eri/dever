@@ -213,6 +213,15 @@ struct GitHubClient {
         RequestLog.record("github", "\(method) \(path)", status: code, bytes: data.count, since: started)
         if code == 304, let known { return known.data }
         if code == 401 { throw AppError.unauthorized(.github) }
+        // The primary limit (no requests left until the reset) and the secondary one (too
+        // many at once) both come as 403 or 429, with how long to wait.
+        if code == 429 || code == 403, let http {
+            let after = http.value(forHTTPHeaderField: "Retry-After").flatMap(Double.init)
+            let reset = http.value(forHTTPHeaderField: "x-ratelimit-remaining") == "0"
+                ? http.value(forHTTPHeaderField: "x-ratelimit-reset").flatMap(Double.init).map { $0 - Date().timeIntervalSince1970 } : nil
+            if let wait = after ?? reset { throw AppError.rateLimited(.github, retryAfter: min(max(wait, 1), 3600)) }
+            if code == 429 { throw AppError.rateLimited(.github, retryAfter: 60) }
+        }
         guard (200..<300).contains(code) else {
             throw AppError.message("GitHub \(code): \(String(decoding: data.prefix(200), as: UTF8.self))")
         }
@@ -343,6 +352,28 @@ struct GitHubClient {
             variables["after"] = cursor
         }
         return state
+    }
+
+    /// The checks of a few pull requests by number, and whether each is still open: what is
+    /// read while checks are running, a fraction of a kilobyte per pull request.
+    func checks(_ repo: String, numbers: [Int]) async throws -> [Int: (checks: String?, open: Bool)] {
+        struct Node: Decodable {
+            var number: Int
+            var state: String
+            var commits: PullNode.Commits?
+        }
+        struct R: Decodable { var repository: [String: Node?]? }
+        let wanted = Array(Set(numbers)).sorted().prefix(30)
+        guard !wanted.isEmpty else { return [:] }
+        let fields = wanted.map { "p\($0): pullRequest(number: \($0)) { number state commits(last: 1) { nodes { commit { statusCheckRollup { state } } } } }" }
+        let found = try await graphql("""
+        query($owner: String!, $name: String!) { repository(owner: $owner, name: $name) { \(fields.joined(separator: " ")) } }
+        """, variables: Self.split(repo), as: R.self).repository ?? [:]
+        var out: [Int: (checks: String?, open: Bool)] = [:]
+        for case let node? in found.values {
+            out[node.number] = (node.commits?.nodes.first?.commit.statusCheckRollup?.state, node.state == "OPEN")
+        }
+        return out
     }
 
     /// Open pull requests, most recently updated first (up to 300).

@@ -40,6 +40,10 @@ struct ProjectDetailView: View {
     /// A load is running (asked for, or the quiet one that keeps the page current).
     @State private var inFlight = false
     @State private var lastLoad: Date?
+    /// When each kind of data was last read by the page's own cadence, and how many reads
+    /// in a row each tool has failed (its next one waits longer).
+    @State private var polled: [RefreshCadence.Kind: Date] = [:]
+    @State private var pollFailures: [ServiceKind: Int] = [:]
     /// The clock the age line is read against, moved by the page's own tick.
     @State private var now = Date()
     @State private var expanded: Set<String> = []
@@ -682,21 +686,69 @@ struct ProjectDetailView: View {
         return out
     }
 
-    /// While the page is open and Dever in front, what it shows is read again every minute,
-    /// in place; the preview every 20 s while it deploys. The tick also moves the age line.
+    /// The project's open pull requests whose checks are running, by repository.
+    private var checksRunning: [String: [Int]] {
+        Dictionary(grouping: pulls.filter { ["PENDING", "EXPECTED"].contains($0.pull.checks ?? "") }, by: { $0.pull.repository })
+            .mapValues { $0.map(\.pull.number) }
+    }
+
+    /// The preview is deploying, updating or deleting, and nothing else is watching it (a
+    /// command posted from here has its own watch).
+    private var previewMoving: Bool {
+        PreviewStore.shared.state(for: project)?.status?.phase.busy == true && PreviewStore.shared.awaiting[project.id] == nil
+    }
+
+    private func isDue(_ kind: RefreshCadence.Kind) -> Bool {
+        let inFlight = kind == .checks ? !checksRunning.isEmpty : kind == .preview ? previewMoving : false
+        return RefreshCadence.isDue(kind, last: polled[kind], inFlight: inFlight, failures: pollFailures[kind.service] ?? 0)
+    }
+
+    /// While the page is open and Dever in front, each kind of data is read again at its own
+    /// pace, in place (`RefreshCadence`): new messages every 20 s, running checks and a moving
+    /// preview every 15 s, the rest every minute. The tick also moves the age line.
     private func keepCurrent() async {
         guard Snapshotter.directory == nil else { return }
+        var ticks = 0
         while !Task.isCancelled {
-            try? await Task.sleep(nanoseconds: 20_000_000_000)
+            try? await Task.sleep(nanoseconds: 5_000_000_000)
             guard !Task.isCancelled else { return }
-            now = Date()
-            guard NSApp.isActive else { continue }
-            if lastLoad.map({ Date().timeIntervalSince($0) > 55 }) ?? true {
-                await load(quiet: true)
-            } else if PreviewStore.shared.state(for: project)?.status?.phase.busy == true,
-                      PreviewStore.shared.awaiting[project.id] == nil {
-                await PreviewStore.shared.load(project, app: app, force: true)
+            ticks += 1
+            if ticks % 4 == 0 { now = Date() }
+            guard NSApp.isActive, !inFlight else { continue }
+            for kind in RefreshCadence.Kind.allCases where isDue(kind) {
+                guard !Task.isCancelled, !inFlight else { break }
+                await poll(kind)
+                polled[kind] = Date()
             }
+        }
+    }
+
+    private func poll(_ kind: RefreshCadence.Kind) async {
+        switch kind {
+        case .slackNew:
+            guard let id = project.slack?.id, states[.slack] != .notConnected else { return }
+            do {
+                try await slackStore.poll(id, app: app)
+                succeeded(.slack)
+            } catch { failed(.slack, error) }
+        case .slackPage:
+            await loadSlack()
+            polled[.slackNew] = Date()
+        case .linear:
+            await loadLinear(force: false)
+            derivePulls()
+        case .github:
+            await loadGitHub()
+        case .checks:
+            guard let client = try? app.githubClient() else { return }
+            for (repo, numbers) in checksRunning {
+                do {
+                    // One of them merged or closed: the repository is read in full on the next tick.
+                    if try await github.refreshChecks(repo, numbers: numbers, client: client) { polled[.github] = nil }
+                } catch { failed(.github, error) }
+            }
+        case .preview:
+            await PreviewStore.shared.load(project, app: app, force: previewMoving)
         }
     }
 
@@ -706,7 +758,10 @@ struct ProjectDetailView: View {
         if !quiet { loading = true }
         guard !inFlight else { return }
         inFlight = true
-        defer { inFlight = false; loading = false; loaded = true; lastLoad = Date(); now = Date() }
+        defer {
+            inFlight = false; loading = false; loaded = true; lastLoad = Date(); now = Date()
+            for kind in RefreshCadence.Kind.allCases { polled[kind] = Date() }
+        }
         for service in ServiceKind.allCases {
             // A tool without a token is an invitation, not a call that fails.
             if missing.contains(service) { states[service] = .notConnected }
@@ -725,12 +780,14 @@ struct ProjectDetailView: View {
         lastLoaded[service] = Date()
         states[service] = nil
         refreshFailed[service] = nil
+        pollFailures[service] = nil
     }
 
     /// A failed refresh keeps what the panel shows and says so under the title; only a panel
     /// with nothing to show, or a rejected token, becomes the failure row.
     private func failed(_ service: ServiceKind, _ error: Error) {
         guard let state = app.failure(error, service) else { return }
+        pollFailures[service, default: 0] += 1
         if lastLoaded[service] != nil, state.isTransient {
             refreshFailed[service] = state
             states[service] = nil
