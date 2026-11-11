@@ -621,7 +621,8 @@ struct ProjectEditorSheet: View {
                         Button { confirmingRemove = true } label: {
                             Label("Remove project", systemImage: "trash")
                         }
-                        .buttonStyle(DestructiveButton(size: .sheet))
+                        // A quiet text link: removing is rare, so it does not compete with Save.
+                        .buttonStyle(TertiaryButton(tint: .muted, lift: Soot.surface, font: .system(size: 14, weight: .medium)))
                         .disabled(saving)
                         .accessibilityHint("Asks before removing the project from Dever")
                     }
