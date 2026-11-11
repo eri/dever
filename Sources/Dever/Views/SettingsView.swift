@@ -835,7 +835,7 @@ private struct RepositoriesSection: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            SectionHead(title: "Repositories", detail: "Change it any time; nothing is lost")
+            SectionHead(title: "Repositories", detail: "Tell Dever where your projects' code lives. Switch any time; nothing is lost.")
             HStack(spacing: 16) {
                 ForEach(RepositoryMode.allCases) { option in
                     let on = app.repositoryMode == option
