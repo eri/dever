@@ -161,8 +161,10 @@ enum Snapshotter {
                 NSApp.appearance = NSAppearance(named: appearance)
                 // DEVER_SNAPSHOT_STAGE_WAIT=<seconds> holds each stage longer (default 1.5).
                 let hold = ProcessInfo.processInfo.environment["DEVER_SNAPSHOT_STAGE_WAIT"].flatMap(Double.init) ?? 1.5
-                for stage in OnboardingView.Stage.allCases {
-                    NotificationCenter.default.post(name: .showOnboardingStage, object: stage.rawValue)
+                // DEVER_SNAPSHOT_STAGE=<stage> captures that stage alone, as onboarding opened on it.
+                let only = OnboardingView.Stage.snapshotStart
+                for stage in only.map({ [$0] }) ?? OnboardingView.Stage.allCases {
+                    if only == nil { NotificationCenter.default.post(name: .showOnboardingStage, object: stage.rawValue) }
                     try? await Task.sleep(nanoseconds: UInt64(hold * 1_000_000_000))
                     capture(to: dir.appendingPathComponent("onboarding-\(stage)-\(themeName).png"))
                 }

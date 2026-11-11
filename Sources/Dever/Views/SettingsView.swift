@@ -15,11 +15,13 @@ struct SettingsView: View {
         case accounts, repositories, overview, appearance, alerts, intelligence, launch, about
         var id: String { rawValue }
 
-        /// The sections this Mac has: Intelligence only where the model can run (now or after a
-        /// fix in System Settings) and a feature that uses it exists.
+        /// The sections this Mac has: Intelligence where a feature can run (now or after a fix in
+        /// System Settings), or where the coming local model is announced.
         @MainActor static var visible: [Section] {
-            let status = IntelligenceStatus.shared.availability
-            let intelligence = status != .unsupported && !IntelligenceFeature.shipped.isEmpty
+            let intelligence = LocalModelOutlook.settingsPage(
+                availability: IntelligenceStatus.shared.availability,
+                anyFeature: !IntelligenceFeature.shipped.isEmpty,
+                announced: LocalModelOutlook.announced())
             return allCases.filter { $0 != .intelligence || intelligence }
         }
         var label: String {
@@ -185,10 +187,15 @@ private struct AttentionDot: View {
 struct SectionHead: View {
     let title: String
     var detail: String? = nil
+    /// A word beside the title that qualifies the whole page ("Beta").
+    var tag: StageTag.Kind? = nil
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(title).font(.system(size: 28, weight: .semibold)).tracking(-0.8).foregroundStyle(Soot.ink)
-                .accessibilityAddTraits(.isHeader)
+            HStack(alignment: .center, spacing: 10) {
+                Text(title).font(.system(size: 28, weight: .semibold)).tracking(-0.8).foregroundStyle(Soot.ink)
+                    .accessibilityAddTraits(.isHeader)
+                if let tag { StageTag(kind: tag).padding(.top, 4) }
+            }
             if let detail { Text(detail).font(.system(size: 13)).foregroundStyle(Soot.muted) }
         }
         .padding(.bottom, 24)
@@ -1239,26 +1246,34 @@ private struct NotificationPreview: View {
 
 // MARK: - Intelligence
 
-/// What the Mac's own model does in Dever: one switch per use, the language of summaries.
-/// While the model is off or not ready, the reason and the way to System Settings instead.
+/// What the Mac's own model does in Dever: one switch per use, the language of summaries, all
+/// marked Beta. While the model is off or not ready, the reason and the way to System Settings
+/// instead. Under either, on a Mac it could reach, the picture of the local model to come; on a
+/// Mac that cannot run Apple's model, that picture alone.
 private struct IntelligenceSection: View {
     @ObservedObject private var status = IntelligenceStatus.shared
     @AppStorage(IntelligencePreferences.summaryLanguageKey) private var language = IntelligencePreferences.SummaryLanguage.source.rawValue
 
+    private var shown: [IntelligenceFeature] {
+        status.availability == .unsupported ? [] : IntelligenceFeature.allCases.filter(IntelligenceFeature.shipped.contains)
+    }
+    private var mark: IntelligenceFeature.BetaMark { IntelligenceFeature.betaMark(among: shown) }
+
     private var headline: String {
         switch status.availability {
-        case .available: "Runs on this Mac. Nothing leaves it."
+        case .available: mark == .none ? "Runs on this Mac. Nothing leaves it." : IntelligenceFeature.betaMeaning
         case .off: "Apple Intelligence is off on this Mac"
-        case .notReady, .unsupported: "Apple Intelligence is not ready on this Mac yet"
+        case .notReady: "Apple Intelligence is not ready on this Mac yet"
+        case .unsupported: "Apple Intelligence is not available on this Mac"
         }
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            SectionHead(title: "Intelligence", detail: headline)
+            SectionHead(title: "Intelligence", detail: headline, tag: mark == .page ? .beta : nil)
             if status.availability == .available {
                 ForEach(IntelligenceFeature.Group.allCases) { group in
-                    let features = group.features.filter { IntelligenceFeature.shipped.contains($0) }
+                    let features = group.features.filter(shown.contains)
                     if !features.isEmpty {
                         Text(group.rawValue).font(.system(size: 12, weight: .semibold)).foregroundStyle(Soot.muted)
                             .padding(.leading, 16).padding(.bottom, 8)
@@ -1266,7 +1281,8 @@ private struct IntelligenceSection: View {
                         SettingRows {
                             ForEach(features) { feature in
                                 let last = feature == features.last && group != .summaries
-                                IntelligenceSwitch(feature: feature, divided: !last)
+                                IntelligenceSwitch(feature: feature, divided: !last,
+                                                   beta: mark == .rows && feature.maturity == .beta)
                             }
                             if group == .summaries {
                                 SettingRow(title: "Language", divided: false) {
@@ -1279,16 +1295,18 @@ private struct IntelligenceSection: View {
                         .padding(.bottom, 24)
                     }
                 }
-            } else {
+            } else if status.availability.fixable {
                 SettingRows {
                     SettingRow(title: status.availability == .off ? "Turn it on to use it here" : "Dever will use it once it is ready",
-                               detail: "Summaries and drafts are written on this Mac. Nothing leaves it.",
+                               detail: "Summaries are written on this Mac. Nothing leaves it.",
                                divided: false) {
                         ExternalLink("Open System Settings", destination: IntelligenceInvitation.settingsURL,
                                      lift: Soot.ground)
                     }
                 }
+                .padding(.bottom, 24)
             }
+            if LocalModelOutlook.announced() { ComingSoonBlock(today: status.availability != .unsupported) }
         }
     }
 }
@@ -1297,11 +1315,14 @@ private struct IntelligenceSection: View {
 private struct IntelligenceSwitch: View {
     let feature: IntelligenceFeature
     let divided: Bool
+    /// Marked on the row: some features on the page have left beta, this one has not.
+    let beta: Bool
     @AppStorage private var on: Bool
 
-    init(feature: IntelligenceFeature, divided: Bool) {
+    init(feature: IntelligenceFeature, divided: Bool, beta: Bool = false) {
         self.feature = feature
         self.divided = divided
+        self.beta = beta
         _on = AppStorage(wrappedValue: true, feature.settingKey)
     }
 
@@ -1313,6 +1334,7 @@ private struct IntelligenceSwitch: View {
     var body: some View {
         SettingRow(title: feature.title, detail: feature.detail, divided: divided, tap: { set(!on) }) {
             HStack(spacing: 10) {
+                if beta { StageTag(kind: .beta) }
                 if feature == .detectedMentions { GeneratedMark(size: 12, mention: true) }
                 Toggle(feature.title, isOn: Binding(get: { on }, set: set))
                     .labelsHidden().toggleStyle(.switch).tint(Soot.lime).controlSize(.small)

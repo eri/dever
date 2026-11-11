@@ -68,7 +68,7 @@ DEVER_SNAPSHOT_DIR=/tmp/dever-shots ./build/Dever.app/Contents/MacOS/Dever
 ```
 
 It opens Overview, the first project and Settings in dark then light mode, saves one PNG per screen, and quits.
-Add `DEVER_SNAPSHOT_ONBOARDING=1` to capture the onboarding stages too, and `DEVER_SNAPSHOT_WAIT=0` to capture the loading state.
+Add `DEVER_SNAPSHOT_ONBOARDING=1` to capture the onboarding stages too (`DEVER_SNAPSHOT_STAGE=connect` for that stage alone), and `DEVER_SNAPSHOT_WAIT=0` to capture the loading state.
 `DEVER_SNAPSHOT_PROJECT=1` captures the second project instead of the first.
 `DEVER_SNAPSHOT_DELIVERY=busy` (or `grab`, `done`) fills the Delivery panel with a made-up project, to capture every situation.
 `DEVER_SNAPSHOT_ISSUE=1` opens the first project's first issue and saves `issue-{dark,light}.png` plus a `-end` capture

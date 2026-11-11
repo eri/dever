@@ -271,33 +271,62 @@ time; a bolder one would speak for the user. Writing on the user's behalf is not
 
 ## 6. Settings › Intelligence
 
-A new page between Notifications and Launch, built like the others (`SectionHead`, `SettingRows`,
+A page between Notifications and Launch, built like the others (`SectionHead`, `SettingRows`,
 `SettingRow` with a switch). No master switch: one per use, all on by default.
 
 ```
-Intelligence
-Runs on this Mac. Nothing leaves it.
+Intelligence  (Beta)
+Runs on this Mac. It can be wrong: the original is always one click away.
 
 Summaries
   Long messages                         [on]
   Detected mentions  @✦                 [on]
-  Issue summary                         [on]
   Language            [ Source | English ]
-Pipelines
-  Explain a failure                     [on]
+
+┌ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ┐
+  Catch up without reading it all  (Coming soon)
+  Today Dever shortens one message at a time. A second model,
+  an optional download, will take on a whole channel, issue or pipeline.
+  [picture]            [picture]           [picture]
+  A busy channel,      A long issue,       A failed pipeline,
+  caught up            summed up           explained
+  Runs entirely on this Mac · Nothing leaves it
+└ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ┘
 ```
 
 - **Language** applies to summaries only: "Source" (default) keeps the language of what is summarised,
   "English" forces English. A segment picker, not a system dropdown.
 - A switch turned off removes the feature's interface entirely, and drops what it had generated.
+- **Beta.** Every feature carries a maturity in the model (`IntelligenceFeature.maturity`), beta for all
+  of them today. `IntelligenceFeature.betaMark(among:)` decides where the word shows for the features
+  the page lists: once, beside the page's title, while all of them are beta (a tag on every row would
+  say the same thing four times); on each beta row once some have left beta. The line under the title
+  says what it means here (`betaMeaning`): it runs on this Mac, it can be wrong, the original is always
+  one click away. A feature added to `built` is marked without touching the page.
+- **Coming soon.** The local model of docs/local-model-benchmark.md is announced, not built
+  (`LocalModelOutlook`, `ComingSoonBlock`). A dashed frame, so that it reads as a place kept and never as
+  a disabled control: no switch, no button, nothing dimmed, nothing clickable. Its title is the benefit
+  ("Catch up without reading it all"); one line says why a second model (Apple's shortens one message,
+  this one will take on a whole channel, issue or pipeline) and that it is an optional download; three
+  small pictures in the app's own shapes show the raw thing and, behind the sparkle, what will be
+  written of it. No date, no model name, no size. "Larger" was tried in the title and refused: it reads
+  as "heavier on my Mac". To VoiceOver the block is one element that reads the whole announcement; it
+  does not move, so Reduce Motion changes nothing.
+- **Where the announcement shows:** only on a Mac the benchmark's recommendation covers, Apple silicon
+  with 16 GB of memory or more (`LocalModelOutlook.announced`). On any other Mac it would promise what
+  may never reach it.
+- **Onboarding** gets no stage and no question (there is nothing to choose yet): one quiet line on the
+  Connect stage, under "Stays on this Mac", since it is the same promise: "Long messages, summed up on
+  this Mac" and the word Beta. Its tooltip gives the meaning of Beta and, where the announcement is
+  made, what is coming. Not shown on a Mac that cannot run Apple's model.
 
 ## 7. Unavailable, slow, failing
 
 | State | Pages | Settings › Intelligence |
 | --- | --- | --- |
-| macOS before 26, or a Mac that can never run it (`deviceNotEligible`) | nothing | the page does not exist |
-| Apple Intelligence off (`appleIntelligenceNotEnabled`) | nothing, plus the invitation once | the reason in one sentence, "Open System Settings ↗" |
-| Model not there (`modelNotReady`: downloading, or held back by the system, for instance when Siri's language and the Mac's differ) | nothing, plus the invitation once | "Apple Intelligence is not ready on this Mac yet. Dever will use it when it is.", "Open System Settings ↗". Never "downloading": the API does not say why. |
+| macOS before 26, or a Mac that can never run it (`deviceNotEligible`) | nothing | where the local model is announced (above): "Apple Intelligence is not available on this Mac" and the Coming soon block alone, without its sentence about today, since a local model could reach this Mac. Elsewhere the page does not exist. |
+| Apple Intelligence off (`appleIntelligenceNotEnabled`) | nothing, plus the invitation once | Beta beside the title, the reason in one sentence, "Open System Settings ↗", then the Coming soon block |
+| Model not there (`modelNotReady`: downloading, or held back by the system, for instance when Siri's language and the Mac's differ) | nothing, plus the invitation once | Beta beside the title, "Apple Intelligence is not ready on this Mac yet", "Dever will use it once it is ready", "Open System Settings ↗", then the Coming soon block. Never "downloading": the API does not say why. |
 | Available | features on | as section 6 |
 
 - **The invitation:** one quiet line at the top of the Slack rail, the first time only, when the Mac
@@ -379,5 +408,5 @@ before it is built.
   for the catch-up costs one request per thread and needs its own budget row.
 - **Detected mentions with no name.** "He wrote that screen, he should look" needs the thread around
   it and a judgement the model does not make reliably: not detected (5.2).
-- **Onboarding wording.** A tooltip says Dever "never posts on your behalf" while thread replies post
-  as the user; issue creation adds a second write. To be reworded with phase 2.
+- **Onboarding wording.** Settled: the tooltip said Dever "never posts on your behalf" while thread
+  replies post as the user. It now says Dever "posts only what you write and send".

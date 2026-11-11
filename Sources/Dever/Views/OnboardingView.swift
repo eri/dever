@@ -12,10 +12,18 @@ enum OnboardingExit { case overview, newProject, importSlack, importLinear }
 
 
 struct OnboardingView: View {
-    enum Stage: Int, CaseIterable { case name, connect, repositories, channels, project }
+    enum Stage: Int, CaseIterable {
+        case name, connect, repositories, channels, project
+
+        /// Captures: `DEVER_SNAPSHOT_STAGE=connect` opens onboarding on that stage, with no
+        /// transition to wait for (a covered window pauses them).
+        static var snapshotStart: Stage? {
+            ProcessInfo.processInfo.environment["DEVER_SNAPSHOT_STAGE"].flatMap { name in allCases.first { "\($0)" == name } }
+        }
+    }
 
     @EnvironmentObject var app: AppState
-    @State var stage: Stage = .name
+    @State var stage: Stage = Stage.snapshotStart ?? .name
     let finish: (_ then: OnboardingExit) -> Void
 
     /// Every stage change goes through here: the headline and its control fade out and the
@@ -181,10 +189,39 @@ private struct ConnectControls: View {
                 Label("Stays on this Mac", systemImage: "lock")
                     .font(.system(size: 13))
                     .foregroundStyle(Soot.muted)
-                    .help("No Dever server: tokens stay in your Keychain, and Dever never posts on your behalf.")
+                    .help("No Dever server: tokens stay in your Keychain, and Dever posts only what you write and send.")
             }
+            IntelligenceLine()
         }
         .sheet(isPresented: $githubSheet) { GitHubLoginSheet() }
+    }
+}
+
+/// Intelligence in onboarding: one quiet line under the privacy promise, where it belongs (it is
+/// the same promise). No stage and no question: there is nothing to choose yet. Shown where a
+/// feature exists on this Mac; the coming local model is a clause of its tooltip.
+private struct IntelligenceLine: View {
+    @ObservedObject private var status = IntelligenceStatus.shared
+
+    private var beta: Bool {
+        status.availability != .unsupported && IntelligenceFeature.betaMark(among: IntelligenceFeature.shipped) != .none
+    }
+    private var detail: String {
+        IntelligenceFeature.betaMeaning
+            + (LocalModelOutlook.announced() ? " Coming soon: a whole channel, issue or pipeline, with an optional download." : "")
+    }
+
+    var body: some View {
+        if beta {
+            HStack(spacing: 8) {
+                Image(systemName: "sparkles").font(.system(size: 12, weight: .semibold)).foregroundStyle(Soot.muted)
+                Text("Long messages, summed up on this Mac").font(.system(size: 13)).foregroundStyle(Soot.muted)
+                Text("Beta").font(.system(size: 11, weight: .semibold)).foregroundStyle(Soot.lime)
+            }
+            .help(detail)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("Long messages, summed up on this Mac. Beta. \(detail)")
+        }
     }
 }
 

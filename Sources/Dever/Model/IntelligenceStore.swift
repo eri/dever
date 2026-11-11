@@ -43,6 +43,24 @@ enum IntelligenceFeature: String, CaseIterable, Identifiable, Sendable {
 
     var settingKey: String { "intelligence.\(rawValue)" }
 
+    /// How far a feature is trusted. Beta: it runs on this Mac, it can be wrong, and the original
+    /// is one click away; Settings says so (`betaMark`). A feature leaves beta here, case by case.
+    enum Maturity: Sendable { case beta, settled }
+
+    var maturity: Maturity { .beta }
+
+    /// Where Settings › Intelligence says "Beta" for the features it lists: once beside the
+    /// page's title while all of them are, on each row once some have left beta.
+    enum BetaMark: Equatable, Sendable { case none, page, rows }
+
+    static func betaMark(among shown: some Collection<IntelligenceFeature>) -> BetaMark {
+        let beta = shown.filter { $0.maturity == .beta }.count
+        return beta == 0 ? .none : beta == shown.count ? .page : .rows
+    }
+
+    /// What "Beta" means here, in one line.
+    static let betaMeaning = "Runs on this Mac. It can be wrong: the original is always one click away."
+
     /// The features that exist in this build. A feature not listed has no switch, no interface
     /// and no invitation; each phase of docs/on-device-ai.md adds its own here.
     static let built: Set<IntelligenceFeature> = [.messageSummary, .detectedMentions]
@@ -50,6 +68,53 @@ enum IntelligenceFeature: String, CaseIterable, Identifiable, Sendable {
     /// Built, or shown for a capture (`DEVER_SNAPSHOT_INTELLIGENCE`).
     static var shipped: Set<IntelligenceFeature> {
         IntelligenceStatus.snapshotOverride == nil ? built : Set(allCases)
+    }
+}
+
+/// What is announced and not built: a second model, downloaded to the Mac, for the jobs Apple's
+/// built-in one cannot do (docs/local-model-benchmark.md). Nothing here runs a model; it decides
+/// where the announcement shows.
+enum LocalModelOutlook {
+    /// The memory the benchmark's recommendation asks for.
+    static let memoryFloor: UInt64 = 16 * 1_073_741_824
+
+    static var appleSilicon: Bool {
+        #if arch(arm64)
+        true
+        #else
+        false
+        #endif
+    }
+
+    /// The announcement is made only on a Mac the recommendation covers: Apple silicon with 16 GB
+    /// or more. Elsewhere it would promise what may never reach that Mac.
+    static func announced(memory: UInt64 = ProcessInfo.processInfo.physicalMemory,
+                          appleSilicon: Bool = LocalModelOutlook.appleSilicon) -> Bool {
+        appleSilicon && memory >= memoryFloor
+    }
+
+    /// What it will bring, in the user's terms; the order of the picture in Settings.
+    enum Promise: String, CaseIterable, Identifiable, Sendable {
+        case channel = "A busy channel, caught up"
+        case issue = "A long issue, summed up"
+        case pipeline = "A failed pipeline, explained"
+        var id: String { rawValue }
+    }
+
+    /// The benefit, never the model's size: "larger" reads as "heavier on my Mac".
+    static let title = "Catch up without reading it all"
+    static let terms = ["Runs entirely on this Mac", "Nothing leaves it"]
+
+    /// Why a second model, in one line. `today`: this Mac shortens messages with Apple's model.
+    static func reason(today: Bool) -> String {
+        (today ? "Today Dever shortens one message at a time. " : "")
+            + "A second model, an optional download, will take on a whole channel, issue or pipeline."
+    }
+
+    /// Settings › Intelligence exists when there is something to show on it: a built feature on a
+    /// Mac that can run Apple's model (now or after a fix in System Settings), or the announcement.
+    static func settingsPage(availability: IntelligenceAvailability, anyFeature: Bool, announced: Bool) -> Bool {
+        (availability != .unsupported && anyFeature) || announced
     }
 }
 
