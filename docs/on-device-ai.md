@@ -55,6 +55,11 @@ Consequences for the design, true whatever the measurements say:
   fifty comments does not. Each feature states what it does when the input does not fit (section 5).
 - One generation at a time: the framework refuses concurrent requests on a session and the chip is shared
   with the system. Requests are queued, the one on screen first.
+  Several sessions at once were measured and gain nothing: six summaries of one 330-character message
+  took 12.5 s one after the other (1.9 to 2.2 s each) and 11.0 to 12.0 s with two, three or six
+  sessions running together; the answers still came out about two seconds apart, each request simply
+  waiting longer. The system runs one generation at a time whatever the app asks. What saves time is
+  not asking: summaries are kept between launches (5.7).
 
 
 ## 3. Rules
