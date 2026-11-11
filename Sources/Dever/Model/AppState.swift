@@ -240,7 +240,9 @@ enum Naming {
 @MainActor
 final class AppState: ObservableObject {
     @Published var github: GitHubCredentials? { didSet { saveCredentials(); expired.remove(.github); GitHubStore.shared.reset() } }
-    @Published var slack: SlackCredentials? { didSet { saveCredentials(); expired.remove(.slack) } }
+    @Published var slack: SlackCredentials? {
+        didSet { saveCredentials(); expired.remove(.slack); if slack?.teamID != oldValue?.teamID { SlackStore.shared.reset() } }
+    }
     @Published var linear: LinearCredentials? { didSet { saveCredentials(); expired.remove(.linear) } }
     @Published var projects: [Project] = [] { didSet { saveProjects() } }
     /// How the team keeps its code; `perProject` is what Dever did before it was asked.

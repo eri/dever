@@ -381,7 +381,7 @@ Safest and most felt first. Each phase ships on its own and leaves the app bette
 | 2 | **Done** | `GitHubClient.repository / mergedPulls / graphql`, ETags in `GitHubClient.send` |
 | 3, step 1: GitHub | **Done** | `Model/ResourceCache.swift` (the shared helper), `Model/GitHubStore.swift`; the Overview (`RepoCache`) and the project page (`derivePulls`, `loadGitHub`) read it |
 | 3, step 2: the Overview row derived from the stores | **Done** | `Model/OverviewRow.swift` (pure functions), `OverviewStore.rederive`, `IssueStore.load(maxAge:)` and `facts` |
-| 3, step 3: Slack | Not started | |
+| 3, step 3: Slack | **Done** | `Model/SlackStore.swift` (messages, cursor, opened threads per channel); `ProjectDetailView` keeps only view state |
 | 4 to 6 | Not started | |
 
 After step 1 of phase 3 a repository is read once for the Overview and every project page that follows
@@ -395,6 +395,12 @@ target date, a quarter of an hour apart. A row's Linear and GitHub parts are wor
 functions during a cycle and between cycles: moving or taking an issue in Delivery, or a project page
 reading its repository again, changes the row at once, without a request (F6 for Linear writes, the 250
 limit of F8). Notifications are still sent from the cycle only.
+
+After step 3 a project's conversation is held by channel for the session: coming back to a project shows
+its messages, names and read position at once (F4), a reply reads its thread again and updates the
+parent's count, a reaction changes its one message, and neither reads the channel again (F8). An opened
+thread shows the replies it had while they are read again. Still separate: the Overview's own Slack read
+(this week's messages, unread and mentions), which does not go through the store yet.
 
 Measured after phase 2 on the same repository, with the app's own client code
 (`DEVER_TRACE_REQUESTS=1`): one repository costs **3 requests, 112 KB, 5.4 s** (open pull requests with

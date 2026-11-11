@@ -377,6 +377,8 @@ struct SlackMessageActions {
     var reply: (SlackMessage, SlackDraft) async throws -> Void = { _, _ in }
     var react: (SlackMessage, String, Bool) async throws -> Void = { _, _, _ in }
     var replies: (SlackMessage) async throws -> [SlackMessage] = { _ in [] }
+    /// The replies already held for a thread, shown while they are read again.
+    var cachedReplies: (SlackMessage) -> [SlackMessage]? = { _ in nil }
 }
 
 /// The channel's latest messages read like Slack: oldest at the top, newest at the bottom,
@@ -1235,7 +1237,7 @@ private struct ThreadPane: View {
         .frame(maxHeight: .infinity, alignment: .top)
         .background(Soot.ground, in: RoundedRectangle(cornerRadius: 12))
         .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Soot.line))
-        .task(id: parent.ts) { replies = nil; seenReplies = 0; await load() }
+        .task(id: parent.ts) { replies = actions.cachedReplies(parent); seenReplies = 0; await load() }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Thread")
     }

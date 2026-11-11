@@ -9,10 +9,8 @@ struct ProjectDetailView: View {
 
     @ObservedObject private var issueStore = IssueStore.shared
     @ObservedObject private var github = GitHubStore.shared
-    @State private var messages: [SlackMessage] = []
-    @State private var users: [String: SlackUser] = [:]
+    @ObservedObject private var slackStore = SlackStore.shared
     @State private var shownMessages = 8
-    @State private var hasEarlier = false
     @State private var loadingEarlier = false
     @State private var slackExpanded = false
     /// The room is built once, after the panel's first growth, then kept (see `toggleSlackWide`).
@@ -21,12 +19,7 @@ struct ProjectDetailView: View {
     @State private var slackFocus: String?
     /// Slack's read cursor for the channel (nil until known) and the newest message that has
     /// been on screen in the room: one timestamp each, nothing else is remembered.
-    @State private var lastRead: String?
-    @State private var seenUpTo: String?
     @State private var markTask: Task<Void, Never>?
-    /// Names of channels linked from the messages, for "Estelle in #other-channel".
-    @State private var linkedChannels: [String: String] = [:]
-    @State private var customEmoji: [String: URL] = [:]
     @State private var previewFile: SlackFile?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// The project's pull requests, worked out from `GitHubStore` each time it or the issues
@@ -76,6 +69,23 @@ struct ProjectDetailView: View {
         "\(app.slack != nil)-\(app.linear != nil)-\(app.github != nil)"
             + "-\(project.slack?.id ?? "")-\(project.linear?.id ?? "")-\(repos.joined(separator: ","))"
     }
+
+    // The conversation lives in `SlackStore`, by channel: the page keeps only what is about
+    // the page (how many messages are shown, the open room, the focus).
+    private var channel: SlackStore.Channel? { project.slack.flatMap { slackStore.channels[$0.id] } }
+    /// Newest first.
+    private var messages: [SlackMessage] { channel?.messages ?? [] }
+    private var hasEarlier: Bool { channel?.hasEarlier ?? false }
+    /// Slack's read cursor for the channel (nil until known) and the newest message that has
+    /// been on screen in the room.
+    private var lastRead: String? { channel?.lastRead }
+    private var seenUpTo: String? { channel?.seenUpTo }
+    private var users: [String: SlackUser] { slackStore.users }
+    private var customEmoji: [String: URL] { slackStore.customEmoji }
+    /// Names of channels linked from the messages, for "Estelle in #other-channel".
+    private var linkedChannels: [String: String] { slackStore.channelNames }
+    /// The Slack panel has something to show: the page loaded, or the store holds the channel.
+    private var slackLoaded: Bool { loaded || channel?.fetchedAt != nil }
 
     private var issues: [LinearIssue] { project.linear.map { issueStore.issues(project: $0.id) } ?? [] }
 
@@ -145,7 +155,10 @@ struct ProjectDetailView: View {
         .navigationTitle(project.name)
         .windowTitleHidden()
         // What the stores already hold shows at once: no skeleton for a project seen before.
-        .onAppear { if derivePulls() { lastLoaded[.github] = githubReadAt } }
+        .onAppear {
+            if derivePulls() { lastLoaded[.github] = githubReadAt }
+            if let at = channel?.fetchedAt { lastLoaded[.slack] = at }
+        }
         // The repository was read again, here or by the Overview's cycle: the page follows.
         .onChange(of: github.revision) { _, _ in
             guard derivePulls(), let at = githubReadAt else { return }
@@ -165,8 +178,8 @@ struct ProjectDetailView: View {
         .sheet(isPresented: $flow.githubSheet) { GitHubLoginSheet() }
         // Another channel: the messages and the read cursor of the previous one do not carry over.
         .onChange(of: project.slack?.id) { _, _ in
-            messages = []; lastRead = nil; seenUpTo = nil; hasEarlier = false; shownMessages = 8
-            lastLoaded[.slack] = nil
+            shownMessages = 8
+            lastLoaded[.slack] = channel?.fetchedAt
         }
         .onChange(of: connectionKey) { _, _ in Task { await load() } }
         .onReceive(NotificationCenter.default.publisher(for: .toggleSlackWide)) { _ in toggleSlackWide() }
@@ -519,7 +532,7 @@ struct ProjectDetailView: View {
                     Rectangle().fill(Soot.line).frame(width: 1, height: 22).transition(.opacity)
                 }
             }, accessory: { EmptyView() }, trailing: {
-                if project.slack != nil, !slackExpanded, loaded, lastRead != nil, !railPlan.caughtUp, railPlan.unread > 0 {
+                if project.slack != nil, !slackExpanded, slackLoaded, lastRead != nil, !railPlan.caughtUp, railPlan.unread > 0 {
                     Button("Mark as read") { markAllRead() }
                         .buttonStyle(TertiaryButton(tint: .muted, font: .system(size: 12, weight: .semibold)))
                         .help("Mark the whole channel as read, in Slack too")
@@ -549,7 +562,7 @@ struct ProjectDetailView: View {
                 }
             } else if let state = states[.slack] {
                 failure(.slack, state)
-            } else if !loaded {
+            } else if !slackLoaded {
                 VStack(alignment: .leading, spacing: 20) {
                     ForEach(0..<3, id: \.self) { i in
                         VStack(alignment: .leading, spacing: 6) {
@@ -738,48 +751,21 @@ struct ProjectDetailView: View {
     private func loadSlack() async {
         guard let id = project.slack?.id, states[.slack] != .notConnected else { return }
         do {
-            let page = try await app.withSlack { try await $0.historyPage(id, limit: 20) }
-            merge(page.messages)
+            try await slackStore.load(id, app: app)
             succeeded(.slack)
-            if messages.count <= 20 { hasEarlier = page.hasMore }
-            let linked = Set(messages.flatMap { $0.linkedChannelIDs }).subtracting([id])
-            if !linked.isSubset(of: Set(linkedChannels.keys)) {
-                linkedChannels = (try? await app.withSlack { await SlackDirectory.shared.channelNames(linked, via: $0) }) ?? linkedChannels
-            }
-            // Whatever was marked from here since keeps precedence over a stale cursor.
-            if let cursor = try? await app.withSlack({ try await $0.lastRead(id) }) {
-                lastRead = seenUpTo.map { SlackTS.later($0, cursor) } ?? cursor
-            }
-            if let team = app.slack?.teamID {
-                // One users.list per quarter hour across the app, not one per visit.
-                users = try await app.withSlack { try await SlackDirectory.shared.users(team: team, via: $0) }
-            }
             let authors = Set(messages.prefix(shownMessages).compactMap(\.user)).compactMap { users[$0] }
             Task.detached(priority: .utility) { await SlackMediaCache.shared.prefetchAvatars(authors) }
-            if customEmoji.isEmpty, let team = app.slack?.teamID {
-                customEmoji = (try? await app.withSlack { await SlackDirectory.shared.customEmoji(team: team, via: $0) }) ?? [:]
-            }
         } catch { failed(.slack, error) }
-    }
-
-    /// New messages replace the ones with the same `ts`; the rest stays as loaded, so a
-    /// refresh never throws away earlier pages or re-renders unchanged rows.
-    private func merge(_ incoming: [SlackMessage]) {
-        var byTS = Dictionary(messages.map { ($0.ts, $0) }, uniquingKeysWith: { _, new in new })
-        for m in incoming where m.subtype != "channel_join" && m.subtype != "channel_leave" { byTS[m.ts] = m }
-        messages = byTS.values.sorted { $0.ts > $1.ts }
     }
 
     /// Reveals already loaded messages first; fetches an earlier page only when those run out.
     private func showEarlier() async {
         if messages.count > shownMessages { shownMessages += 10; return }
-        guard let id = project.slack?.id, let oldest = messages.last?.ts, !loadingEarlier else { return }
+        guard let id = project.slack?.id, !messages.isEmpty, !loadingEarlier else { return }
         loadingEarlier = true
         defer { loadingEarlier = false }
         do {
-            let page = try await app.withSlack { try await $0.historyPage(id, before: oldest, limit: 20) }
-            merge(page.messages)
-            hasEarlier = page.hasMore
+            try await slackStore.loadEarlier(id, app: app)
             shownMessages += 10
         } catch { app.report(error) }
     }
@@ -819,9 +805,7 @@ struct ProjectDetailView: View {
     /// A message stayed on screen in the room: remember the newest such, and after three quiet
     /// seconds move Slack's cursor there. Closing the room sends it at once.
     private func seen(_ ts: String) {
-        let next = SlackTS.later(seenUpTo, ts)
-        guard next != seenUpTo else { return }
-        seenUpTo = next
+        guard let id = project.slack?.id, slackStore.seen(id, ts) else { return }
         markTask?.cancel()
         markTask = Task { @MainActor in
             try? await Task.sleep(nanoseconds: 3_000_000_000)
@@ -831,9 +815,8 @@ struct ProjectDetailView: View {
 
     /// Moves the read cursor to the newest seen message, if it is past the current one.
     private func pushCursor() async {
-        guard let id = project.slack?.id, let seen = seenUpTo,
-              lastRead.map({ !SlackTS.isAtOrBefore(seen, $0) }) ?? true else { return }
-        Motion.run(Motion.ui, fade: true) { lastRead = seen }
+        guard let id = project.slack?.id, let seen = channel?.cursorToPush else { return }
+        Motion.run(Motion.ui, fade: true) { slackStore.setLastRead(id, seen) }
         do {
             try await app.withSlack { try await $0.markRead(id, ts: seen) }
             // The Overview's "for you" follows at once, without a refresh.
@@ -843,10 +826,8 @@ struct ProjectDetailView: View {
 
     /// "Mark as read" in the rail: the cursor goes to the latest message.
     private func markAllRead() {
-        // Threads with fresh replies are unread too: the cursor must pass their newest reply.
-        guard var target = messages.first?.ts else { return }
-        for m in messages { if let last = m.latest_reply { target = SlackTS.later(target, last) } }
-        seenUpTo = SlackTS.later(seenUpTo, target)
+        guard let id = project.slack?.id, let target = channel?.readAllTarget else { return }
+        _ = slackStore.seen(id, target)
         Task { await pushCursor() }
     }
 
@@ -874,21 +855,26 @@ struct ProjectDetailView: View {
         }
     }
 
+    /// A reply and a reaction change what they touch: the thread is read again by its pane
+    /// (its parent's count follows), the reaction is applied to its message. The channel is
+    /// not read again for either.
     private var slackActions: SlackMessageActions {
         SlackMessageActions(
             reply: { m, draft in
                 guard let id = project.slack?.id else { return }
                 try await app.withSlack { try await $0.reply(id, threadTS: m.ts, text: draft.text, blocks: draft.blocks) }
-                await loadSlack()
             },
             react: { m, name, on in
                 guard let id = project.slack?.id else { return }
                 try await app.withSlack { try await $0.react(id, ts: m.ts, name: name, on: on) }
-                await loadSlack()
+                slackStore.react(id, ts: m.ts, name: name, on: on, user: app.slack?.userID)
             },
             replies: { m in
                 guard let id = project.slack?.id else { return [] }
-                return try await app.withSlack { try await $0.replies(id, threadTS: m.ts) }
+                return try await slackStore.thread(id, parent: m.ts, app: app)
+            },
+            cachedReplies: { m in
+                project.slack.flatMap { slackStore.cachedThread($0.id, parent: m.ts) }
             })
     }
 

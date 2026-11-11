@@ -354,10 +354,11 @@ struct SlackClient {
         _ = try await call("conversations.mark", ["channel": channelID, "ts": ts])
     }
 
-    /// A thread's replies, oldest first, without the parent message.
-    func replies(_ channelID: String, threadTS: String, limit: Int = 100) async throws -> [SlackMessage] {
+    /// A thread, oldest first: its parent message (with its reply count and latest reply as
+    /// they are now), then its replies.
+    func thread(_ channelID: String, threadTS: String, limit: Int = 100) async throws -> [SlackMessage] {
         let res = try await call("conversations.replies", ["channel": channelID, "ts": threadTS, "limit": "\(limit)"])
-        return try decode(res["messages"], as: [SlackMessage].self).filter { $0.ts != threadTS }
+        return try decode(res["messages"], as: [SlackMessage].self)
     }
 
     /// The workspace's custom emoji: name → image URL, aliases resolved.
