@@ -52,7 +52,7 @@ struct MessageSummaryAnswer: Equatable, Sendable {
 @available(macOS 26.0, *)
 @Generable
 private struct MessageSummaryShape {
-    @Guide(description: "The point of the message in one full sentence of at most 20 words, understandable by someone who has not read the channel: who or what it is about, and what is asked, wrong, decided or announced")
+    @Guide(description: "The point of the message in one short full sentence of at most 14 words, understandable by someone who has not read the channel: who or what it is about, and what is asked, wrong, decided or announced")
     var summary: String
     @Guide(description: "Request: the author asks someone to do, send, check, fix or decide something. Question: the author asks for an answer or an opinion. Problem: a bug, a failure, a delay or a risk is reported and no one in particular is asked. Update: only when nothing is asked and no bug, failure, delay or risk is reported, such as progress, news, a decision, a welcome",
            .anyOf(["Request", "Question", "Problem", "Update"]))

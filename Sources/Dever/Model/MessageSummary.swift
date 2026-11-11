@@ -14,8 +14,13 @@ enum MessageSummary {
     static let minimumLength = 240
     /// Longest summary worth showing, as a share of the original: past it, the original reads as fast.
     static let longestShare = 0.7
-    /// And in characters: a summary is two lines of the rail, three at most, whatever the message.
-    static let longest = 180
+    /// And in characters: a summary is two lines of the rail, and most of one line of the
+    /// Overview, whatever the message.
+    static let longest = 120
+
+    /// Raised when the instructions or the limits change: summaries kept from before are
+    /// another version, and are written again.
+    static let revision = 2
 
     struct Input: Equatable, Sendable {
         let author: String
@@ -26,7 +31,7 @@ enum MessageSummary {
         /// kept on disk is found again), which `hashValue` is not.
         var version: String {
             let digest = SHA256.hash(data: Data(text.utf8)).prefix(8).map { String(format: "%02x", $0) }.joined()
-            return "\(language)-\(text.count)-\(digest)"
+            return "\(revision)-\(language)-\(text.count)-\(digest)"
         }
     }
 
@@ -87,7 +92,7 @@ enum MessageSummary {
     static func instructions(_ input: Input) -> String {
         """
         You shorten one message from a team chat for someone who has not read the channel.
-        Give its point in one full sentence of at most 20 words, in \(input.language) whatever language the message is in, then say what kind of message it is. The sentence must stand on its own: name who or what it is about (the feature, the ticket, the person), then what is asked, wrong, decided or announced.
+        Give its point in one short full sentence of at most 14 words, in \(input.language) whatever language the message is in, then say what kind of message it is. The sentence must stand on its own: name who or what it is about (the feature, the ticket, the person), then what is asked, wrong, decided or announced. Use as few words as the point needs.
         Do not list what the message lists: give the outcome. Keep names, numbers and ticket identifiers exactly as written. Use only what the message says, and do not make a statement stronger than the message does. No greeting, no opinion, no "this message", no formatting marks.
         The kind says what the message expects of its readers. Request: someone is asked to do, send, check, fix or decide something. Question: an answer or an opinion is asked for. Problem: a bug, a failure, a delay or a risk is reported, without asking anyone in particular. Update: the rest, such as progress, news, a decision, a welcome. A reported bug, failure, delay or risk is a Problem, never an Update.
         The sentence says what the message says, in its own terms: name the bug, the delay or the request itself, never a general phrase about it.

@@ -279,7 +279,7 @@ generated sentence, and the link to the real log.
 - **Never over what is being read:** a message opened with "Show more" before its summary was wanted
   stays open, with "Show summary" under it. An edited message keeps its old sentence under
   "Summarising" until the new one lands.
-- **What:** the kind of message at the head of the block and one sentence of at most 20 words that
+- **What:** the kind of message at the head of the block and one short sentence of at most 14 words that
   stands on its own: who or what it is about, then what is asked, wrong, decided or announced. Names,
   numbers and ticket identifiers kept. Guided generation; the kind is chosen after the sentence.
 - **Asked of the user:** a lime arrow before the kind when the message is a Request or a Question and
@@ -289,7 +289,7 @@ generated sentence, and the link to the real log.
   check, fix or decide), **Question** (an answer or an opinion is asked for), **Problem** (something is
   wrong, slow, failing, late or to fix, and no one in particular is asked), **Update** (the rest:
   progress, news, a decision, a welcome). The first three show in ink, Update muted. "Decision", "Warning"
-  and "Info" were tried first: the model filed almost everything under Decision, and Info said nothing. Never more than 180 characters: whole sentences are kept
+  and "Info" were tried first: the model filed almost everything under Decision, and Info said nothing. Never more than 120 characters (two lines of the rail, most of a line of the Overview; 20 words and 180 characters at first, which the user found too long): whole sentences are kept
   as far as they fit. "Show original" opens the message in full, "Show summary" goes back: one movement
   for the row, its link previews and the rows under it.
 - **Folded with it:** the link previews of the message, which come back with the original. Pictures,

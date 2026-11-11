@@ -335,7 +335,7 @@ final class MessageSummaryTests: XCTestCase {
         let b = try XCTUnwrap(MessageSummary.input(SlackMessage(ts: "3", user: "U1", text: long + " Corrigé."), users: users, languageCode: { _ in "fr" }))
         XCTAssertNotEqual(a.version, b.version)
         // The same at every launch, so a summary kept on disk is found again.
-        XCTAssertEqual(MessageSummary.Input(author: "A", text: "abc", language: "French").version, "French-3-ba7816bf8f01cfea")
+        XCTAssertEqual(MessageSummary.Input(author: "A", text: "abc", language: "French").version, "\(MessageSummary.revision)-French-3-ba7816bf8f01cfea")
     }
 
     private func shown(_ summary: String, kind: String = "Update", original: String) -> GeneratedText? {
@@ -343,7 +343,8 @@ final class MessageSummaryTests: XCTestCase {
     }
 
     func testASummaryNearlyAsLongAsTheMessageIsNotShown() {
-        XCTAssertNil(shown(String(long.prefix(230)), original: String(long.prefix(241))))
+        let sentence = "Le rapport de QA couvre tous les critères d'acceptation prévus pour cette version du produit et rien ne bloque."
+        XCTAssertNil(shown(sentence, original: sentence + " Voilà, c'est tout pour aujourd'hui."))
         XCTAssertNil(shown("  ", original: long))
         XCTAssertEqual(shown("le *rapport* couvre\ntous les critères.", original: long)?.sentences.map(\.text),
                        ["Le rapport couvre tous les critères."])
@@ -354,7 +355,9 @@ final class MessageSummaryTests: XCTestCase {
         let first = "Le rapport de QA est terminé et vingt et un critères sur vingt-quatre passent sur la preview."
         let second = "SUP-931 est à corriger avant la mise en production, les deux autres peuvent attendre."
         let third = "Le détail complet des cas de test est dans le canvas du canal."
-        XCTAssertEqual(shown("\(first) \(second) \(third)", original: original)?.sentences.map(\.text), ["\(first) \(second)"])
+        XCTAssertEqual(shown("\(first) \(second) \(third)", original: original)?.sentences.map(\.text), [first])
+        XCTAssertEqual(shown("Le rapport est prêt. SUP-931 reste à corriger. Le détail est dans le canvas.", original: original)?.sentences.map(\.text),
+                       ["Le rapport est prêt. SUP-931 reste à corriger. Le détail est dans le canvas."])
         XCTAssertNil(shown(String(repeating: "mot ", count: 80), original: original), "one endless sentence")
     }
 
