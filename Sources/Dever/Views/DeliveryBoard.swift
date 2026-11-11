@@ -42,7 +42,6 @@ struct DeliveryBoard: View {
     @State private var showsOthers = false
     @State private var showsShipped = false
     @ObservedObject private var release = ReleaseStore.shared
-    @ObservedObject private var previews = PreviewStore.shared
     @EnvironmentObject private var appState: AppState
     @State private var showsAllShipped = false
     @ObservedObject private var intelligence = IntelligenceStatus.shared
@@ -128,12 +127,14 @@ struct DeliveryBoard: View {
             }
             .accessibilityElement(children: .combine)
         } else {
-            HStack(alignment: .lastTextBaseline, spacing: 8) {
-                // The figures roll to their new values when a refresh or an action lands.
-                Text("\(plan.left)").font(.system(size: 34, weight: .semibold)).tracking(-1).foregroundStyle(Soot.ink)
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                // The figures roll to their new values when a refresh or an action lands. 26pt, no
+                // negative tracking: a single digit sits on the same baseline as the words beside it.
+                Text("\(plan.left)").font(.system(size: 26, weight: .semibold)).foregroundStyle(Soot.ink)
                     .monospacedDigit().rollingNumber(plan.left)
                 Text("left").font(.system(size: 14)).foregroundStyle(Soot.muted)
-                if plan.yours > 0 {
+                // Only when the open issues are shared: alone on the project it would repeat "left".
+                if plan.showsYours {
                     HStack(spacing: 5) {
                         Image(systemName: "person.fill").font(.system(size: 11, weight: .semibold)).accessibilityHidden(true)
                         Text("\(plan.yours) yours").monospacedDigit().rollingNumber(plan.yours)
@@ -146,7 +147,7 @@ struct DeliveryBoard: View {
                     .monospacedDigit().rollingNumber(plan.shipped.count * 10_000 + plan.total)
             }
             .accessibilityElement(children: .ignore)
-            .accessibilityLabel("\(plan.left) left\(plan.yours > 0 ? ", \(plan.yours) yours" : ""). \(plan.shipped.count) of \(plan.total) shipped")
+            .accessibilityLabel("\(plan.left) left\(plan.showsYours ? ", \(plan.yours) yours" : ""). \(plan.shipped.count) of \(plan.total) shipped")
         }
     }
 
@@ -633,26 +634,17 @@ struct DeliveryBoard: View {
         plan.shipped.filter { environment($0)?.0 == .staging }
     }
 
-    /// One quiet line under the bar: what is on staging to test, and the preview when it is live.
+    /// One quiet line under the bar: what is on staging to test. The preview is not repeated
+    /// here: its own panel sits right above.
     @ViewBuilder
     private var whereLine: some View {
         let staging = onStaging
-        let preview = previews.state(for: project)?.status
-        let live = preview?.phase == .live ? preview : nil
-        if !staging.isEmpty || live != nil {
+        if !staging.isEmpty {
             HStack(spacing: 14) {
-                if !staging.isEmpty {
-                    Label { Text("\(staging.count) on staging").monospacedDigit() } icon: {
-                        Image(systemName: "testtube.2").foregroundStyle(Theme.chart2)
-                    }
-                    .help("Merged, waiting for the next release: " + staging.prefix(8).map(\.issue.identifier).joined(separator: ", "))
+                Label { Text("\(staging.count) on staging").monospacedDigit() } icon: {
+                    Image(systemName: "testtube.2").foregroundStyle(Theme.chart2)
                 }
-                if let live {
-                    Label { Text(verbatim: "#\(live.pull.number) in preview") } icon: {
-                        Image(systemName: "globe").foregroundStyle(Theme.positive)
-                    }
-                    .help("The preview of pull request #\(live.pull.number) is live")
-                }
+                .help("Merged, waiting for the next release: " + staging.prefix(8).map(\.issue.identifier).joined(separator: ", "))
             }
             .font(.system(size: 12))
             .foregroundStyle(Soot.muted)

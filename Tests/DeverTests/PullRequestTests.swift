@@ -135,4 +135,29 @@ final class GitHubStoreTests: XCTestCase {
         store.reset()                       // nothing held: nothing to announce
         XCTAssertEqual(store.revision, before)
     }
+
+    // MARK: Delivery plan: "N yours"
+
+    private func planIssue(_ n: Int, assignee: String?) -> LinearIssue {
+        LinearIssue(id: "id-\(n)", identifier: "APP-\(n)", title: "Issue \(n)", url: "https://linear.app/acme/issue/APP-\(n)",
+                    updatedAt: "2026-03-01T00:00:00.000Z", state: .init(id: "s", name: "Todo", type: "unstarted", color: nil),
+                    assignee: assignee.map { .init(id: $0, name: $0) })
+    }
+
+    private func plan(_ assignees: [String?]) -> DeliveryPlan {
+        DeliveryPlan(issues: assignees.enumerated().map { planIssue($0.offset, assignee: $0.element) },
+                     open: [:], merged: [:], blockers: [:], viewer: .init(linearID: "me", linearName: "Me", githubLogin: "me"))
+    }
+
+    func testYoursShowsOnlyWhenTheOpenIssuesAreShared() {
+        // Every open issue is the viewer's: the count would repeat "left".
+        XCTAssertFalse(plan(["me", "me"]).showsYours)
+        // None is the viewer's: nothing to say.
+        XCTAssertFalse(plan(["ada", nil]).showsYours)
+        // Some are, some are not: "1 yours" of 3 left.
+        let shared = plan(["me", "ada", nil])
+        XCTAssertTrue(shared.showsYours)
+        XCTAssertEqual(shared.yours, 1)
+        XCTAssertEqual(shared.left, 3)
+    }
 }

@@ -114,6 +114,9 @@ struct DeliveryPlan {
     private(set) var lastMerged: Date?
 
     var left: Int { total - shipped.count }
+    /// Whether "N yours" says something: some of the open issues are the viewer's and some are
+    /// not. Alone on a project, or with nothing assigned, the count would only repeat `left`.
+    var showsYours: Bool { yours > 0 && yours < left }
     var inQA: Int { shipped.filter(\.inQA).count }
     /// Open issues with work under way, for the bar's middle segment.
     var moving: Int { ([start].compactMap { $0 } + next + others).filter { $0.situation != .todo && $0.situation != .blocked }.count }
