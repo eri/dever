@@ -68,7 +68,7 @@ Connection states, without touching the Keychain: `DEVER_SNAPSHOT_DISCONNECTED=s
 tools had never been connected, `DEVER_SNAPSHOT_UNAUTHORIZED=linear` as if the service rejected the token,
 `DEVER_SNAPSHOT_FAILING=github,slack=offline` as if calls failed (a 503, or no network), and
 `DEVER_SNAPSHOT_CONNECTING=linear` shows that tool mid-connection on the project page.
-Preview panel states from sample data (PR #4714, no network): `DEVER_SNAPSHOT_PREVIEW=live|deploying|failed|deleted|notdeployed|none`
+Preview panel states from sample data (PR #4714, no network): `DEVER_SNAPSHOT_PREVIEW=live|behind|conflict|deploying|failed|deleted|notdeployed|none`
 (`none`: no pull request linked); add `DEVER_SNAPSHOT_PREVIEW_OPTIONS=1` for the deploy options row, and
 `DEVER_SNAPSHOT_SHEETS=1 DEVER_SNAPSHOT_SCREENS=0 DEVER_SNAPSHOT_STEP=preview` for the editor's step.
 Editor pages: `DEVER_SNAPSHOT_STEP=name|slack|linear|github|preview|ready` opens that step's question, `DEVER_SNAPSHOT_PHASE=detail`

@@ -55,6 +55,9 @@ struct GitHubRun: Codable, Identifiable {
     var event: String?
     var updated_at: String?
     var actor: GitHubPull.User?
+    /// The commit the run was started for: the pull request's head for a `pull_request` run,
+    /// the default branch's for an `issue_comment` one (which says nothing of the pull request).
+    var head_sha: String?
 }
 
 /// A check of a pull request's head commit that failed, as GitHub names it.
@@ -88,6 +91,7 @@ struct GitHubFailedChecks: Equatable, Sendable {
 /// (which page of comments is the last one).
 struct GitHubPullDetail: Codable {
     struct Head: Codable { var ref: String; var sha: String }
+    struct Base: Codable { var ref: String }
     struct Label: Codable { var name: String }
     var number: Int
     var title: String
@@ -96,7 +100,12 @@ struct GitHubPullDetail: Codable {
     var draft: Bool?
     var user: GitHubPull.User
     var head: Head
+    var base: Base?
     var labels: [Label]
+    /// False when the pull request conflicts with its base; nil while GitHub works it out.
+    var mergeable: Bool?
+    /// GitHub's word for it: "dirty" is a conflict ("clean", "blocked", "behind", "unknown"…).
+    var mergeable_state: String?
     var comments: Int
     var merged_at: String?
     var closed_at: String?
@@ -462,6 +471,14 @@ struct GitHubClient {
     func comment(_ repo: String, number: Int, body: String) async throws -> GitHubComment {
         try JSONDecoder().decode(GitHubComment.self,
                                  from: try await send("POST", "/repos/\(repo)/issues/\(number)/comments", json: ["body": body]))
+    }
+
+    /// When a commit was made (its committer date): the git object alone, under a kilobyte,
+    /// and it never changes, so one read per commit is enough.
+    func commitDate(_ repo: String, sha: String) async throws -> Date? {
+        struct Who: Decodable { var date: String }
+        struct R: Decodable { var committer: Who }
+        return ISO8601DateFormatter().date(from: try await get("/repos/\(repo)/git/commits/\(sha)", as: R.self).committer.date)
     }
 
     /// The latest runs of one workflow file, newest first; `branch` narrows to a head branch.

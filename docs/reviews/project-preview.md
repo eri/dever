@@ -159,3 +159,47 @@ The Overview follows the same rule (`waitsForIssues`): its GitHub column reads "
 the repository's pull requests while the project's issues cannot be read.
 
 Captures: `…/scratchpad/shots9/{live,deploying,none,disc2}/project-{dark,light}.png`. Verdict: Approve.
+
+## Revision 6 (incident: a preview stopped redeploying and was shown as Live)
+
+A pull request in conflict with its base gets no `pull_request` workflow from GitHub, so the update workflow never
+ran when its head moved. The hosts kept answering on a commit several days old and the panel said "Live".
+
+| Severity | Domain | Location | Before | After | Why |
+| --- | --- | --- | --- | --- | --- |
+| HIGH | Data | Phase, live | "Live" as long as the hosts answer | "Live, behind the pull request" with a warning triangle and "deployed 6 days ago" when the head is not what was deployed; "Live, won't redeploy" when the pull request conflicts but the preview is still on its head (`PreviewStatus.tracking`, `conflict`, `drift`) | Rule 7: a deploy state is never drawn as current when it is not |
+| HIGH | Writing | Under the line | Nothing | One sentence in the warning tone: the conflict with its base and that GitHub runs no workflow until it is resolved, and the commit served against the pull request's head when a run tells it. "Resolve conflicts ↗" (the pull request's conflicts page) when conflicting, "Redeploy" otherwise | The reason and the way out, where the state is read |
+| MEDIUM | Data | Overview, Status | "On track" | "Preview behind" / "Preview won't redeploy" (warning triangle, the sentence as tooltip), after CI failing and Preview failed, before the due date | What is tested on the preview is not the pull request: worth the row's one status |
+
+How "behind" is known (`PreviewStore.tracking`), from what was already read:
+
+1. an update run (`pull_request`) that succeeded for the head: following;
+2. the last update that succeeded is for another commit and no `/preview` was posted since: behind, and that
+   commit is the one served;
+3. otherwise the head commit's date against the last `/preview`: made after it, it was not in that deploy;
+4. nothing known: not called behind.
+
+The preview exposes its commit nowhere (no header on the probe, no version endpoint, nothing in the workflows'
+result comments), and an `issue_comment` run carries the default branch's commit, not the pull request's: the
+served commit is the last successful update run's, and unknown after a `/preview`. Commits behind are not
+counted (a compare request per poll); the age of the deploy is shown instead.
+
+Data contract:
+
+- Reads: `preview(project)` in `PreviewStore`, same entry. New fields from the same responses: `mergeable`,
+  `mergeable_state`, `base.ref`, `head.sha` of `GET pulls/{n}`; `head_sha` of the workflow runs. New: the head
+  commit's date (`GET git/commits/{sha}`), kept per commit for the app's life.
+- Writes: none new ("Redeploy" is the existing `/preview` command: optimistic phase, 30 s polling).
+- Invalidates: nothing new. "Resolve conflicts" opens GitHub: `LookAgain` marks the data dirty, the preview is
+  read again on return.
+- Budget: the preview's (60 s; 15 s while a run goes).
+- Loading: none of its own; the sentence appears and leaves with the panel's motion.
+- Failure: a failed refresh keeps the last status, drift included. While GitHub has not worked the merge out
+  (`mergeable` null), what was known for the same head stays.
+- Exits: the conflicts page (above).
+- Cost: no request more per poll. One request of under 1 kB once per new head commit, and only in case 3.
+
+Not done: a mark on the pull request rows of Delivery (needs `mergeable` in the repository's GraphQL list), a
+notification "Preview stopped following the pull request" (the notifier has no preview alert yet).
+
+Captures: `…/scratchpad/shots10/{behind,conflict}/{project,overview}-{dark,light}.png`. Verdict: Approve.

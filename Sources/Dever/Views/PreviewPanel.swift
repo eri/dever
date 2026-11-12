@@ -46,6 +46,7 @@ struct PreviewPanel: View {
                 // The flags unfold under the line (200 ms), and fold back.
                 if optionsOpen { optionsRow.transition(Motion.rise) }
                 if let note = status.note { noteRow(note, failed: status.phase == .failed) }
+                if status.drift != nil { driftRow(status).transition(Motion.rise) }
                 if let actionError { ErrorLabel(actionError).transition(Motion.rise) }
             } else {
                 header {
@@ -70,6 +71,7 @@ struct PreviewPanel: View {
             }
         }
         .motion(Motion.ui, value: optionsOpen)
+        .motion(Motion.ui, value: status?.drift)
         .motion(Motion.ui, fade: true, value: status == nil)
         .motion(Motion.ui, value: actionError)
         // The invitation hands over to the preview when a pull request is picked.
@@ -121,13 +123,15 @@ struct PreviewPanel: View {
             }
             if let s {
                 HStack(spacing: 6) {
-                    PreviewPhaseGlyph(phase: s.phase, health: s.health, size: 13)
+                    PreviewPhaseGlyph(phase: s.phase, health: s.health, drifting: s.drift != nil, size: 13)
                     Text(s.word).font(.system(size: 13, weight: .semibold)).foregroundStyle(Soot.ink)
                         .contentTransition(.opacity).motion(Motion.ui, fade: true, value: s.word)
                     if let at = s.updatedAt {
                         Text(verbatim: "·").foregroundStyle(Soot.muted).accessibilityHidden(true)
-                        Text(at.formatted(.relative(presentation: .named))).font(.system(size: 12)).foregroundStyle(Soot.muted).lineLimit(1)
-                            .help("\(s.phase.busy ? "Started" : "Last change") \(at.formatted(date: .abbreviated, time: .shortened))")
+                        // Behind: the age is the deploy's, and says so.
+                        Text((s.drift == .behind ? "deployed " : "") + at.formatted(.relative(presentation: .named)))
+                            .font(.system(size: 12)).foregroundStyle(Soot.muted).lineLimit(1)
+                            .help("\(s.phase.busy ? "Started" : s.drift != nil ? "Last deployed" : "Last change") \(at.formatted(date: .abbreviated, time: .shortened))")
                     }
                 }
                 .fixedSize()
@@ -204,6 +208,31 @@ struct PreviewPanel: View {
                 .textSelection(.enabled)
         }
         .accessibilityElement(children: .combine)
+    }
+
+    /// Hosts that answer on an old commit: why the preview stopped following, in the warning
+    /// tone (a triangle and a sentence, not the colour alone), and the way out.
+    private func driftRow(_ s: PreviewStatus) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.chart3)
+                .accessibilityHidden(true)
+            Text(s.driftReason ?? "").font(.system(size: 13)).foregroundStyle(Soot.ink)
+                .fixedSize(horizontal: false, vertical: true)
+                .textSelection(.enabled)
+            Spacer(minLength: 12)
+            if s.conflict {
+                ExternalLink("Resolve conflicts", destination: s.pull.conflictsURL)
+                    .help("Opens the pull request's conflicts on GitHub; the preview follows again once they are resolved")
+                    .fixedSize()
+            } else {
+                Button("Redeploy") { Task { await send { try await store.deploy(project, app: app, options: options) } } }
+                    .buttonStyle(SecondaryButton()).disabled(sending)
+                    .help("Posts \(options.command) on the pull request; about ten minutes")
+                    .fixedSize()
+            }
+        }
+        .accessibilityElement(children: .contain)
     }
 
     // MARK: Actions
@@ -303,11 +332,14 @@ struct PreviewPhaseGlyph: View {
     let phase: PreviewStatus.Phase
     /// What the probes found: a live preview with a host down is not drawn as live.
     var health: PreviewStatus.Health = .up
+    /// Live on an older commit, or about to be: not drawn as live either (`PreviewStatus.drift`).
+    var drifting = false
     var size: CGFloat = 14
     var body: some View {
         let (symbol, tint): (String, Color) = switch phase {
         case .live where health == .partlyDown: ("exclamationmark.triangle.fill", Theme.chart3)
         case .live where health == .down: ("xmark.circle.fill", Theme.negative)
+        case .live where drifting: ("exclamationmark.triangle.fill", Theme.chart3)
         case .live: ("checkmark.circle.fill", Theme.positive)
         case .deploying, .updating: ("clock.fill", Theme.chart2)
         case .deleting: ("clock.fill", Soot.muted)
@@ -316,7 +348,7 @@ struct PreviewPhaseGlyph: View {
         case .notDeployed: ("circle.dotted", Soot.muted)
         }
         Image(systemName: symbol).font(.system(size: size, weight: .semibold)).foregroundStyle(tint)
-            .accessibilityLabel("Preview \((phase == .live && health == .partlyDown ? "partly down" : phase == .live && health == .down ? "down" : phase.word.lowercased()))")
+            .accessibilityLabel("Preview \((phase == .live && health == .partlyDown ? "partly down" : phase == .live && health == .down ? "down" : phase == .live && drifting ? "live, not following the pull request" : phase.word.lowercased()))")
     }
 }
 

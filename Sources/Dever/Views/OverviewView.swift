@@ -803,6 +803,11 @@ private struct ProjectRow: View {
             return .blocked(symbol: "xmark.circle.fill", tint: Theme.negative, text: "Preview failed",
                             help: "The preview of pull request #\(project.previewPullNumber ?? 0) failed to deploy")
         }
+        // Hosts that answer on an old commit: what is tested there is not the pull request.
+        if let preview = previews.state(for: project)?.status, let drift = preview.drift, let reason = preview.driftReason {
+            return .blocked(symbol: "exclamationmark.triangle.fill", tint: Theme.chart3,
+                            text: drift == .behind ? "Preview behind" : "Preview won't redeploy", help: reason)
+        }
         if overdue, let t = s.linear?.targetDate {
             return .blocked(symbol: "exclamationmark.circle.fill", tint: Theme.negative, text: "Past due date",
                             help: "Due \(t.formatted(.dateTime.day().month(.wide))), issues still open")
@@ -921,9 +926,10 @@ private struct ProjectRow: View {
     @ViewBuilder private var preview: some View {
         if let status = previews.state(for: project)?.status {
             HStack(spacing: 5) {
-                PreviewPhaseGlyph(phase: status.phase, health: status.health, size: 12)
-                Text(status.word).font(.system(size: 13)).foregroundStyle(Soot.ink).lineLimit(1)
+                PreviewPhaseGlyph(phase: status.phase, health: status.health, drifting: status.drift != nil, size: 12)
+                Text(status.compactWord).font(.system(size: 13)).foregroundStyle(Soot.ink).lineLimit(1)
             }
+            .help(status.driftReason ?? "")
         } else if project.previewPullNumber != nil && !loaded {
             Skeleton(width: 56, height: 12)
         } else {

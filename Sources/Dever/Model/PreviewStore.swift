@@ -115,6 +115,21 @@ struct PreviewStatus: Equatable {
         var author: String
         var state: State
         var headRef: String
+        /// The commit the pull request is at, and the branch it merges into.
+        var headSHA = ""
+        var baseRef = ""
+
+        /// GitHub's page to resolve the pull request's conflicts.
+        var conflictsURL: URL { url.appendingPathComponent("conflicts") }
+    }
+
+    /// How the preview stands against the pull request it follows.
+    enum Tracking: Equatable {
+        /// Nothing says the preview is not on the pull request's head.
+        case following
+        /// The pull request moved on and the preview did not: `served` is the commit of the
+        /// last update that succeeded, when a run tells it.
+        case behind(served: String?)
     }
 
     struct Run: Equatable {
@@ -140,6 +155,48 @@ struct PreviewStatus: Equatable {
     var note: String?
     /// When the latest `/preview` or `/delete-preview` was posted (to find its run).
     var commandAt: Date?
+    /// When the latest `/preview` was posted: that deploy took the pull request as it was then.
+    var deployedAt: Date?
+    var tracking: Tracking = .following
+    /// The pull request conflicts with its base. GitHub starts no `pull_request` workflow for
+    /// such a pull request, so a push no longer updates the preview.
+    var conflict = false
+
+    /// What a live preview hides behind hosts that answer: it serves an older commit, or it
+    /// will at the next push.
+    enum Drift: Equatable { case behind, wontRedeploy }
+
+    var drift: Drift? {
+        guard phase == .live, pull.state == .open || pull.state == .draft else { return nil }
+        if case .behind = tracking { return .behind }
+        return conflict ? .wontRedeploy : nil
+    }
+
+    /// The commit the preview serves, shortened, when a run tells it.
+    var servedCommit: String? {
+        if case .behind(let served?) = tracking { return String(served.prefix(7)) }
+        return nil
+    }
+
+    /// Why the preview no longer follows, in one sentence; nil when it does.
+    var driftReason: String? {
+        guard let drift else { return nil }
+        let head = pull.headSHA.isEmpty ? nil : String(pull.headSHA.prefix(7))
+        let base = pull.baseRef.isEmpty ? "its base branch" : pull.baseRef
+        let served: String = switch (servedCommit, head) {
+        case (let s?, let h?): "The preview serves \(s), the pull request is at \(h)."
+        case (nil, let h?): "The pull request moved to \(h) after this deploy."
+        default: "The pull request has commits newer than this deploy."
+        }
+        switch drift {
+        case .behind where conflict:
+            return "Won't redeploy: the pull request conflicts with \(base), and GitHub runs no workflow on it until that is resolved. \(served)"
+        case .behind:
+            return "\(served) No update ran for it."
+        case .wontRedeploy:
+            return "Won't redeploy on the next push: the pull request conflicts with \(base), and GitHub runs no workflow on it until that is resolved."
+        }
+    }
 
     /// What the probes found across the hosts of a live preview.
     enum Health: Equatable { case checking, up, partlyDown, down }
@@ -151,14 +208,24 @@ struct PreviewStatus: Equatable {
         return probed.contains(false) ? .partlyDown : .up
     }
 
-    /// The phase in one word, as shown: a live preview with a host that does not answer is
-    /// not called "Live".
-    var word: String {
+    /// The phase as shown: a live preview with a host that does not answer, or one that no
+    /// longer follows its pull request, is not called "Live" alone.
+    var word: String { word(compact: false) }
+
+    /// The same in a narrow column (the Overview's).
+    var compactWord: String { word(compact: true) }
+
+    private func word(compact: Bool) -> String {
         guard phase == .live else { return phase.word }
         switch health {
         case .partlyDown: return "Partly down"
         case .down: return "Down"
-        case .checking, .up: return phase.word
+        case .checking, .up: break
+        }
+        switch drift {
+        case .behind: return compact ? "Live, behind" : "Live, behind the pull request"
+        case .wontRedeploy: return compact ? "Won't redeploy" : "Live, won't redeploy"
+        case nil: return phase.word
         }
     }
 
@@ -197,7 +264,7 @@ final class PreviewStore: ObservableObject {
 
     // MARK: Snapshots
 
-    /// `DEVER_SNAPSHOT_PREVIEW=live|deploying|failed|deleted|notdeployed|none` renders that
+    /// `DEVER_SNAPSHOT_PREVIEW=live|behind|conflict|deploying|failed|deleted|notdeployed|none` renders that
     /// state from sample data, without network.
     static let simulation: String? = ProcessInfo.processInfo.environment["DEVER_SNAPSHOT_PREVIEW"]
     static let samplePullNumber = 4714
@@ -218,7 +285,8 @@ final class PreviewStore: ObservableObject {
     static func sample(_ mode: String) -> PreviewStatus? {
         let pull = PreviewStatus.Pull(number: samplePullNumber, title: "feat(app): guided lab intro with the new side panel [ENG-1050]",
                                       url: URL(string: "https://github.com/\(sampleRepo)/pull/\(samplePullNumber)")!,
-                                      author: "ada", state: .open, headRef: "feat/eng-1050-lab-intro")
+                                      author: "ada", state: .open, headRef: "feat/eng-1050-lab-intro",
+                                      headSHA: "9f3c2e7a41d05b6c8e12f4a7b3d9c0e5f6a1b2c3", baseRef: "main")
         let run = PreviewStatus.Run(url: URL(string: "https://github.com/\(sampleRepo)/actions/runs/19284738291")!,
                                     inProgress: false, failed: false, step: nil, createdAt: Date().addingTimeInterval(-12 * 60))
         var s = PreviewStatus(phase: .live, pull: pull)
@@ -229,6 +297,13 @@ final class PreviewStore: ObservableObject {
             s.options = PreviewOptions(prod: false, autoscale: false, keep: true)
             s.updatedAt = Date().addingTimeInterval(-12 * 60)
             s.run = run
+        case "behind", "conflict":
+            // Hosts that answer, on a commit six days old: the pull request moved on.
+            s.targets = [.app: true, .api: true, .bo: true]
+            s.updatedAt = Date().addingTimeInterval(-6 * 86_400)
+            s.run = run
+            s.tracking = .behind(served: "4b81d6f02c9e7a35d1f8b6c4e0a2d7f9c3b5e1a8")
+            s.conflict = mode == "conflict"
         case "deploying":
             s.phase = .deploying
             s.updatedAt = Date().addingTimeInterval(-3 * 60)
@@ -313,12 +388,17 @@ final class PreviewStore: ObservableObject {
         let pullState: PreviewStatus.Pull.State = detail.merged_at != nil ? .merged
             : detail.state == "closed" ? .closed : detail.draft == true ? .draft : .open
         let pull = PreviewStatus.Pull(number: number, title: detail.title, url: URL(string: detail.html_url)!,
-                                      author: detail.user.login, state: pullState, headRef: detail.head.ref)
+                                      author: detail.user.login, state: pullState, headRef: detail.head.ref,
+                                      headSHA: detail.head.sha, baseRef: detail.base?.ref ?? "")
         var status = derive(from: try await comments, pull: pull)
         status.keep = detail.labels.contains { $0.name == keepLabel }
+        // While GitHub works the merge out (nil), what was known of the same commit stays.
+        status.conflict = conflict(mergeable: detail.mergeable, state: detail.mergeable_state)
+            ?? (previous?.pull.headSHA == detail.head.sha ? previous?.conflict ?? false : false)
 
         // The run behind the latest command or push, for its link and its progress.
-        let runs = (try await deployRuns) + (try await cleanupRuns) + (try await updateRuns)
+        let pushes = try await updateRuns
+        let runs = (try await deployRuns) + (try await cleanupRuns) + pushes
         if let run = latestRun(runs, after: status.commandAt, pull: pull) {
             var info = PreviewStatus.Run(url: URL(string: run.html_url)!,
                                          inProgress: run.status != "completed",
@@ -350,6 +430,22 @@ final class PreviewStore: ObservableObject {
             status.phase = .deleted
         }
 
+        if status.phase == .live, pullState == .open || pullState == .draft {
+            // Hosts that answer say nothing of what they serve: the runs do. Only when they
+            // leave it open is the head commit's date read, once per commit.
+            var committedAt: Date?
+            if needsHeadDate(head: detail.head.sha, runs: pushes, deployedAt: status.deployedAt) {
+                if let known = headDates[detail.head.sha] {
+                    committedAt = known
+                } else if let read = try? await client.commitDate(repo, sha: detail.head.sha) {
+                    headDates[detail.head.sha] = read
+                    committedAt = read
+                }
+            }
+            status.tracking = tracking(head: detail.head.sha, headCommittedAt: committedAt, runs: pushes,
+                                       deployedAt: status.deployedAt)
+        }
+
         if status.phase == .live {
             // Which hosts answer, a few seconds at most, all at once.
             let targets = status.sortedTargets
@@ -364,6 +460,45 @@ final class PreviewStore: ObservableObject {
         return status
     }
 
+    /// When each head commit read so far was made: a commit's date never changes.
+    private static var headDates: [String: Date] = [:]
+
+    /// Whether GitHub says the pull request conflicts with its base; nil while it does not know.
+    static func conflict(mergeable: Bool?, state: String?) -> Bool? {
+        if state == "dirty" || mergeable == false { return true }
+        if mergeable == nil, state == nil || state == "unknown" { return nil }
+        return false
+    }
+
+    /// The updates that deployed a commit of the pull request: `pull_request` runs that succeeded.
+    private static func updates(_ runs: [GitHubRun]) -> [GitHubRun] {
+        runs.filter { $0.event == "pull_request" && $0.conclusion == "success" && $0.head_sha != nil }
+    }
+
+    /// Whether the preview is on the pull request's head. An update that succeeded for the
+    /// head says yes; one that succeeded for another commit, with no `/preview` posted since,
+    /// says no and which commit is served; otherwise a head made after the last `/preview`
+    /// was not in it. Nothing known is not called behind.
+    static func tracking(head: String, headCommittedAt: Date?, runs: [GitHubRun], deployedAt: Date?) -> PreviewStatus.Tracking {
+        let updates = updates(runs)
+        if updates.contains(where: { $0.head_sha == head }) { return .following }
+        if let last = updates.max(by: { $0.created_at < $1.created_at }), let at = date(last.created_at),
+           deployedAt.map({ at > $0 }) ?? true {
+            return .behind(served: last.head_sha)
+        }
+        if let headCommittedAt, let deployedAt, headCommittedAt > deployedAt { return .behind(served: nil) }
+        return .following
+    }
+
+    /// True when only the head commit's date can tell (see `tracking`).
+    static func needsHeadDate(head: String, runs: [GitHubRun], deployedAt: Date?) -> Bool {
+        guard let deployedAt else { return false }
+        let updates = updates(runs)
+        if updates.contains(where: { $0.head_sha == head }) { return false }
+        if let last = updates.max(by: { $0.created_at < $1.created_at }), let at = date(last.created_at), at > deployedAt { return false }
+        return true
+    }
+
     /// Replays the comments oldest to newest, keeping the state the latest one leaves.
     static func derive(from comments: [GitHubComment], pull: PreviewStatus.Pull) -> PreviewStatus {
         var s = PreviewStatus(phase: .notDeployed, pull: pull)
@@ -376,6 +511,7 @@ final class PreviewStore: ObservableObject {
             if body.range(of: #"(^|\s)/preview\b"#, options: .regularExpression) != nil {
                 s.options = PreviewOptions.parse(body)
                 s.commandAt = at
+                s.deployedAt = at
                 continue
             }
             if body.contains("/delete-preview") { s.commandAt = at; continue }
