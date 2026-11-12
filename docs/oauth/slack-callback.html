@@ -1,11 +1,27 @@
 <!doctype html>
+<html lang="en">
 <meta charset="utf-8">
-<title>Dever — Slack sign-in</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Dever</title>
 <!-- Slack only accepts HTTPS redirects: this page (GitHub Pages) forwards the
-     authorization code to the Dever app's local server. -->
+     authorization code to the Dever app's local server, which shows the result. -->
 <script>
   location.replace("http://localhost:47321/slack/callback" + location.search);
 </script>
-<p style="font:16px -apple-system, sans-serif; padding:40px">
-  Returning to Dever… If nothing happens, make sure the app is open and start the sign-in again.
-</p>
+<style>
+  :root { --ground:#F4F4F2; --ink:#111111; --muted:#5F6368; --lime:#3F6212; }
+  @media (prefers-color-scheme: dark) { :root { --ground:#0F0F0F; --ink:#FFFFFF; --muted:#8F8F8F; --lime:#DAFA9C; } }
+  html, body { height:100%; margin:0; }
+  body { background:var(--ground); color:var(--ink); font:16px/1.5 -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
+    -webkit-font-smoothing:antialiased; display:grid; place-items:center; padding:24px; text-align:center; }
+  svg { width:96px; height:96px; fill:var(--lime); display:block; margin:0 auto 28px; }
+  h1 { font-size:30px; line-height:1.15; letter-spacing:-.03em; font-weight:650; margin:0 0 10px; }
+  p { margin:0 auto; max-width:330px; color:var(--muted); }
+</style>
+<main>
+  <svg viewBox="0 0 64 64" aria-hidden="true"><path fill-rule="evenodd" d="M14 4h18a28 28 0 0 1 0 56H14A10 10 0 0 1 4 50V14A10 10 0 0 1 14 4ZM43 15a8 8 0 1 0 0 16a8 8 0 1 0 0-16Z"/></svg>
+  <h1>Returning to Dever</h1>
+  <p>If nothing happens, make sure the app is open and start the sign-in again.</p>
+</main>
+</html>

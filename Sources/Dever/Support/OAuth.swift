@@ -138,15 +138,14 @@ final class LoopbackServer: @unchecked Sendable {
             let target = parts.count > 1 ? String(parts[1]) : "/"
             let comps = URLComponents(string: "http://localhost\(target)")
             let matches = comps?.path == self.expectedPath
-            let body = matches
-                ? "<h2>Dever is connected ✅</h2><p>You can close this tab and go back to the app.</p>"
-                : "<p>Not found</p>"
-            let html = "<!doctype html><meta charset=utf-8><body style=\"font:16px -apple-system;padding:40px\">\(body)"
+            var query: [String: String] = [:]
+            comps?.queryItems?.forEach { query[$0.name] = $0.value ?? "" }
+            // The page says what happened: signed in, refused by the provider, or not a sign-in at all.
+            let html = OAuthPage.html(service: OAuthPage.service(path: comps?.path ?? ""),
+                                      outcome: OAuthPage.outcome(matches: matches, query: query))
             let response = "HTTP/1.1 \(matches ? "200 OK" : "404 Not Found")\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: \(html.utf8.count)\r\nConnection: close\r\n\r\n\(html)"
             conn.send(content: Data(response.utf8), completion: .contentProcessed { _ in conn.cancel() })
             guard matches else { return }
-            var query: [String: String] = [:]
-            comps?.queryItems?.forEach { query[$0.name] = $0.value ?? "" }
             self.finish(.success(query))
         }
     }
