@@ -5,7 +5,9 @@ import Foundation
 // brief, and the link that opens the tool on that folder with the brief filled in, not sent.
 // Everything here is derived without the network and without a process, so it is tested.
 
-/// The coding agents Dever can start.
+/// The coding agents Dever can start. A new tool is a case here, with its name, the scheme its
+/// desktop app answers, and its openings in `AgentLink`: the menu, the settings and the wording
+/// name no tool themselves.
 enum AgentTool: String, CaseIterable, Identifiable {
     case claudeCode, codex
     var id: String { rawValue }
@@ -13,6 +15,35 @@ enum AgentTool: String, CaseIterable, Identifiable {
         switch self {
         case .claudeCode: "Claude Code"
         case .codex: "Codex"
+        }
+    }
+    /// The URL scheme the tool's desktop app registers: how the app is found on this Mac, for its
+    /// icon and to say whether it is installed.
+    var appScheme: String {
+        switch self {
+        case .claudeCode: "claude"
+        case .codex: "codex"
+        }
+    }
+}
+
+/// The agent a start uses: not asked yet, asked at each start, or always the same one.
+enum AgentChoice: Equatable {
+    case unset, ask, tool(AgentTool)
+
+    init(stored: String?) {
+        switch stored {
+        case "ask": self = .ask
+        case let raw?: self = AgentTool(rawValue: raw).map(AgentChoice.tool) ?? .unset
+        case nil: self = .unset
+        }
+    }
+
+    var stored: String {
+        switch self {
+        case .unset: ""
+        case .ask: "ask"
+        case .tool(let tool): tool.rawValue
         }
     }
 }
@@ -36,6 +67,13 @@ enum AgentPreferences {
     static let clonesKey = "agentClones"
     static func surfaceKey(_ tool: AgentTool) -> String { "agentSurface.\(tool.rawValue)" }
     static let lastToolKey = "agentLastTool"
+    /// The preferred agent: a tool's raw value, "ask", or nothing while it was never asked.
+    static let preferredKey = "agentPreferred"
+
+    static var preferred: AgentChoice {
+        get { AgentChoice(stored: UserDefaults.standard.string(forKey: preferredKey)) }
+        set { UserDefaults.standard.set(newValue.stored, forKey: preferredKey) }
+    }
 
     static var clones: [String: String] {
         get { UserDefaults.standard.dictionary(forKey: clonesKey) as? [String: String] ?? [:] }

@@ -1415,16 +1415,20 @@ struct SegmentPicker<Value: Hashable>: View {
 
 // MARK: - Agents
 
-/// Where the coding agents start: where each tool opens, and where each repository the projects
-/// follow is cloned on this Mac. Clones live wherever the user keeps them, so each has its own folder.
+/// The coding agents: which one a start uses, where each opens, and where each repository the
+/// projects follow is cloned on this Mac. Every tool in `AgentTool` gets its tile and its row;
+/// nothing here names one.
 private struct AgentsSection: View {
     @EnvironmentObject var app: AppState
-    @AppStorage(AgentPreferences.surfaceKey(.claudeCode)) private var claudeSurface = AgentSurface.app.rawValue
-    @AppStorage(AgentPreferences.surfaceKey(.codex)) private var codexSurface = AgentSurface.app.rawValue
+    @AppStorage(AgentPreferences.preferredKey) private var preferred = ""
     @State private var clones = AgentPreferences.clones
     /// What the last pick or search did, or why it was refused.
     @State private var note: (text: String, failed: Bool)?
     @State private var searching = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Namespace private var ring
+
+    private var choice: AgentChoice { AgentChoice(stored: preferred) }
 
     /// Every repository a project follows, once.
     private var repositories: [String] {
@@ -1432,25 +1436,53 @@ private struct AgentsSection: View {
         return app.projects.flatMap { app.repositories(for: $0) }.filter { seen.insert($0.lowercased()).inserted }
     }
 
-    private var surfaces: [(label: String, value: String)] {
-        AgentSurface.allCases.map { (label: $0.label, value: $0.rawValue) }
+    /// What the choice means at a start, in one line.
+    private var consequence: String {
+        switch choice {
+        case .unset: "Not chosen yet: the first start asks"
+        case .ask: "Every start shows the agents to pick from"
+        case .tool(let tool): "One click starts \(tool.label); the chevron beside it offers the others"
+        }
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             SectionHead(title: "Agents",
-                        detail: "Start Claude Code or Codex on an issue: in your own tool, on a worktree of the issue's branch, the brief filled in and not sent.")
-            SettingRows {
-                SettingRow(title: "Claude Code opens in") {
-                    SegmentPicker(label: "Claude Code opens in", options: surfaces, selection: $claudeSurface)
+                        detail: "Start a coding agent on an issue: in your own tool, on a worktree of the issue's branch, the brief filled in and not sent.")
+            title("Your agent")
+            HStack(spacing: 16) {
+                ForEach(AgentTool.allCases) { tool in
+                    tile(.tool(tool), name: tool.label, detail: AgentApps.app(tool) == nil ? "App not found" : "Installed") {
+                        AgentMark(tool: tool, size: 44)
+                    }
                 }
-                SettingRow(title: "Codex opens in", divided: false) {
-                    SegmentPicker(label: "Codex opens in", options: surfaces, selection: $codexSurface)
+                tile(.ask, name: "Ask each time", detail: "Any of them") {
+                    // The agents' marks, fanned: any of them.
+                    ZStack {
+                        ForEach(Array(AgentTool.allCases.enumerated()), id: \.element) { index, tool in
+                            AgentMark(tool: tool, size: 30)
+                                .offset(x: CGFloat(index) * 18 - CGFloat(AgentTool.allCases.count - 1) * 9)
+                        }
+                    }
+                    .frame(height: 44)
                 }
             }
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel("Your agent")
+            Text(consequence).font(.system(size: 13)).foregroundStyle(Soot.muted)
+                .padding(.top, 14)
+                .id(preferred)
+                .transition(.opacity)
+
+            title("Where it opens")
+            SettingRows {
+                ForEach(Array(AgentTool.allCases.enumerated()), id: \.element) { index, tool in
+                    AgentSurfaceRow(tool: tool, divided: index < AgentTool.allCases.count - 1)
+                }
+            }
+
             HStack(alignment: .firstTextBaseline) {
-                Text("Clones on this Mac").font(.system(size: 13, weight: .semibold)).foregroundStyle(Soot.ink)
-                    .accessibilityAddTraits(.isHeader)
+                title("Your clones")
                 Spacer(minLength: 16)
                 if !repositories.isEmpty {
                     Button(searching ? "Looking…" : "Find them in a folder…", action: search)
@@ -1459,19 +1491,33 @@ private struct AgentsSection: View {
                         .help("Pick a folder; Dever finds the clones under it by their GitHub remote")
                 }
             }
-            .padding(.top, 28).padding(.bottom, 10)
             if repositories.isEmpty {
                 Text("No project follows a repository yet.").font(.system(size: 13)).foregroundStyle(Soot.muted)
             } else {
                 SettingRows {
                     ForEach(Array(repositories.enumerated()), id: \.element) { index, name in
                         let clone = AgentPreferences.clone(of: name, in: clones)
-                        SettingRow(title: name,
-                                   detail: clone.map { ($0.path as NSString).abbreviatingWithTildeInPath } ?? "Asked the first time you start an agent on it",
-                                   divided: index < repositories.count - 1) {
-                            Button(clone == nil ? "Choose…" : "Change…") { choose(name) }
-                                .buttonStyle(SecondaryButton())
-                                .accessibilityLabel("\(clone == nil ? "Choose" : "Change") the folder of \(name)")
+                        VStack(spacing: 0) {
+                            HStack(spacing: 12) {
+                                BrandLogo(service: .github, size: 20).foregroundStyle(Soot.ink).opacity(clone == nil ? 0.55 : 1)
+                                    .accessibilityHidden(true)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(verbatim: name).font(.system(size: 14, weight: .medium)).foregroundStyle(Soot.ink).lineLimit(1)
+                                    HStack(spacing: 5) {
+                                        Image(systemName: clone == nil ? "questionmark.folder" : "folder.fill")
+                                            .font(.system(size: 11)).foregroundStyle(clone == nil ? Soot.muted : Soot.lime)
+                                            .accessibilityHidden(true)
+                                        Text(verbatim: clone.map { ($0.path as NSString).abbreviatingWithTildeInPath } ?? "Asked the first time an agent starts on it")
+                                            .font(.system(size: 12)).foregroundStyle(Soot.muted).lineLimit(1).truncationMode(.middle)
+                                    }
+                                }
+                                Spacer(minLength: 16)
+                                Button(clone == nil ? "Choose…" : "Change…") { choose(name) }
+                                    .buttonStyle(SecondaryButton())
+                                    .accessibilityLabel("\(clone == nil ? "Choose" : "Change") the folder of \(name)")
+                            }
+                            .frame(minHeight: 60)
+                            if index < repositories.count - 1 { Rectangle().fill(Soot.line).frame(height: 1) }
                         }
                     }
                 }
@@ -1488,7 +1534,41 @@ private struct AgentsSection: View {
                 .padding(.top, 10)
         }
         .motion(Motion.ui, fade: true, value: note?.text)
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: preferred)
         .onAppear { clones = AgentPreferences.clones }
+    }
+
+    private func title(_ text: String) -> some View {
+        Text(text).font(.system(size: 13, weight: .semibold)).foregroundStyle(Soot.ink)
+            .padding(.top, 28).padding(.bottom, 10)
+            .accessibilityAddTraits(.isHeader)
+    }
+
+    /// One choice of "Your agent": a mark, a name, a quiet word, the lime ring on the chosen one.
+    private func tile<Mark: View>(_ option: AgentChoice, name: String, detail: String, @ViewBuilder mark: () -> Mark) -> some View {
+        let on = choice == option
+        return Button {
+            withAnimation(reduceMotion ? nil : .spring(response: 0.3, dampingFraction: 0.85)) { preferred = option.stored }
+        } label: {
+            VStack(spacing: 10) {
+                mark()
+                VStack(spacing: 1) {
+                    Text(name).font(.system(size: 13, weight: on ? .semibold : .medium)).foregroundStyle(on ? Soot.ink : Soot.muted)
+                    Text(detail).font(.system(size: 11)).foregroundStyle(Soot.muted)
+                }
+            }
+            .frame(width: 148, height: 124)
+            .background(Soot.surface, in: RoundedRectangle(cornerRadius: 12))
+            .overlay {
+                if on {
+                    RoundedRectangle(cornerRadius: 12).strokeBorder(Soot.lime, lineWidth: 2)
+                        .matchedGeometryEffect(id: "ring", in: ring)
+                }
+            }
+        }
+        .buttonStyle(RowButton(lift: .tone, radius: 12))
+        .accessibilityLabel("\(name), \(detail)")
+        .accessibilityAddTraits(on ? .isSelected : [])
     }
 
     private func choose(_ repository: String) {
@@ -1517,6 +1597,33 @@ private struct AgentsSection: View {
             searching = false
             note = (added == 0 ? "No new clone found under \((folder.path as NSString).abbreviatingWithTildeInPath)"
                                : "\(added) clone\(added == 1 ? "" : "s") found", false)
+        }
+    }
+}
+
+/// One agent's row of "Where it opens": its mark, its name, desktop app or terminal.
+private struct AgentSurfaceRow: View {
+    let tool: AgentTool
+    let divided: Bool
+    @AppStorage private var surface: String
+
+    init(tool: AgentTool, divided: Bool) {
+        self.tool = tool
+        self.divided = divided
+        _surface = AppStorage(wrappedValue: AgentSurface.app.rawValue, AgentPreferences.surfaceKey(tool))
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 12) {
+                AgentMark(tool: tool, size: 24)
+                Text(tool.label).font(.system(size: 14, weight: .medium)).foregroundStyle(Soot.ink)
+                Spacer(minLength: 16)
+                SegmentPicker(label: "\(tool.label) opens in",
+                              options: AgentSurface.allCases.map { (label: $0.label, value: $0.rawValue) }, selection: $surface)
+            }
+            .frame(minHeight: 56)
+            if divided { Rectangle().fill(Soot.line).frame(height: 1) }
         }
     }
 }

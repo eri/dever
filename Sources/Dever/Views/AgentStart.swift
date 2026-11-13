@@ -1,9 +1,49 @@
 import AppKit
 import SwiftUI
 
-/// "Start with ⌄" on an issue: a menu of the coding agents, each opening in the user's own tool
-/// on a worktree of the issue's branch, the brief filled in and not sent
-/// (docs/agents-integration.md, phase 1). The caller says what else a start does (move the issue).
+/// Where a tool's desktop app is on this Mac, found by the scheme it answers, and its icon:
+/// the tools' own marks come from the apps the user installed, so Dever ships none of them.
+@MainActor enum AgentApps {
+    private static var icons: [AgentTool: NSImage] = [:]
+
+    static func app(_ tool: AgentTool) -> URL? {
+        URL(string: "\(tool.appScheme)://").flatMap { NSWorkspace.shared.urlForApplication(toOpen: $0) }
+    }
+
+    static func icon(_ tool: AgentTool) -> NSImage? {
+        if let cached = icons[tool] { return cached }
+        guard let app = app(tool) else { return nil }
+        let icon = NSWorkspace.shared.icon(forFile: app.path)
+        icons[tool] = icon
+        return icon
+    }
+}
+
+/// A coding agent's mark: its app's icon, or a terminal glyph on a tile when the app is not on this Mac.
+struct AgentMark: View {
+    let tool: AgentTool
+    var size: CGFloat = 20
+
+    var body: some View {
+        Group {
+            if let icon = AgentApps.icon(tool) {
+                Image(nsImage: icon).resizable().interpolation(.high).aspectRatio(contentMode: .fit)
+            } else {
+                Image(systemName: "terminal").font(.system(size: size * 0.5, weight: .semibold)).foregroundStyle(Soot.muted)
+                    .frame(width: size, height: size)
+                    .background(Soot.ground, in: RoundedRectangle(cornerRadius: size * 0.24))
+                    .overlay(RoundedRectangle(cornerRadius: size * 0.24).strokeBorder(Soot.edge))
+            }
+        }
+        .frame(width: size, height: size)
+        .accessibilityHidden(true)
+    }
+}
+
+/// Starting a coding agent on an issue, in the user's own tool, on a worktree of the issue's branch,
+/// the brief filled in and not sent (docs/agents-integration.md, phase 1). With a preferred agent
+/// it is one button ("Start with <agent>") and a chevron for another one this time; asked each
+/// time, or never asked yet, it is a menu. The caller says what else a start does (move the issue).
 struct AgentStartMenu: View {
     @EnvironmentObject var app: AppState
     @Environment(\.openSettings) private var openSettings
@@ -23,8 +63,10 @@ struct AgentStartMenu: View {
 
     @State private var busy: AgentTool?
     @AppStorage(AgentPreferences.lastToolKey) private var lastTool = AgentTool.claudeCode.rawValue
+    @AppStorage(AgentPreferences.preferredKey) private var preferred = ""
     @State private var chosenRepository: String?
 
+    private var choice: AgentChoice { AgentChoice(stored: preferred) }
     private var repositories: [String] { app.repositories(for: project) }
     private var repositoryKey: String { "agentRepository.\(project.id.uuidString)" }
     private var repository: String? {
@@ -32,30 +74,42 @@ struct AgentStartMenu: View {
         return saved.flatMap { repositories.contains($0) ? $0 : nil } ?? repositories.first
     }
     private var branch: String? { issue.branchName.flatMap { $0.isEmpty ? nil : $0 } }
-    /// The tool started last comes first.
-    private var tools: [AgentTool] {
-        AgentTool.allCases.sorted { a, _ in a.rawValue == lastTool }
+    private var ready: Bool { branch != nil && repository != nil }
+    /// The tools the menu lists: all of them, the one started last first; with a preferred agent, the others.
+    private var listed: [AgentTool] {
+        let all = AgentTool.allCases.sorted { a, _ in a.rawValue == lastTool }
+        if case .tool(let mine) = choice { return all.filter { $0 != mine } }
+        return all
     }
 
     var body: some View {
-        Button { set(!open) } label: {
-            HStack(spacing: 6) {
-                Text(busy.map { "Opening \($0.label)…" } ?? title)
-                Image(systemName: "chevron.down").font(.system(size: 10, weight: .bold)).foregroundStyle(Soot.muted)
-                    .rotationEffect(.degrees(open ? 180 : 0))
-                    .motion(Motion.ui, value: open)
-                    .accessibilityHidden(true)
+        HStack(spacing: 4) {
+            if case .tool(let tool) = choice {
+                Button { start(tool) } label: {
+                    HStack(spacing: 8) {
+                        AgentMark(tool: tool, size: 18)
+                        Text(busy.map { "Opening \($0.label)…" } ?? "\(title) \(tool.label)").lineLimit(1)
+                    }
+                    .font(.system(size: 14, weight: .medium))
+                    .padding(.leading, 10).padding(.trailing, 14)
+                    .frame(height: ButtonSize.panel.height)
+                }
+                .buttonStyle(MenuTriggerButton(fill: fill))
+                .disabled(busy != nil || !ready)
+                .help(branch.map { "Opens \(tool.label) on a worktree of \($0), the brief filled in and not sent" } ?? "Linear gives no branch for this issue")
+                chevron.frame(width: 30, height: ButtonSize.panel.height)
+            } else {
+                HStack(spacing: 6) {
+                    Text(busy.map { "Opening \($0.label)…" } ?? "\(title) an agent").lineLimit(1)
+                    chevronGlyph
+                }
+                .font(.system(size: 14, weight: .medium))
+                .padding(.horizontal, 14)
+                .frame(height: ButtonSize.panel.height)
+                .modifier(Trigger(open: open, fill: fill, label: "\(title) a coding agent", hint: "Shows the agents") { set(!open) })
+                .disabled(busy != nil)
             }
-            .font(.system(size: 14, weight: .medium))
-            .padding(.horizontal, 14)
-            .frame(height: ButtonSize.panel.height)
         }
-        .buttonStyle(MenuTriggerButton(open: open, fill: fill))
-        .keepsMenuOpen()
-        .disabled(busy != nil)
-        .accessibilityLabel("\(title) a coding agent")
-        .accessibilityHint("Shows Claude Code and Codex")
-        .accessibilityAddTraits(open ? .isSelected : [])
         .overlay(alignment: edge) {
             if open {
                 menu
@@ -73,16 +127,63 @@ struct AgentStartMenu: View {
         }
     }
 
+    private var chevronGlyph: some View {
+        Image(systemName: "chevron.down").font(.system(size: 10, weight: .bold)).foregroundStyle(Soot.muted)
+            .rotationEffect(.degrees(open ? 180 : 0))
+            .motion(Motion.ui, value: open)
+            .accessibilityHidden(true)
+    }
+
+    /// Beside the preferred agent's button: another agent, this time.
+    private var chevron: some View {
+        chevronGlyph
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .modifier(Trigger(open: open, fill: fill, label: "\(title) another agent", hint: "Shows the other agents") { set(!open) })
+            .disabled(busy != nil)
+            .help("Another agent, this time")
+    }
+
+    /// The button that opens the menu, in the menu trigger's role.
+    private struct Trigger: ViewModifier {
+        let open: Bool
+        let fill: Color
+        let label: String
+        let hint: String
+        let action: () -> Void
+        func body(content: Content) -> some View {
+            Button(action: action) { content }
+                .buttonStyle(MenuTriggerButton(open: open, fill: fill))
+                .keepsMenuOpen()
+                .accessibilityLabel(label)
+                .accessibilityHint(hint)
+                .accessibilityAddTraits(open ? .isSelected : [])
+        }
+    }
+
     private func set(_ value: Bool) { Motion.run(Motion.ui, fade: true) { open = value } }
 
     private var menu: some View {
         MenuPanel(width: 300, label: "\(title) a coding agent") {
-            MenuPanelHead(title: "\(title)…", detail: branch.map { "A worktree on \($0)" } ?? "Linear gives no branch for this issue")
-            ForEach(tools) { tool in
-                let surface = AgentPreferences.surface(tool)
-                MenuPanelRow(symbol: surface == .app ? "macwindow" : "terminal", title: tool.label,
-                             detail: "\(surface.label) · brief filled in, not sent") { start(tool) }
-                    .disabled(branch == nil || repository == nil)
+            switch choice {
+            case .unset:
+                MenuPanelHead(title: "Which agent do you use?", detail: "One click from now on; Settings changes it")
+            case .ask:
+                MenuPanelHead(title: "\(title)…", detail: branch.map { "A worktree on \($0)" } ?? "Linear gives no branch for this issue")
+            case .tool:
+                MenuPanelHead(title: "Another agent, this time", detail: branch.map { "A worktree on \($0)" } ?? "Linear gives no branch for this issue")
+            }
+            ForEach(listed) { tool in
+                MenuPanelRow(agent: tool, title: tool.label,
+                             detail: "\(AgentPreferences.surface(tool).label) · brief filled in, not sent") {
+                    if choice == .unset { preferred = AgentChoice.tool(tool).stored }
+                    start(tool)
+                }
+                .disabled(!ready)
+            }
+            if choice == .unset {
+                MenuPanelRow(symbol: "questionmark", title: "Ask me each time", detail: "This menu, at every start") {
+                    preferred = AgentChoice.ask.stored
+                }
             }
             if repositories.count > 1 {
                 MenuPanelDivider()
@@ -95,7 +196,7 @@ struct AgentStartMenu: View {
                 }
             }
             MenuPanelDivider()
-            MenuPanelRow(symbol: "gearshape", title: "Agent settings", detail: "Where each repository is, where each tool opens") {
+            MenuPanelRow(symbol: "gearshape", title: "Agent settings", detail: "Your agent, where it opens, your clones") {
                 set(false)
                 openSettings()
                 // Settings listens once it is on screen.

@@ -68,6 +68,18 @@ final class AgentLaunchTests: XCTestCase {
         XCTAssertNil(AgentPreferences.clone(of: "acme/other", in: clones))
     }
 
+    func testThePreferredAgentIsUnsetAskedOrOneTool() {
+        XCTAssertEqual(AgentChoice(stored: nil), .unset)
+        XCTAssertEqual(AgentChoice(stored: ""), .unset)
+        XCTAssertEqual(AgentChoice(stored: "a tool that left"), .unset)
+        XCTAssertEqual(AgentChoice(stored: "ask"), .ask)
+        for tool in AgentTool.allCases {
+            XCTAssertEqual(AgentChoice(stored: AgentChoice.tool(tool).stored), .tool(tool))
+            XCTAssertFalse(tool.appScheme.isEmpty)
+        }
+        XCTAssertEqual(AgentChoice(stored: AgentChoice.ask.stored), .ask)
+    }
+
     func testWorktreeFolderAndArguments() {
         // Beside the clone, wherever the clone is, named after the clone's own folder.
         let folder = AgentWorktree.folder(clone: URL(fileURLWithPath: "/code/client/app-main", isDirectory: true), branch: "sam/eng-12-export csv")

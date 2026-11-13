@@ -853,6 +853,8 @@ struct MenuPanelDivider: View {
 struct MenuPanelRow: View {
     var symbol: String? = nil
     var service: ServiceKind? = nil
+    /// A coding agent's own mark, in the glyph's place.
+    var agent: AgentTool? = nil
     let title: String
     var detail: String? = nil
     var url: URL? = nil
@@ -877,7 +879,8 @@ struct MenuPanelRow: View {
     private var face: some View {
         HStack(spacing: 10) {
             Group {
-                if let service { BrandLogo(service: service, size: 13).foregroundStyle(tint) }
+                if let agent { AgentMark(tool: agent, size: 20) }
+                else if let service { BrandLogo(service: service, size: 13).foregroundStyle(tint) }
                 else if let symbol { Image(systemName: symbol).font(.system(size: 12, weight: .semibold)).foregroundStyle(tint) }
             }
             .frame(width: 26, height: 26)

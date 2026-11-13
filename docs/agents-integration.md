@@ -205,6 +205,7 @@ Taken with the user, one question at a time (2026-11-13).
 | 12 | When the agent has finished | **A "review its work" step**: the agent's account, the acceptance criteria to tick, CI and preview, then its proposals |
 | 13 | Colleagues | **Local only.** Each developer sees their own agents; nothing is written anywhere to share the state |
 | 14 | Installing into the tools | **A "Connect" button per tool in Settings › Agents**, showing exactly what is added, installed by the tool's own plugin command, removed by "Disconnect". Dever never edits their configuration files by hand |
+| 16 | Which agent a start uses | **The user's preferred agent, asked at the first start** ("Which agent do you use?"): then one button, "Start with <agent>", and a chevron for another one this time. "Ask each time" keeps the menu. Settings › Agents shows the agents as tiles with their own marks; the wording names no tool, so another agent is a case in `AgentTool` and nothing else |
 | 15 | Core or plugin | **Core, on the plugin system's mechanism** (section 6) |
 
 ---
@@ -363,7 +364,9 @@ What phase 1 built: `Model/AgentLaunch.swift` (tools, where each opens, clone lo
 remote, worktree folder and `git worktree add` arguments, the brief, the links), `Services/AgentLauncher.swift`
 (git, opening the tool), `Views/AgentStart.swift` (the menu), Settings › Agents, "Start with ⌄" beside
 **Start** and "Continue with ⌄" beside **Copy branch** on the Start tile, "Open with ⌄" in the issue
-page's Details. Worktrees go beside their clone, in `.dever/worktrees/<clone folder>/<branch>`; a branch
+page's Details. With a preferred agent the control is one button and a chevron; the agents' marks are the
+icons of the apps installed on the Mac (found by the scheme each answers), so the repository ships no
+logo of theirs. Worktrees go beside their clone, in `.dever/worktrees/<clone folder>/<branch>`; a branch
 already checked out anywhere (the clone, a worktree another tool made) is opened where it is. Not
 verified by a click: the four openings against the real apps, and a worktree in a real repository
 (the test makes its own).

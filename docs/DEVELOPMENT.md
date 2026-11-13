@@ -40,7 +40,7 @@ Tokens are stored in the macOS Keychain (`io.github.eri.dever`), projects in `~/
 
 ## Coding agents
 
-"Start with ⌄" on an issue opens Claude Code or Codex in the user's own tool (desktop app or terminal, Settings › Agents)
+"Start with <agent>" on an issue opens the user's preferred coding agent (Claude Code or Codex, asked at the first start; Settings › Agents) in the user's own tool (desktop app or terminal, Settings › Agents)
 on a worktree of the issue's branch, with a short brief filled in and not sent. The first start on a repository asks where
 its clone is (checked by its `origin` remote, then remembered; Settings › Agents lists them); the worktree goes beside the
 clone, in `.dever/worktrees`, unless the branch is already checked out somewhere. The audit, the decisions and the plan: [docs/agents-integration.md](agents-integration.md).
@@ -68,7 +68,8 @@ It opens Overview, the first project and Settings in dark then light mode, saves
 Add `DEVER_SNAPSHOT_ONBOARDING=1` to capture the onboarding stages too (`DEVER_SNAPSHOT_STAGE=name|connect|repositories|channels|intelligence|project` for that stage alone), and `DEVER_SNAPSHOT_WAIT=0` to capture the loading state.
 `DEVER_SNAPSHOT_PROJECT=1` captures the second project instead of the first.
 `DEVER_SNAPSHOT_DELIVERY=busy` (or `grab`, `done`, `agent`) fills the Delivery panel with a made-up project, to capture every situation;
-`DEVER_SNAPSHOT_AGENT_MENU=1` opens the "Start with" menu of the tile (`agent` scene) or of the issue page.
+`DEVER_SNAPSHOT_AGENT_MENU=1` opens the "Start with" menu of the tile (`agent` scene) or of the issue page; the launch argument
+`-agentPreferred claudeCode` (or `codex`, `ask`, `""` for never asked) gives that run a preferred agent without saving it.
 `DEVER_SNAPSHOT_ISSUE=1` opens the first project's first issue and saves `issue-{dark,light}.png` plus a `-end` capture
 scrolled to the comments; add `DEVER_SNAPSHOT_CHOICE=Status` (or `Priority`, `Assignee`) to open that chip's list, and
 `DEVER_SNAPSHOT_TRIAGE=1` to write the issue's current priority back and show the confirmation line.
