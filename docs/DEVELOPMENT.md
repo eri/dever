@@ -96,3 +96,8 @@ Nothing is written back in these runs.
 New users (no project yet) start with a short welcome: their display name, connecting Slack, Linear and GitHub
 (with what each one is used for), where the code lives (the repository mode, with GitHub), the channel prefix, what the Mac's own model does
 (where the Mac can run it), then a first project. Reopen it from Help → Welcome to Dever….
+
+Every stage opens with the same head (`StageHead` in `OnboardingView.swift`): a glyph and the stage's name in lime
+(Welcome, Accounts, Repositories, Slack channels, Enable Local Intelligence, Projects), the headline, and one sentence
+of 15 pt muted text that says why it is asked. The sentence is left out where the stage has no room for it at the
+smallest window (Repositories, whose rows say it). Under the head: rows, at most one line of reassurance, one action.

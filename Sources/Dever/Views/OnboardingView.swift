@@ -149,6 +149,37 @@ struct OnboardingView: View {
 
 // MARK: - Shared controls
 
+/// The head of every stage, the same everywhere: what the stage is about in a lime word or two
+/// behind a glyph, the headline, and where it helps one sentence that says why it is asked.
+struct StageHead: View {
+    let eyebrow: String
+    let symbol: String
+    let title: String
+    var lead: String? = nil
+    /// The glyph breathes (the sparkle of the Intelligence stage).
+    var twinkles = false
+    /// The stage's subject is still being proven: the word Beta beside its name.
+    var beta = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 8) {
+                Image(systemName: symbol).font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(Soot.lime).modifier(Twinkle(on: twinkles))
+                    .accessibilityHidden(true)
+                Text(eyebrow).font(.system(size: 17, weight: .semibold)).foregroundStyle(Soot.lime)
+                if beta { StageTag(kind: .beta) }
+            }
+            Headline(text: title)
+            if let lead {
+                Text(lead).font(.system(size: 15)).foregroundStyle(Soot.muted)
+                    .lineSpacing(3).fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: 400, alignment: .leading)
+            }
+        }
+    }
+}
+
 /// A tertiary way out of onboarding: lime text, no fill, under the stage's primary action.
 private struct SkipButton: View {
     let action: () -> Void
@@ -170,7 +201,8 @@ private struct NameControls: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 28) {
-            Headline(text: "What's your name?")
+            StageHead(eyebrow: "Welcome", symbol: "hand.wave", title: "What's your name?",
+                      lead: "Dever shows what is waiting for you, project by project.")
             TextField("Name", text: $displayName, prompt: Text("Your name").foregroundStyle(Soot.muted))
                 .textFieldStyle(.plain)
                 .font(.system(size: 24, weight: .medium))
@@ -212,7 +244,8 @@ private struct ConnectControls: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 28) {
-            Headline(text: "Connect your tools")
+            StageHead(eyebrow: "Accounts", symbol: "link", title: "Connect your tools",
+                      lead: "Dever reads each project's channel, issues and pull requests.")
             VStack(spacing: 8) {
                 ServiceRow(service: .slack, why: "Each project's channel and its latest messages.", githubSheet: $githubSheet)
                 ServiceRow(service: .linear, why: "Each project's issues, to measure delivery.", githubSheet: $githubSheet)
@@ -363,7 +396,8 @@ private struct ChannelNamingControls: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 28) {
-            Headline(text: "Name your channels")
+            StageHead(eyebrow: "Slack channels", symbol: "number", title: "Name your channels",
+                      lead: "Each project has its Slack channel. How are yours named?")
             VStack(spacing: 8) {
                 VStack(alignment: .leading, spacing: 0) {
                     choice(on: usesPrefix, title: "A shared prefix", tag: "Recommended",
@@ -455,7 +489,8 @@ private struct ProjectControls: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 28) {
-            Headline(text: "Add your projects")
+            StageHead(eyebrow: "Projects", symbol: "square.stack", title: "Add your projects",
+                      lead: "A project is a channel, a Linear project and its repositories.")
             // Same row language as Connect: one recommended path first, the others under it.
             VStack(spacing: 8) {
                 OptionRow(icon: AnyView(BrandLogo(service: .slack, size: 20)),

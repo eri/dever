@@ -88,7 +88,8 @@ struct RepositoryModeControls: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 28) {
-            Headline(text: "Where's the code?")
+            // No sentence under this one: the three rows say it, and the repository picker needs the room.
+            StageHead(eyebrow: "Repositories", symbol: "chevron.left.forwardslash.chevron.right", title: "Where's the code?")
             VStack(alignment: .leading, spacing: 16) {
                 RepositoryModeRows(mode: $mode)
                 if mode.usesWorkspaceRepository {

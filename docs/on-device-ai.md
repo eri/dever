@@ -392,9 +392,10 @@ Summaries
 - **Onboarding** has an Intelligence stage (`OnboardingIntelligence.swift`), after the channel names and
   before the first project: the tools are connected and described by then, and the projects are the way
   out of onboarding. It replaces the quiet line the Connect stage carried while there was nothing to choose.
-  - **Left,** top to bottom: what is asked, by name (a lit sparkle, "Enable Local Intelligence" in lime
-    and the word Beta, whose tooltip gives the meaning); the headline "Skip the long reads"; one
-    sentence that says whose model it is and what it does here ("Apple Intelligence, the model built
+  - **Left,** top to bottom, under the head every stage of onboarding shares (`StageHead`: a glyph and
+    a name in lime, the headline, one sentence): what is asked, by name (a lit sparkle, "Enable Local
+    Intelligence" and the word Beta, whose tooltip gives the meaning); the headline "Skip the long
+    reads"; one sentence that says whose model it is and what it does here ("Apple Intelligence, the model built
     into your Mac, sums up long messages and explains failed pipelines."); the answer, as two rows
     drawn like the channel-naming stage's ("Turn it on", Recommended, and "Not now", with "Turn it on
     any time in Settings"); what it costs, as three short facts with a glyph each ("Runs on your Mac's

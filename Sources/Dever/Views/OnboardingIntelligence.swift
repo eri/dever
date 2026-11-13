@@ -58,23 +58,10 @@ struct IntelligenceControls: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 24) {
-            VStack(alignment: .leading, spacing: 14) {
-                // What is being asked, by name, before the benefit: the sparkle is the mark every
-                // generated text carries in the app, here lit and alive.
-                HStack(spacing: 8) {
-                    Image(systemName: "sparkles").font(.system(size: 17, weight: .semibold))
-                        .foregroundStyle(Soot.lime).modifier(Twinkle())
-                        .accessibilityHidden(true)
-                    Text(OnboardingIntelligence.name).font(.system(size: 17, weight: .semibold))
-                        .foregroundStyle(Soot.lime)
-                    StageTag(kind: .beta)
-                }
-                Headline(text: "Skip the long reads")
-                Text(OnboardingIntelligence.lead).font(.system(size: 15)).foregroundStyle(Soot.muted)
-                    .lineSpacing(3).fixedSize(horizontal: false, vertical: true)
-                    .frame(maxWidth: 400, alignment: .leading)
-            }
+        VStack(alignment: .leading, spacing: 28) {
+            // The sparkle is the mark every generated text carries in the app, here lit and alive.
+            StageHead(eyebrow: OnboardingIntelligence.name, symbol: "sparkles", title: "Skip the long reads",
+                      lead: OnboardingIntelligence.lead, twinkles: true, beta: true)
             Group {
                 if status.availability == .available {
                     VStack(spacing: 8) {
@@ -299,12 +286,14 @@ struct IntelligencePicture: View {
 struct Twinkle: ViewModifier {
     /// Where in its cycle this one starts, 0 to 1, so that neighbours do not pulse together.
     var phase: Double = 0
+    /// Off: the content is drawn as it is.
+    var on = true
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     func body(content: Content) -> some View {
-        TimelineView(.animation(minimumInterval: 1.0 / 30, paused: reduceMotion)) { context in
+        TimelineView(.animation(minimumInterval: 1.0 / 30, paused: reduceMotion || !on)) { context in
             let t = context.date.timeIntervalSinceReferenceDate / 2.4 + phase
-            let wave = reduceMotion ? 1 : 0.5 + 0.5 * cos(t * 2 * .pi)
+            let wave = reduceMotion || !on ? 1 : 0.5 + 0.5 * cos(t * 2 * .pi)
             content.opacity(0.6 + 0.4 * wave).scaleEffect(0.86 + 0.14 * wave)
         }
     }
