@@ -50,14 +50,28 @@ final class AgentLaunchTests: XCTestCase {
         let found = CloneFinder.clones(under: root)
         XCTAssertEqual(Set(found.keys), ["acme/app", "acme/api"])
         XCTAssertEqual(found["acme/app"]?.lastPathComponent, "app")
-        XCTAssertEqual(CloneFinder.clone(of: "Acme/Api", under: root)?.lastPathComponent, "api")
-        XCTAssertNil(CloneFinder.clone(of: "acme/deep", under: root))
+        XCTAssertNil(found["acme/deep"])
+        // One folder at a time: what it is a clone of.
+        XCTAssertEqual(CloneFinder.repository(of: root.appendingPathComponent("api")), "acme/api")
+        XCTAssertNil(CloneFinder.repository(of: worktree))
+        XCTAssertNil(CloneFinder.repository(of: root))
+    }
+
+    func testAClonePathIsKeptPerRepositoryAndForgottenWhenItIsGone() throws {
+        let files = FileManager.default
+        let here = files.temporaryDirectory.appendingPathComponent("dever-clone-\(UUID().uuidString)")
+        try files.createDirectory(at: here, withIntermediateDirectories: true)
+        defer { try? files.removeItem(at: here) }
+        let clones = ["acme/app": here.path, "acme/gone": "/nowhere/gone"]
+        XCTAssertEqual(AgentPreferences.clone(of: "Acme/App", in: clones)?.path, here.path)
+        XCTAssertNil(AgentPreferences.clone(of: "acme/gone", in: clones))
+        XCTAssertNil(AgentPreferences.clone(of: "acme/other", in: clones))
     }
 
     func testWorktreeFolderAndArguments() {
-        let root = URL(fileURLWithPath: "/code", isDirectory: true)
-        let folder = AgentWorktree.folder(root: root, repository: "acme/app", branch: "sam/eng-12-export csv")
-        XCTAssertEqual(folder.path, "/code/.dever/worktrees/app/sam-eng-12-export-csv")
+        // Beside the clone, wherever the clone is, named after the clone's own folder.
+        let folder = AgentWorktree.folder(clone: URL(fileURLWithPath: "/code/client/app-main", isDirectory: true), branch: "sam/eng-12-export csv")
+        XCTAssertEqual(folder.path, "/code/client/.dever/worktrees/app-main/sam-eng-12-export-csv")
         XCTAssertEqual(AgentWorktree.addArguments(folder: folder, branch: "b", existsLocally: true, existsOnOrigin: true, base: "origin/main"),
                        ["worktree", "add", folder.path, "b"])
         XCTAssertEqual(AgentWorktree.addArguments(folder: folder, branch: "b", existsLocally: false, existsOnOrigin: true, base: "origin/main"),
@@ -145,12 +159,12 @@ final class AgentLaunchTests: XCTestCase {
         try git("add", "README")
         try git("commit", "--quiet", "-m", "first")
 
-        let folder = try AgentLauncher.worktree(clone: clone, root: root, repository: "acme/app", branch: "sam/eng-12-export")
+        let folder = try AgentLauncher.worktree(clone: clone, branch: "sam/eng-12-export")
         XCTAssertEqual(folder.path, root.appendingPathComponent(".dever/worktrees/app/sam-eng-12-export").path)
         XCTAssertTrue(files.fileExists(atPath: folder.appendingPathComponent("README").path))
-        let again = try AgentLauncher.worktree(clone: clone, root: root, repository: "acme/app", branch: "sam/eng-12-export")
+        let again = try AgentLauncher.worktree(clone: clone, branch: "sam/eng-12-export")
         XCTAssertEqual(again.resolvingSymlinksInPath().path, folder.path)
         // The branch the clone itself is on opens the clone.
-        XCTAssertEqual(try AgentLauncher.worktree(clone: clone, root: root, repository: "acme/app", branch: "main").resolvingSymlinksInPath().path, clone.path)
+        XCTAssertEqual(try AgentLauncher.worktree(clone: clone, branch: "main").resolvingSymlinksInPath().path, clone.path)
     }
 }

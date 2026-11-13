@@ -22,7 +22,6 @@ struct AgentStartMenu: View {
     var failed: (String) -> Void = { _ in }
 
     @State private var busy: AgentTool?
-    @AppStorage(AgentPreferences.rootKey) private var root = ""
     @AppStorage(AgentPreferences.lastToolKey) private var lastTool = AgentTool.claudeCode.rawValue
     @State private var chosenRepository: String?
 
@@ -79,46 +78,41 @@ struct AgentStartMenu: View {
     private var menu: some View {
         MenuPanel(width: 300, label: "\(title) a coding agent") {
             MenuPanelHead(title: "\(title)…", detail: branch.map { "A worktree on \($0)" } ?? "Linear gives no branch for this issue")
-            if root.isEmpty {
-                MenuPanelRow(symbol: "folder", title: "Choose your code folder…",
-                             detail: "Where your clones live, asked once", action: chooseFolder)
-            } else {
-                ForEach(tools) { tool in
-                    let surface = AgentPreferences.surface(tool)
-                    MenuPanelRow(symbol: surface == .app ? "macwindow" : "terminal", title: tool.label,
-                                 detail: "\(surface.label) · brief filled in, not sent") { start(tool) }
-                        .disabled(branch == nil || repository == nil)
-                }
-                if repositories.count > 1 {
-                    MenuPanelDivider()
-                    ForEach(repositories, id: \.self) { name in
-                        MenuPanelRow(symbol: name == repository ? "checkmark" : "shippingbox", title: name,
-                                     detail: name == repository ? "The agent opens here" : nil) {
-                            chosenRepository = name
-                            UserDefaults.standard.set(name, forKey: repositoryKey)
-                        }
-                    }
-                }
+            ForEach(tools) { tool in
+                let surface = AgentPreferences.surface(tool)
+                MenuPanelRow(symbol: surface == .app ? "macwindow" : "terminal", title: tool.label,
+                             detail: "\(surface.label) · brief filled in, not sent") { start(tool) }
+                    .disabled(branch == nil || repository == nil)
+            }
+            if repositories.count > 1 {
                 MenuPanelDivider()
-                MenuPanelRow(symbol: "gearshape", title: "Agent settings", detail: "Code folder, where each tool opens") {
-                    set(false)
-                    openSettings()
-                    // Settings listens once it is on screen.
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                        NotificationCenter.default.post(name: .showSettingsSection, object: SettingsView.Section.agents.rawValue)
+                ForEach(repositories, id: \.self) { name in
+                    MenuPanelRow(symbol: name == repository ? "checkmark" : "shippingbox", title: name,
+                                 detail: name == repository ? "The agent opens here" : nil) {
+                        chosenRepository = name
+                        UserDefaults.standard.set(name, forKey: repositoryKey)
                     }
+                }
+            }
+            MenuPanelDivider()
+            MenuPanelRow(symbol: "gearshape", title: "Agent settings", detail: "Where each repository is, where each tool opens") {
+                set(false)
+                openSettings()
+                // Settings listens once it is on screen.
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                    NotificationCenter.default.post(name: .showSettingsSection, object: SettingsView.Section.agents.rawValue)
                 }
             }
         }
     }
 
-    private func chooseFolder() {
-        guard let url = AgentFolderPanel.choose() else { return }
-        root = url.path
-    }
-
     private func start(_ tool: AgentTool) {
         set(false)
+        // The first start on a repository asks where its clone is; Dever remembers it.
+        if let repository, AgentPreferences.clone(of: repository) == nil {
+            guard let folder = AgentFolderPanel.choose(clone: repository) else { return }
+            do { try AgentLauncher.register(folder, as: repository) } catch { return failed(error.localizedDescription) }
+        }
         busy = tool
         Task {
             defer { busy = nil }
@@ -135,16 +129,25 @@ struct AgentStartMenu: View {
     }
 }
 
-/// The folder picker for the code folder, shared by the menu and Settings › Agents.
+/// The folder pickers of the agents: a repository's clone, or a folder to look for clones in.
 enum AgentFolderPanel {
-    @MainActor static func choose() -> URL? {
+    @MainActor private static func choose(message: String, prompt: String) -> URL? {
         let panel = NSOpenPanel()
         panel.canChooseDirectories = true
         panel.canChooseFiles = false
         panel.allowsMultipleSelection = false
-        panel.prompt = "Choose"
-        panel.message = "The folder your repositories are cloned under"
-        panel.directoryURL = AgentPreferences.root ?? FileManager.default.homeDirectoryForCurrentUser
+        panel.prompt = prompt
+        panel.message = message
         return panel.runModal() == .OK ? panel.url : nil
+    }
+
+    /// Where `repository` is cloned on this Mac.
+    @MainActor static func choose(clone repository: String) -> URL? {
+        choose(message: "Where is \(repository) cloned on this Mac? Dever asks once per repository.", prompt: "Use this clone")
+    }
+
+    /// A folder to search for the projects' clones.
+    @MainActor static func chooseSearchFolder() -> URL? {
+        choose(message: "Dever looks for your projects' clones in this folder, three levels deep.", prompt: "Look here")
     }
 }

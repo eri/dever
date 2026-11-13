@@ -198,8 +198,8 @@ Taken with the user, one question at a time (2026-11-13).
 | 5 | The signal for working / waiting / finished | **Hooks installed by Dever.** No reading of session files |
 | 6 | What is shown of a session | Tool, state, age, branch, and **the agent's last sentence or question**. Nothing stored on disk |
 | 7 | What an agent may do through Dever | **Read freely, propose writes.** Moving an issue or replying in a thread arrives in Dever as a proposal the user applies. Nothing leaves in the user's name without them |
-| 8 | Finding the local clone | **One root folder in Settings**; each repository found under it by its GitHub remote; asked for when missing |
-| 9 | Where the agent works | **A worktree on the issue's branch** (the branch name Linear gives) |
+| 8 | Finding the local clone | **One folder per repository, asked at the first start on it** and checked against its GitHub remote; Settings › Agents lists them and can fill them in from a folder. First decided as one root folder, changed after phase 1: clones of different projects are not in one place |
+| 9 | Where the agent works | **A worktree on the issue's branch** (the branch name Linear gives), **beside the clone**: `<the clone's parent>/.dever/worktrees/<clone folder>/<branch>` |
 | 10 | The brief | **Short**: the issue, its acceptance criteria, the branch, the identifier. The rest (thread, comments, linked issues, CI) is fetched by the agent through Dever's MCP tools |
 | 11 | Where sessions appear | On the issue page and its Delivery row, and **a board of agents** across projects. Not in the Overview's "for you", no macOS notification (both tools already notify) |
 | 12 | When the agent has finished | **A "review its work" step**: the agent's account, the acceptance criteria to tick, CI and preview, then its proposals |
@@ -234,7 +234,7 @@ is not sandboxed, so nothing new is asked of macOS.
 On a "Start here" tile and on the issue page, **Start with Claude Code ⌄** (a `MenuTriggerButton`
 opening a `MenuPanel`: Claude Code, Codex, and where each opens) sits beside **Start**. It:
 
-1. finds the clone: the repository of the issue's project under the root folder, by its `origin` remote;
+1. takes the clone of the issue's repository: its folder is asked the first time, checked by its `origin` remote, and remembered;
 2. creates the worktree itself with `git worktree add` on the issue's `branchName`, so both tools
    start the same way (Claude Code's own `-w` names the branch `worktree-…`, Codex's worktrees are
    detached: neither gives the branch Dever matches pull requests on);
@@ -352,7 +352,7 @@ Smallest useful step first. Days are rough, for one developer who knows the code
 | Phase | What | Useful alone? | Effort |
 | --- | --- | --- | --- |
 | **0. Checks** (done, section 2.5) | Inspect the Claude desktop app for a way to open a session on a folder with a prompt, and to bring a session forward. Verify on real installs: the fields of Stop and PermissionRequest (is the last sentence there, in both tools), the plugin install commands from a Mac with no CLI on the `PATH`, Codex's trust review, `codex "prompt"`, the length a deep link's prompt may reach | decides the shape of 1 and 2 | 1–2 d |
-| **1. Launch** (done) | Settings › Agents with the clones' root folder; clone lookup; worktree on the issue's branch; the brief (complete enough to stand without MCP: issue, criteria, link to the thread); "Start with … ⌄" on the Start tile and the issue page | yes: the brief and the right folder in one click | 3–4 d |
+| **1. Launch** (done) | Settings › Agents with each repository's clone; clone lookup; worktree on the issue's branch; the brief (complete enough to stand without MCP: issue, criteria, link to the thread); "Start with … ⌄" on the Start tile and the issue page | yes: the brief and the right folder in one click | 3–4 d |
 | **2. Observe** | The two plugins (hooks only) and "Connect / Disconnect"; `AgentBridge`; `AgentStore`; the state line on the issue and its Delivery row; the ranking; "Open session" | yes: this is the phase that fills the blind stretch | 4–5 d |
 | **3. Context** | MCP server with the read tools, the token, the skill; the brief shrinks to its short form | for the agent; invisible to the developer | 4–5 d |
 | **4. Propose and review** | `propose_update`, `ProposalStore`, "Proposed by the agent", the "review its work" situation with the criteria checklist | yes: closes the loop with Linear and Slack | 5–6 d |
@@ -363,7 +363,7 @@ What phase 1 built: `Model/AgentLaunch.swift` (tools, where each opens, clone lo
 remote, worktree folder and `git worktree add` arguments, the brief, the links), `Services/AgentLauncher.swift`
 (git, opening the tool), `Views/AgentStart.swift` (the menu), Settings › Agents, "Start with ⌄" beside
 **Start** and "Continue with ⌄" beside **Copy branch** on the Start tile, "Open with ⌄" in the issue
-page's Details. Worktrees go to `.dever/worktrees/<repository>/<branch>` in the code folder; a branch
+page's Details. Worktrees go beside their clone, in `.dever/worktrees/<clone folder>/<branch>`; a branch
 already checked out anywhere (the clone, a worktree another tool made) is opened where it is. Not
 verified by a click: the four openings against the real apps, and a worktree in a real repository
 (the test makes its own).

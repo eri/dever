@@ -3,18 +3,19 @@ import Foundation
 
 /// Why an agent could not be started, in words the Delivery notice shows.
 enum AgentLaunchError: LocalizedError, Equatable {
-    case noFolder
     case noRepository
-    case cloneNotFound(String)
+    case cloneUnknown(String)
+    case notAClone(String, found: String?)
     case noBranch
     case git(String)
     case cannotOpen(AgentTool, AgentSurface)
 
     var errorDescription: String? {
         switch self {
-        case .noFolder: "Choose your code folder in Settings › Agents first"
         case .noRepository: "This project has no repository to open"
-        case .cloneNotFound(let repository): "No clone of \(repository) under your code folder"
+        case .cloneUnknown(let repository): "Dever does not know where \(repository) is on this Mac"
+        case .notAClone(let repository, let found):
+            found.map { "That folder is a clone of \($0), not of \(repository)" } ?? "That folder is not a clone of \(repository)"
         case .noBranch: "Linear gives no branch name for this issue"
         case .git(let message): "git: \(message)"
         case .cannotOpen(let tool, let surface):
@@ -23,22 +24,21 @@ enum AgentLaunchError: LocalizedError, Equatable {
     }
 }
 
-/// Starts a coding agent on an issue: finds the clone, puts a worktree on the issue's branch,
+/// Starts a coding agent on an issue: takes the repository's clone, puts a worktree on the issue's branch,
 /// and opens the tool there with the brief filled in. Nothing is sent for the user, and nothing
 /// is read from or written to the tools' own files.
 enum AgentLauncher {
     /// The folder the agent was opened in.
     @discardableResult
     static func start(tool: AgentTool, issue: LinearIssue, detail: LinearIssueDetail?, repository: String?) async throws -> URL {
-        guard let root = AgentPreferences.root else { throw AgentLaunchError.noFolder }
         guard let repository else { throw AgentLaunchError.noRepository }
+        guard let clone = AgentPreferences.clone(of: repository) else { throw AgentLaunchError.cloneUnknown(repository) }
         guard let branch = (detail?.branchName ?? issue.branchName).flatMap({ $0.isEmpty ? nil : $0 }) else { throw AgentLaunchError.noBranch }
         let surface = AgentPreferences.surface(tool)
         let brief = AgentBrief.text(issue: issue, detail: detail)
 
         let folder = try await Task.detached(priority: .userInitiated) {
-            guard let clone = CloneFinder.clone(of: repository, under: root) else { throw AgentLaunchError.cloneNotFound(repository) }
-            return try worktree(clone: clone, root: root, repository: repository, branch: branch)
+            try worktree(clone: clone, branch: branch)
         }.value
 
         guard let opening = AgentLink.opening(tool: tool, surface: surface, folder: folder, brief: brief),
@@ -49,11 +49,18 @@ enum AgentLauncher {
         return folder
     }
 
+    /// Remembers `folder` as the clone of `repository`, once its `origin` says it is.
+    static func register(_ folder: URL, as repository: String) throws {
+        let found = CloneFinder.repository(of: folder)
+        guard found == repository.lowercased() else { throw AgentLaunchError.notAClone(repository, found: found) }
+        AgentPreferences.setClone(folder, for: repository)
+    }
+
     // MARK: Worktree
 
     /// The folder where `branch` is checked out: wherever it already is (the clone itself, a
-    /// worktree another tool made), else a new worktree under the code folder.
-    static func worktree(clone: URL, root: URL, repository: String, branch: String) throws -> URL {
+    /// worktree another tool made), else a new worktree beside the clone.
+    static func worktree(clone: URL, branch: String) throws -> URL {
         _ = git(["worktree", "prune"], in: clone)
         let list = git(["worktree", "list", "--porcelain"], in: clone)
         if list.status == 0, let path = AgentWorktree.checkedOut(branch: branch, inPorcelain: list.output),
@@ -67,7 +74,7 @@ enum AgentLauncher {
         let remote = git(["show-ref", "--verify", "--quiet", "refs/remotes/origin/\(branch)"], in: clone).status == 0
         let head = git(["symbolic-ref", "--short", "refs/remotes/origin/HEAD"], in: clone)
         let base = head.status == 0 && !head.output.isEmpty ? head.output : "HEAD"
-        let folder = AgentWorktree.folder(root: root, repository: repository, branch: branch)
+        let folder = AgentWorktree.folder(clone: clone, branch: branch)
         try FileManager.default.createDirectory(at: folder.deletingLastPathComponent(), withIntermediateDirectories: true)
         let added = git(AgentWorktree.addArguments(folder: folder, branch: branch, existsLocally: local, existsOnOrigin: remote, base: base),
                         in: clone, timeout: 120)

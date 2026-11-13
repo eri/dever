@@ -1415,15 +1415,16 @@ struct SegmentPicker<Value: Hashable>: View {
 
 // MARK: - Agents
 
-/// Where the coding agents start: the folder the clones live under, with what Dever finds there
-/// for each repository the projects follow, and where each tool opens.
+/// Where the coding agents start: where each tool opens, and where each repository the projects
+/// follow is cloned on this Mac. Clones live wherever the user keeps them, so each has its own folder.
 private struct AgentsSection: View {
     @EnvironmentObject var app: AppState
-    @AppStorage(AgentPreferences.rootKey) private var root = ""
     @AppStorage(AgentPreferences.surfaceKey(.claudeCode)) private var claudeSurface = AgentSurface.app.rawValue
     @AppStorage(AgentPreferences.surfaceKey(.codex)) private var codexSurface = AgentSurface.app.rawValue
-    /// The clones under the folder, by repository; nil while the folder is being read.
-    @State private var clones: [String: URL]?
+    @State private var clones = AgentPreferences.clones
+    /// What the last pick or search did, or why it was refused.
+    @State private var note: (text: String, failed: Bool)?
+    @State private var searching = false
 
     /// Every repository a project follows, once.
     private var repositories: [String] {
@@ -1440,14 +1441,6 @@ private struct AgentsSection: View {
             SectionHead(title: "Agents",
                         detail: "Start Claude Code or Codex on an issue: in your own tool, on a worktree of the issue's branch, the brief filled in and not sent.")
             SettingRows {
-                SettingRow(title: "Code folder",
-                           detail: root.isEmpty ? "Where your repositories are cloned. Dever finds each one by its GitHub remote."
-                               : (root as NSString).abbreviatingWithTildeInPath) {
-                    Button(root.isEmpty ? "Choose…" : "Change…") {
-                        if let url = AgentFolderPanel.choose() { root = url.path }
-                    }
-                    .buttonStyle(SecondaryButton())
-                }
                 SettingRow(title: "Claude Code opens in") {
                     SegmentPicker(label: "Claude Code opens in", options: surfaces, selection: $claudeSurface)
                 }
@@ -1455,40 +1448,75 @@ private struct AgentsSection: View {
                     SegmentPicker(label: "Codex opens in", options: surfaces, selection: $codexSurface)
                 }
             }
-            if !root.isEmpty, !repositories.isEmpty {
-                Text("Repositories").font(.system(size: 13, weight: .semibold)).foregroundStyle(Soot.ink)
-                    .padding(.top, 28).padding(.bottom, 10)
+            HStack(alignment: .firstTextBaseline) {
+                Text("Clones on this Mac").font(.system(size: 13, weight: .semibold)).foregroundStyle(Soot.ink)
                     .accessibilityAddTraits(.isHeader)
+                Spacer(minLength: 16)
+                if !repositories.isEmpty {
+                    Button(searching ? "Looking…" : "Find them in a folder…", action: search)
+                        .buttonStyle(TertiaryButton(tint: .lime, lift: Soot.surface, font: .system(size: 13, weight: .medium)))
+                        .disabled(searching)
+                        .help("Pick a folder; Dever finds the clones under it by their GitHub remote")
+                }
+            }
+            .padding(.top, 28).padding(.bottom, 10)
+            if repositories.isEmpty {
+                Text("No project follows a repository yet.").font(.system(size: 13)).foregroundStyle(Soot.muted)
+            } else {
                 SettingRows {
                     ForEach(Array(repositories.enumerated()), id: \.element) { index, name in
-                        let clone = clones?[name.lowercased()]
-                        HStack(spacing: 10) {
-                            Image(systemName: clones == nil ? "circle.dotted" : clone == nil ? "questionmark.circle" : "checkmark.circle.fill")
-                                .font(.system(size: 14)).foregroundStyle(clone == nil ? Soot.muted : Soot.lime)
-                                .accessibilityHidden(true)
-                            Text(verbatim: name).font(.system(size: 14, weight: .medium)).foregroundStyle(Soot.ink).lineLimit(1)
-                            Spacer(minLength: 16)
-                            Text(verbatim: clones == nil ? "Looking…" : clone.map { ($0.path as NSString).abbreviatingWithTildeInPath } ?? "No clone under this folder")
-                                .font(.system(size: 13)).foregroundStyle(Soot.muted).lineLimit(1).truncationMode(.head)
+                        let clone = AgentPreferences.clone(of: name, in: clones)
+                        SettingRow(title: name,
+                                   detail: clone.map { ($0.path as NSString).abbreviatingWithTildeInPath } ?? "Asked the first time you start an agent on it",
+                                   divided: index < repositories.count - 1) {
+                            Button(clone == nil ? "Choose…" : "Change…") { choose(name) }
+                                .buttonStyle(SecondaryButton())
+                                .accessibilityLabel("\(clone == nil ? "Choose" : "Change") the folder of \(name)")
                         }
-                        .frame(minHeight: 44)
-                        .overlay(alignment: .bottom) {
-                            if index < repositories.count - 1 { Rectangle().fill(Soot.line).frame(height: 1) }
-                        }
-                        .accessibilityElement(children: .combine)
                     }
                 }
-                Text("New worktrees go to .dever/worktrees in the code folder. A branch already checked out somewhere is opened where it is.")
-                    .font(.system(size: 12)).foregroundStyle(Soot.muted)
+            }
+            if let note {
+                Text(note.text).font(.system(size: 12)).foregroundStyle(note.failed ? Theme.negative : Soot.muted)
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.top, 10)
+                    .transition(.opacity)
             }
+            Text("A worktree goes beside its clone, in .dever/worktrees. A branch already checked out somewhere is opened where it is.")
+                .font(.system(size: 12)).foregroundStyle(Soot.muted)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.top, 10)
         }
-        .task(id: root) {
-            clones = nil
-            guard !root.isEmpty else { return }
-            let folder = URL(fileURLWithPath: root, isDirectory: true)
-            clones = await Task.detached { CloneFinder.clones(under: folder) }.value
+        .motion(Motion.ui, fade: true, value: note?.text)
+        .onAppear { clones = AgentPreferences.clones }
+    }
+
+    private func choose(_ repository: String) {
+        guard let folder = AgentFolderPanel.choose(clone: repository) else { return }
+        do {
+            try AgentLauncher.register(folder, as: repository)
+            note = nil
+        } catch {
+            note = (error.localizedDescription, true)
+        }
+        clones = AgentPreferences.clones
+    }
+
+    /// Fills in the repositories whose clone is under the folder picked; those already set are kept.
+    private func search() {
+        guard let folder = AgentFolderPanel.chooseSearchFolder() else { return }
+        searching = true
+        let wanted = repositories
+        Task {
+            let found = await Task.detached { CloneFinder.clones(under: folder) }.value
+            var added = 0
+            for name in wanted where AgentPreferences.clone(of: name) == nil {
+                if let clone = found[name.lowercased()] { AgentPreferences.setClone(clone, for: name); added += 1 }
+            }
+            clones = AgentPreferences.clones
+            searching = false
+            note = (added == 0 ? "No new clone found under \((folder.path as NSString).abbreviatingWithTildeInPath)"
+                               : "\(added) clone\(added == 1 ? "" : "s") found", false)
         }
     }
 }

@@ -1,7 +1,7 @@
 import Foundation
 
 // Starting a coding agent on an issue (docs/agents-integration.md, phase 1): which tool, where it
-// opens, where the repository's clone is on this Mac, the worktree on the issue's branch, the
+// opens, where each repository's clone is on this Mac, the worktree on the issue's branch, the
 // brief, and the link that opens the tool on that folder with the brief filled in, not sent.
 // Everything here is derived without the network and without a process, so it is tested.
 
@@ -29,18 +29,29 @@ enum AgentSurface: String, CaseIterable, Identifiable {
     }
 }
 
-/// Settings › Agents, in UserDefaults: the folder the clones live under, and where each tool opens.
+/// Settings › Agents, in UserDefaults: where each repository is cloned on this Mac, and where each tool opens.
 enum AgentPreferences {
-    static let rootKey = "agentCodeFolder"
+    /// Repository ("owner/name", lowercased) to the path of its clone. Clones live wherever the
+    /// user keeps them, so each is asked for once, at the first start on that repository.
+    static let clonesKey = "agentClones"
     static func surfaceKey(_ tool: AgentTool) -> String { "agentSurface.\(tool.rawValue)" }
     static let lastToolKey = "agentLastTool"
 
-    /// The folder the user's clones live under; nil until chosen.
-    static var root: URL? {
-        get {
-            UserDefaults.standard.string(forKey: rootKey).flatMap { $0.isEmpty ? nil : URL(fileURLWithPath: $0, isDirectory: true) }
-        }
-        set { UserDefaults.standard.set(newValue?.path, forKey: rootKey) }
+    static var clones: [String: String] {
+        get { UserDefaults.standard.dictionary(forKey: clonesKey) as? [String: String] ?? [:] }
+        set { UserDefaults.standard.set(newValue, forKey: clonesKey) }
+    }
+
+    /// The clone of a repository, when it was given and is still there.
+    static func clone(of repository: String, in clones: [String: String] = AgentPreferences.clones) -> URL? {
+        guard let path = clones[repository.lowercased()], FileManager.default.fileExists(atPath: path) else { return nil }
+        return URL(fileURLWithPath: path, isDirectory: true)
+    }
+
+    static func setClone(_ folder: URL?, for repository: String) {
+        var all = clones
+        all[repository.lowercased()] = folder?.path
+        clones = all
     }
 
     static func surface(_ tool: AgentTool) -> AgentSurface {
@@ -54,8 +65,19 @@ enum AgentPreferences {
     }
 }
 
-/// Finds a GitHub repository's clone under the code folder, by its `origin` remote.
+/// Tells which GitHub repository a folder is a clone of, by its `origin` remote, and finds the
+/// clones under a folder ("Find my clones in…").
 enum CloneFinder {
+    /// The repository ("owner/name", lowercased) a folder is a clone of; nil when it is not a clone
+    /// (no `.git` directory: a plain folder, or a worktree) or has no GitHub-style `origin`.
+    static func repository(of folder: URL) -> String? {
+        var isDirectory: ObjCBool = false
+        let git = folder.appendingPathComponent(".git")
+        guard FileManager.default.fileExists(atPath: git.path, isDirectory: &isDirectory), isDirectory.boolValue,
+              let config = try? String(contentsOf: git.appendingPathComponent("config"), encoding: .utf8) else { return nil }
+        return originURL(inConfig: config).flatMap(slug(fromRemote:))
+    }
+
     /// "owner/name", lowercased, from a git remote URL; nil when it is not a GitHub-style remote.
     /// Reads `git@host:owner/name.git`, `https://host/owner/name(.git)` and `ssh://git@host/owner/name`.
     static func slug(fromRemote remote: String) -> String? {
@@ -103,14 +125,8 @@ enum CloneFinder {
         for _ in 0...depth {
             var next: [URL] = []
             for folder in level {
-                var isDirectory: ObjCBool = false
-                let git = folder.appendingPathComponent(".git")
-                if files.fileExists(atPath: git.path, isDirectory: &isDirectory) {
-                    if isDirectory.boolValue,
-                       let config = try? String(contentsOf: git.appendingPathComponent("config"), encoding: .utf8),
-                       let slug = originURL(inConfig: config).flatMap(slug(fromRemote:)), found[slug] == nil {
-                        found[slug] = folder
-                    }
+                if files.fileExists(atPath: folder.appendingPathComponent(".git").path) {
+                    if let slug = repository(of: folder), found[slug] == nil { found[slug] = folder }
                     continue
                 }
                 let children = (try? files.contentsOfDirectory(at: folder, includingPropertiesForKeys: [.isDirectoryKey],
@@ -124,20 +140,15 @@ enum CloneFinder {
         }
         return found
     }
-
-    static func clone(of repository: String, under root: URL) -> URL? {
-        clones(under: root)[repository.lowercased()]
-    }
 }
 
-/// The worktree an agent works in: one folder per issue branch, kept apart from the clones.
+/// The worktree an agent works in: one folder per issue branch, beside the clone it comes from.
 enum AgentWorktree {
-    /// `<code folder>/.dever/worktrees/<repository name>/<branch, slashes as dashes>`. Hidden, so the
-    /// clone search never enters it, and on the same volume as the clones.
-    static func folder(root: URL, repository: String, branch: String) -> URL {
-        let name = repository.split(separator: "/").last.map(String.init) ?? repository
-        return root.appendingPathComponent(".dever/worktrees", isDirectory: true)
-            .appendingPathComponent(name, isDirectory: true)
+    /// `<the clone's parent>/.dever/worktrees/<the clone's folder name>/<branch, slashes as dashes>`:
+    /// next to the clone, so on its volume and easy to find; hidden, so a search for clones never enters it.
+    static func folder(clone: URL, branch: String) -> URL {
+        clone.deletingLastPathComponent().appendingPathComponent(".dever/worktrees", isDirectory: true)
+            .appendingPathComponent(clone.lastPathComponent, isDirectory: true)
             .appendingPathComponent(folderName(branch), isDirectory: true)
     }
 
