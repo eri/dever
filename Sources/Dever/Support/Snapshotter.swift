@@ -181,7 +181,10 @@ enum Snapshotter {
                 let hold = ProcessInfo.processInfo.environment["DEVER_SNAPSHOT_STAGE_WAIT"].flatMap(Double.init) ?? 1.5
                 // DEVER_SNAPSHOT_STAGE=<stage> captures that stage alone, as onboarding opened on it.
                 let only = OnboardingView.Stage.snapshotStart
-                for stage in only.map({ [$0] }) ?? OnboardingView.Stage.allCases {
+                // Without DEVER_SNAPSHOT_STAGE, the stages of this Mac's flow (Intelligence where the
+                // model can run, or as DEVER_SNAPSHOT_INTELLIGENCE says).
+                let flow = OnboardingView.Stage.flow(intelligence: OnboardingView.Stage.offersIntelligence(IntelligenceStatus.shared.availability))
+                for stage in only.map({ [$0] }) ?? flow {
                     if only == nil { NotificationCenter.default.post(name: .showOnboardingStage, object: stage.rawValue) }
                     try? await Task.sleep(nanoseconds: UInt64(hold * 1_000_000_000))
                     capture(to: dir.appendingPathComponent("onboarding-\(stage)-\(themeName).png"))

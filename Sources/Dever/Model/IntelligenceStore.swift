@@ -139,6 +139,17 @@ enum IntelligencePreferences {
         defaults.object(forKey: feature.settingKey) as? Bool ?? true
     }
 
+    /// Switches a use on or off, from Settings › Intelligence or from onboarding: the one place
+    /// that writes the key. Off removes what the feature had written.
+    @MainActor
+    static func set(_ feature: IntelligenceFeature, on: Bool, defaults: UserDefaults = .standard,
+                    store: IntelligenceStore? = nil, failures: FailureStore? = nil) {
+        defaults.set(on, forKey: feature.settingKey)
+        guard !on else { return }
+        (store ?? .shared).drop(feature)
+        if feature == .explainFailure { (failures ?? .shared).reset() }
+    }
+
     static func summaryLanguage(defaults: UserDefaults = .standard) -> SummaryLanguage {
         SummaryLanguage(rawValue: defaults.string(forKey: summaryLanguageKey) ?? "") ?? .source
     }

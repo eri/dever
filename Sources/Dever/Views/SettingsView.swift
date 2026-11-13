@@ -1326,11 +1326,7 @@ private struct IntelligenceSwitch: View {
         _on = AppStorage(wrappedValue: true, feature.settingKey)
     }
 
-    private func set(_ value: Bool) {
-        on = value
-        if !value { IntelligenceStore.shared.drop(feature) }
-        if !value, feature == .explainFailure { FailureStore.shared.reset() }
-    }
+    private func set(_ value: Bool) { IntelligencePreferences.set(feature, on: value) }
 
     var body: some View {
         SettingRow(title: feature.title, detail: feature.detail, divided: divided, tap: { set(!on) }) {

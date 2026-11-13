@@ -13,7 +13,37 @@ enum OnboardingExit { case overview, newProject, importSlack, importLinear }
 
 struct OnboardingView: View {
     enum Stage: Int, CaseIterable {
-        case name, connect, repositories, channels, project
+        case name, connect, repositories, channels, intelligence, project
+
+        /// The stage's name, for its progress mark.
+        var title: String {
+            switch self {
+            case .name: "Name"
+            case .connect: "Connect"
+            case .repositories: "Repositories"
+            case .channels: "Channel names"
+            case .intelligence: "Intelligence"
+            case .project: "First project"
+            }
+        }
+
+        /// Intelligence is a stage where the Mac can run Apple's model, now or after a change in
+        /// System Settings, and a use of it exists. Elsewhere there is nothing to choose and
+        /// nothing to fix: the stage and its progress mark are left out.
+        static func offersIntelligence(_ availability: IntelligenceAvailability,
+                                       features: [IntelligenceFeature] = OnboardingIntelligence.features) -> Bool {
+            availability != .unsupported && !features.isEmpty
+        }
+
+        /// The stages of this Mac's flow, in order.
+        static func flow(intelligence: Bool) -> [Stage] {
+            allCases.filter { $0 != .intelligence || intelligence }
+        }
+
+        /// The stage shown for `self`: a stage this Mac's flow does not have gives way to the next.
+        func resolved(intelligence: Bool) -> Stage {
+            self == .intelligence && !intelligence ? .project : self
+        }
 
         /// Captures: `DEVER_SNAPSHOT_STAGE=connect` opens onboarding on that stage, with no
         /// transition to wait for (a covered window pauses them).
@@ -23,12 +53,16 @@ struct OnboardingView: View {
     }
 
     @EnvironmentObject var app: AppState
-    @State var stage: Stage = Stage.snapshotStart ?? .name
+    @ObservedObject private var intelligence = IntelligenceStatus.shared
+    @State private var asked: Stage = Stage.snapshotStart ?? .name
     let finish: (_ then: OnboardingExit) -> Void
 
     /// Every stage change goes through here: the headline and its control fade out and the
     /// next rise in (`FadeSwap`), the progress marks slide, the stage on the right fills in.
-    private func go(_ s: Stage) { Motion.run(Motion.settle) { stage = s } }
+    private func go(_ s: Stage) { Motion.run(Motion.settle) { asked = s } }
+
+    private var offersIntelligence: Bool { Stage.offersIntelligence(intelligence.availability) }
+    private var stage: Stage { asked.resolved(intelligence: offersIntelligence) }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -74,7 +108,8 @@ struct OnboardingView: View {
                     case .name: NameControls(next: { go(.connect) })
                     case .connect: ConnectControls(next: { go(app.github == nil ? afterRepositories : .repositories) })
                     case .repositories: RepositoryModeControls(next: { go(afterRepositories) })
-                    case .channels: ChannelNamingControls(next: { go(.project) })
+                    case .channels: ChannelNamingControls(next: { go(afterChannels) })
+                    case .intelligence: IntelligenceControls(next: { go(.project) })
                     case .project: ProjectControls(finish: finish)
                     }
                     // The way out, under every stage's own action: same place, same words.
@@ -87,12 +122,15 @@ struct OnboardingView: View {
     }
 
     /// Channel naming needs Slack; without it, straight to the projects.
-    private var afterRepositories: Stage { app.slack == nil ? .project : .channels }
+    private var afterRepositories: Stage { app.slack == nil ? afterChannels : .channels }
+
+    /// What the Mac's own model does, where it can run; otherwise straight to the projects.
+    private var afterChannels: Stage { offersIntelligence ? .intelligence : .project }
 
     /// Order shown by position: one mark per stage, the current one long.
     private var progress: some View {
         HStack(spacing: 6) {
-            ForEach(Stage.allCases, id: \.self) { s in
+            ForEach(Stage.flow(intelligence: offersIntelligence), id: \.self) { s in
                 Button { if s.rawValue < stage.rawValue { go(s) } } label: {
                     Capsule()
                         .fill(s == stage ? Soot.ink : s.rawValue < stage.rawValue ? Soot.muted : Soot.surface)
@@ -100,9 +138,9 @@ struct OnboardingView: View {
                         .padding(.vertical, 6)
                 }
                 .buttonStyle(IconButton(fill: nil))
-                .help(s.rawValue < stage.rawValue ? "Back to \(["Name", "Connect", "Repositories", "Channel names", "First project"][s.rawValue])" : "")
+                .help(s.rawValue < stage.rawValue ? "Back to \(s.title)" : "")
                 .disabled(s.rawValue >= stage.rawValue)
-                .accessibilityLabel(["Name", "Connect", "Repositories", "Channel names", "First project"][s.rawValue])
+                .accessibilityLabel(s.title)
                 .accessibilityAddTraits(s == stage ? .isSelected : [])
             }
         }
@@ -191,37 +229,8 @@ private struct ConnectControls: View {
                     .foregroundStyle(Soot.muted)
                     .help("No Dever server. Tokens stay in your Keychain, and Dever posts only what you write and send.")
             }
-            IntelligenceLine()
         }
         .sheet(isPresented: $githubSheet) { GitHubLoginSheet() }
-    }
-}
-
-/// Intelligence in onboarding: one quiet line under the privacy promise, where it belongs (it is
-/// the same promise). No stage and no question: there is nothing to choose yet. Shown where a
-/// feature exists on this Mac; the coming local model is a clause of its tooltip.
-private struct IntelligenceLine: View {
-    @ObservedObject private var status = IntelligenceStatus.shared
-
-    private var beta: Bool {
-        status.availability != .unsupported && IntelligenceFeature.betaMark(among: IntelligenceFeature.shipped) != .none
-    }
-    private var detail: String {
-        IntelligenceFeature.betaMeaning
-            + (LocalModelOutlook.announced() ? " Soon, an optional download will take on a whole channel, issue or pipeline." : "")
-    }
-
-    var body: some View {
-        if beta {
-            HStack(spacing: 8) {
-                Image(systemName: "sparkles").font(.system(size: 12, weight: .semibold)).foregroundStyle(Soot.muted)
-                Text("Long messages, summed up on this Mac").font(.system(size: 13)).foregroundStyle(Soot.muted)
-                Text("Beta").font(.system(size: 11, weight: .semibold)).foregroundStyle(Soot.lime)
-            }
-            .help(detail)
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel("Long messages, summed up on this Mac. Beta. \(detail)")
-        }
     }
 }
 
@@ -549,8 +558,15 @@ private struct StageView: View {
                 // The crop is drawn at true size, then scaled to fill most of the stage's height.
                 // Fit the height, and the width up to the GitHub column (the right edge may crop).
                 let scale = max(0.7, min(1.5, (geo.size.height - 120) / 380, (geo.size.width - 56) / 640))
-                DeverWindowCrop(name: displayName, stage: stage,
-                                slack: app.slack != nil, linear: app.linear != nil, github: app.github != nil)
+                Group {
+                    if stage == .intelligence {
+                        IntelligencePicture().transition(.opacity)
+                    } else {
+                        DeverWindowCrop(name: displayName, stage: stage,
+                                        slack: app.slack != nil, linear: app.linear != nil, github: app.github != nil)
+                            .transition(.opacity)
+                    }
+                }
                     .scaleEffect(scale, anchor: .leading)
                     .frame(width: geo.size.width - 56, height: geo.size.height, alignment: .leading)
                     .offset(x: 56)
@@ -558,7 +574,9 @@ private struct StageView: View {
         }
         .clipShape(RoundedRectangle(cornerRadius: Soot.radius))
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Preview of Dever")
+        .accessibilityLabel(stage == .intelligence
+            ? "Preview: a long message as its summary, and a failed pipeline with the reason in a sentence"
+            : "Preview of Dever")
     }
 }
 

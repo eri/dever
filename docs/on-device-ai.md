@@ -389,17 +389,40 @@ Summaries
 - **Where the announcement shows:** only on a Mac the benchmark's recommendation covers, Apple silicon
   with 16 GB of memory or more (`LocalModelOutlook.announced`). On any other Mac it would promise what
   may never reach it.
-- **Onboarding** gets no stage and no question (there is nothing to choose yet): one quiet line on the
-  Connect stage, under "Stays on this Mac", since it is the same promise: "Long messages, summed up on
-  this Mac" and the word Beta. Its tooltip gives the meaning of Beta and, where the announcement is
-  made, what is coming. Not shown on a Mac that cannot run Apple's model.
+- **Onboarding** has an Intelligence stage (`OnboardingIntelligence.swift`), after the channel names and
+  before the first project: the tools are connected and described by then, and the projects are the way
+  out of onboarding. It replaces the quiet line the Connect stage carried while there was nothing to choose.
+  - **Left:** the word Beta (its tooltip gives the meaning), the headline "Skip the long reads", one row
+    per built use that has a picture ("Long messages", "Explain a failure"), each with one short line and
+    a switch, then Continue beside the promise of rule 3: "Runs on this Mac. Nothing leaves it." The
+    whole row is the switch; VoiceOver hears the title, the line and On or Off.
+  - **Right:** on the lime stage, in the place of the window crop, a made-up project page: a long message
+    of the rail as its summary, a failed pipeline with its card and the sentence behind the sparkle. The
+    picture answers to the switches: off, the message is cut at four lines with "Show more" and the
+    failed state is plain, with no card. It is a picture: nothing in it is clickable or read by the model.
+  - **One source of truth:** the switches are the keys of Settings › Intelligence
+    (`IntelligenceFeature.settingKey`), written in one place by both screens
+    (`IntelligencePreferences.set`), which also drops what a use had written when it goes off. On by
+    default, as in Settings. The language of summaries is not asked here; Settings has it.
+  - **Off or not ready:** the same stage with, in the place of the switches, one row: "Apple Intelligence
+    is off on this Mac" and "Turn it on to use it here", or "Apple Intelligence is not ready on this Mac
+    yet" and "Dever will use it once it is ready" (never "downloading", section 7), with "Open System
+    Settings ↗". The picture stays: it shows what Dever will do. Back from System Settings the stage
+    shows the switches by itself (`IntelligenceStatus`).
+  - **A Mac that can never run it** (macOS before 26, `deviceNotEligible`): the stage is left out, with
+    its progress mark (`OnboardingView.Stage.flow`). Showing it disabled was set aside: every other
+    stage asks one thing the user can answer, and here there would be nothing to choose and nothing to
+    fix, only a reason to feel the Mac is too old. The local model to come is announced in Settings
+    alone, where it does not stand in the way of the first project.
+  - Captures: `docs/reviews/shots/onboarding-intelligence-{available,notReady,off,unsupported}.png`
+    (onboarding is dark in both modes; `unsupported` shows the first-project stage and five marks).
 
 ## 7. Unavailable, slow, failing
 
 | State | Pages | Settings › Intelligence |
 | --- | --- | --- |
 | macOS before 26, or a Mac that can never run it (`deviceNotEligible`) | nothing | where the local model is announced (above): "Apple Intelligence is not available on this Mac" and the Coming soon block alone, without its sentence about today, since a local model could reach this Mac. Elsewhere the page does not exist. |
-| Apple Intelligence off (`appleIntelligenceNotEnabled`) | nothing, plus the invitation once | Beta beside the title, the reason in one sentence, "Open System Settings ↗", then the Coming soon block |
+| Apple Intelligence off (`appleIntelligenceNotEnabled`) | nothing, plus the invitation once; onboarding's stage gives the reason and the link (section 6) | Beta beside the title, the reason in one sentence, "Open System Settings ↗", then the Coming soon block |
 | Model not there (`modelNotReady`: downloading, or held back by the system, for instance when Siri's language and the Mac's differ) | nothing, plus the invitation once | Beta beside the title, "Apple Intelligence is not ready on this Mac yet", "Dever will use it once it is ready", "Open System Settings ↗", then the Coming soon block. Never "downloading": the API does not say why. |
 | Available | features on | as section 6 |
 

@@ -58,7 +58,7 @@ DEVER_SNAPSHOT_DIR=/tmp/dever-shots ./build/Dever.app/Contents/MacOS/Dever
 ```
 
 It opens Overview, the first project and Settings in dark then light mode, saves one PNG per screen, and quits.
-Add `DEVER_SNAPSHOT_ONBOARDING=1` to capture the onboarding stages too (`DEVER_SNAPSHOT_STAGE=connect` for that stage alone), and `DEVER_SNAPSHOT_WAIT=0` to capture the loading state.
+Add `DEVER_SNAPSHOT_ONBOARDING=1` to capture the onboarding stages too (`DEVER_SNAPSHOT_STAGE=name|connect|repositories|channels|intelligence|project` for that stage alone), and `DEVER_SNAPSHOT_WAIT=0` to capture the loading state.
 `DEVER_SNAPSHOT_PROJECT=1` captures the second project instead of the first.
 `DEVER_SNAPSHOT_DELIVERY=busy` (or `grab`, `done`) fills the Delivery panel with a made-up project, to capture every situation.
 `DEVER_SNAPSHOT_ISSUE=1` opens the first project's first issue and saves `issue-{dark,light}.png` plus a `-end` capture
@@ -86,10 +86,13 @@ With `DEVER_SNAPSHOT_OVERVIEW_DEMO=busy` the Overview's long mention shows as it
 `DEVER_SNAPSHOT_INTELLIGENCE=off`; without the variable the Mac's own model writes it).
 `DEVER_SNAPSHOT_WHY=1` with `DEVER_SNAPSHOT_DELIVERY=busy` opens the failed checks' card on the "Start here" tile; `DEVER_SNAPSHOT_WHY=open` with
 `DEVER_SNAPSHOT_ISSUE=1` shows a made-up failed pull request on the issue page with its card open.
+`DEVER_SNAPSHOT_ONBOARDING=1 DEVER_SNAPSHOT_STAGE=intelligence` with each value of `DEVER_SNAPSHOT_INTELLIGENCE` captures the onboarding's
+Intelligence stage in that state; with `unsupported` the stage is not part of the flow, and the capture shows the first-project
+stage and five progress marks.
 Nothing is written back in these runs.
 
 ## Onboarding
 
 New users (no project yet) start with a short welcome: their display name, connecting Slack, Linear and GitHub
-(with what each one is used for), where the code lives (the repository mode, with GitHub), the channel prefix, then
-a first project. Reopen it from Help → Welcome to Dever….
+(with what each one is used for), where the code lives (the repository mode, with GitHub), the channel prefix, what the Mac's own model does
+(where the Mac can run it), then a first project. Reopen it from Help → Welcome to Dever….
