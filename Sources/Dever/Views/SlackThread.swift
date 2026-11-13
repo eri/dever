@@ -1718,9 +1718,21 @@ private struct ReactionPill: View {
                 showingWho = false
             }
         }
-        .popover(isPresented: $showingWho, arrowEdge: .top) {
-            WhoReacted(reaction: reaction, custom: custom, users: users, me: me)
+        // Drawn in the window, over the message, not in a popover: a popover is a window of its
+        // own that takes the key, which made the pointer flicker on the pill and swallowed the
+        // click meant for it.
+        .overlay(alignment: .topLeading) {
+            if showingWho {
+                // A frame of no height on the pill's top edge, the card hanging above it.
+                WhoReacted(reaction: reaction, custom: custom, users: users, me: me)
+                    .frame(height: 0, alignment: .bottomLeading)
+                    .offset(y: -6)
+                    .allowsHitTesting(false)
+                    .transition(.opacity)
+            }
         }
+        .motion(Motion.quick, fade: true, value: showingWho)
+        .zIndex(showingWho ? 1 : 0)
         .modifier(FocusOutline(radius: 12))
         .accessibilityLabel("\(SlackMarkup.reactionName(reaction.name)), \(reaction.count)\(on ? ", including you" : "")")
         .accessibilityValue(WhoReacted.names(reaction: reaction, users: users, me: me))
@@ -1767,12 +1779,14 @@ private struct WhoReacted: View {
             }
         }
         .padding(12)
-        // A popover takes its size from the content's ideal size. A flexible width left that
-        // to the window, which gave a tall, mostly empty card: fix the width and let the
-        // height follow the text.
+        // A fixed width, the height following the text: a flexible width gave a tall, mostly
+        // empty card.
         .frame(width: 240, alignment: .leading)
         .fixedSize()
-        .background(Soot.surface)
+        .background(Soot.surface, in: RoundedRectangle(cornerRadius: Soot.radius))
+        .overlay(RoundedRectangle(cornerRadius: Soot.radius).strokeBorder(Soot.line))
+        .shadow(color: .black.opacity(0.22), radius: 12, y: 4)
+        .accessibilityHidden(true)
     }
 }
 
