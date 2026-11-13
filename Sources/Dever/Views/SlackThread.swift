@@ -1539,7 +1539,9 @@ private struct MessageRow: View {
         .motion(Motion.quick, fade: true, value: hovering)
         .motion(Motion.ui, value: selected)
         .contentShape(Rectangle())
-        .simultaneousGesture(TapGesture().onEnded { if let openWide { openWide(message) } }, including: openWide == nil ? .none : .all)
+        // `.subviews`, not `.none`, where the row itself opens nothing: `.none` also silences the
+        // buttons inside it, and the reactions and the replies link stopped answering in the room.
+        .simultaneousGesture(TapGesture().onEnded { if let openWide { openWide(message) } }, including: openWide == nil ? .subviews : .all)
         .help(openWide == nil ? "" : "Open the conversation at this message")
         .overlay(alignment: .topTrailing) {
             toolbar.opacity(stripShown ? 1 : 0).offset(x: 0, y: -6)
