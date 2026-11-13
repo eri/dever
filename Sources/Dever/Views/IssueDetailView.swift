@@ -774,10 +774,22 @@ struct IssueDetailView: View {
         return list.sorted { $0.date > $1.date }
     }
 
-    /// Under six hours old: the thread marks it so the newest changes stand out.
+    /// Under six hours old: the time turns lime with a dot, and a hairline separates these
+    /// from the rest. `DEVER_SNAPSHOT_RECENT_HOURS` widens the window for captures.
     private func isRecent(_ date: String) -> Bool {
         guard let d = LinearDate.parse(date) else { return false }
-        return Date().timeIntervalSince(d) < 6 * 3600
+        let hours = ProcessInfo.processInfo.environment["DEVER_SNAPSHOT_RECENT_HOURS"].flatMap(Double.init) ?? 6
+        return Date().timeIntervalSince(d) < hours * 3600
+    }
+
+    private var earlierDivider: some View {
+        HStack(spacing: 10) {
+            Text("Earlier").font(.system(size: 12, weight: .medium)).foregroundStyle(Soot.muted)
+            Rectangle().fill(Soot.line).frame(height: 1)
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 10)
+        .accessibilityAddTraits(.isHeader)
     }
 
     private func describe(_ e: LinearIssueDetail.HistoryEvent, labels: [String: String]) -> [Change] {
@@ -811,6 +823,8 @@ struct IssueDetailView: View {
         return VStack(alignment: .leading, spacing: 0) {
             ForEach(Array(list.enumerated()), id: \.element.id) { index, item in
                 let previous = index > 0 ? list[index - 1] : nil
+                // Newest first: the recent ones sit on top, and one hairline says where "earlier" begins.
+                if let previous, isRecent(previous.date), !isRecent(item.date) { earlierDivider }
                 switch item {
                 case .created(let date, let state):
                     eventRow(name: d.creator?.name, avatar: d.creator?.avatarUrl,
@@ -869,7 +883,6 @@ struct IssueDetailView: View {
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 4)
-        .background(isRecent(date) ? Soot.lime.opacity(0.06) : Color.clear, in: RoundedRectangle(cornerRadius: 8))
         .accessibilityElement(children: .combine)
     }
 
@@ -958,7 +971,7 @@ private struct CommentRow: View {
         .padding(.leading, reply ? 28 : 0)
         .padding(.vertical, 4)
         .padding(.horizontal, 8)
-        .background(hovering ? Soot.ground.opacity(0.6) : recent ? Soot.lime.opacity(0.06) : Color.clear, in: RoundedRectangle(cornerRadius: 8))
+        .background(hovering ? Soot.ground.opacity(0.6) : Color.clear, in: RoundedRectangle(cornerRadius: 8))
         .onHover { hovering = $0 }
         .accessibilityElement(children: .contain)
         .task(id: comment.body) { blocks = await store.blocks(for: comment.body) }
