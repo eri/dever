@@ -818,6 +818,7 @@ struct ProjectDetailView: View {
         guard let id = project.linear?.id, states[.linear] != .notConnected else { return }
         do {
             _ = try await issueStore.load(project: id, force: force, app: app)
+            Task { await issueStore.people(app: app) }
             succeeded(.linear)
             await issueStore.loadPlanContext(project: id, app: app)
         } catch { failed(.linear, error) }

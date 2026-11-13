@@ -124,6 +124,24 @@ final class IssueStore: ObservableObject {
 
     func cachedDetail(_ id: String) -> LinearIssueDetail? { details[id] }
 
+    private var peopleAt: Date?
+    private var peopleLoad: Task<Void, Never>?
+
+    /// Members' emails, at most once an hour, shared by every screen (see `PeopleIndex`).
+    func people(app: AppState) async {
+        if let peopleAt, Date().timeIntervalSince(peopleAt) < 3600 { return }
+        if let peopleLoad { return await peopleLoad.value }
+        let task = Task {
+            if let emails = try? await app.withLinear({ try await $0.peopleEmails() }) {
+                PeopleIndex.shared.linear(emails)
+                self.peopleAt = Date()
+            }
+        }
+        peopleLoad = task
+        await task.value
+        peopleLoad = nil
+    }
+
     func team(_ id: String, app: AppState) async throws -> LinearTeamContext {
         if let hit = teams[id], Date().timeIntervalSince(hit.at) < teamTTL { return hit.context }
         if let running = teamLoads[id] { return try await running.value }

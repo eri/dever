@@ -564,7 +564,7 @@ struct DeliveryBoard: View {
     @ViewBuilder
     private func person(_ issue: LinearIssue) -> some View {
         if let person = issue.assignee {
-            LinearAvatar(name: person.name, avatarURL: person.avatarUrl).help(person.name)
+            LinearAvatar(name: person.name, avatarURL: person.avatarUrl, personID: person.id).help(person.name)
                 .accessibilityLabel("Assigned to \(person.name)")
         } else {
             Image(systemName: "person.crop.circle.badge.questionmark").foregroundStyle(Soot.muted)
@@ -611,7 +611,7 @@ struct DeliveryBoard: View {
         fold("Others", count: plan.others.count, open: $showsOthers) {
             HStack(spacing: -5) {
                 ForEach(people.prefix(4), id: \.name) { p in
-                    LinearAvatar(name: p.name, avatarURL: p.avatarUrl, size: 18)
+                    LinearAvatar(name: p.name, avatarURL: p.avatarUrl, size: 18, personID: p.id)
                         .overlay(Circle().strokeBorder(Soot.surface, lineWidth: 1.5))
                 }
             }

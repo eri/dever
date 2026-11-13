@@ -132,10 +132,15 @@ struct LabelPill: View {
 /// A Linear member's picture from the shared cache, or their initial on a tint.
 struct LinearAvatar: View {
     @EnvironmentObject var app: AppState
+    @ObservedObject private var people = PeopleIndex.shared
     let name: String
     var avatarURL: String?
     var size: CGFloat = 22
+    /// The Linear user id: with it, the Slack photo of the same person (same email) wins.
+    var personID: String? = nil
     @State private var image: CGImage?
+
+    private var slackPhoto: URL? { people.photo(linearID: personID) }
 
     var body: some View {
         Group {
@@ -152,7 +157,12 @@ struct LinearAvatar: View {
         .frame(width: size, height: size)
         .clipShape(Circle())
         .accessibilityHidden(true)
-        .task(id: avatarURL) {
+        .task(id: (slackPhoto?.absoluteString ?? "") + (avatarURL ?? "")) {
+            if let slack = slackPhoto,
+               let picture = await ImageCache.shared.image(slack, kind: .avatars, source: "slack", maxPixels: Int(size * 2.5)) {
+                image = picture
+                return
+            }
             guard let avatarURL, let url = URL(string: avatarURL) else { image = nil; return }
             let token = app.linear?.accessToken
             image = await ImageCache.shared.image(url, kind: .avatars, source: "linear", maxPixels: Int(size * 2.5)) { req in
@@ -238,7 +248,7 @@ struct IssueRow: View {
         Spacer(minLength: 12)
         DueDateText(dueDate: issue.dueDate)
         if let person = issue.assignee {
-            LinearAvatar(name: person.name, avatarURL: person.avatarUrl).help(person.name)
+            LinearAvatar(name: person.name, avatarURL: person.avatarUrl, personID: person.id).help(person.name)
                 .accessibilityLabel("Assigned to \(person.name)")
         } else {
             Image(systemName: "person.crop.circle.badge.questionmark").foregroundStyle(Soot.muted)

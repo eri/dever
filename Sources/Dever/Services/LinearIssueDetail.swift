@@ -191,6 +191,17 @@ extension LinearClient {
         """, variables: ["id": id], as: R.self).issue
     }
 
+    /// Every workspace member's email by user id, to find them in Slack (`PeopleIndex`).
+    func peopleEmails() async throws -> [String: String] {
+        struct R: Decodable {
+            struct U: Decodable { var id: String; var email: String? }
+            struct C: Decodable { var nodes: [U] }
+            var users: C
+        }
+        let r = try await query("{ users(first: 250) { nodes { id email } } }", as: R.self)
+        return Dictionary(r.users.nodes.compactMap { u in u.email.map { (u.id, $0) } }, uniquingKeysWith: { a, _ in a })
+    }
+
     func teamContext(id: String) async throws -> LinearTeamContext {
         struct R: Decodable {
             struct T: Decodable {

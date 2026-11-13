@@ -197,6 +197,8 @@ struct SlackUser: Codable, Identifiable, Hashable {
     var name: String
     var avatar: URL?
     var isBot: Bool
+    /// Work email (scope `users:read.email`): how a Linear user is recognised as this person.
+    var email: String? = nil
 }
 
 /// One page of channel history, newest first.
@@ -212,7 +214,7 @@ enum SlackAuth {
     static let callbackPath = "/slack/callback"
     static let userScopes = [
         "channels:read", "groups:read", "channels:history", "groups:history",
-        "channels:write", "groups:write", "users:read", "team:read", "files:read",
+        "channels:write", "groups:write", "users:read", "users:read.email", "team:read", "files:read",
         "chat:write", "reactions:read", "reactions:write", "emoji:read",
     ].joined(separator: ",")
 
@@ -297,7 +299,8 @@ struct SlackClient {
         let display = (profile?["display_name"] as? String).flatMap { $0.isEmpty ? nil : $0 }
         let name = (m["real_name"] as? String) ?? display ?? (m["name"] as? String) ?? id
         let image = (profile?["image_72"] as? String) ?? (profile?["image_48"] as? String)
-        return SlackUser(id: id, name: name, avatar: image.flatMap(URL.init(string:)), isBot: m["is_bot"] as? Bool ?? false)
+        return SlackUser(id: id, name: name, avatar: image.flatMap(URL.init(string:)), isBot: m["is_bot"] as? Bool ?? false,
+                         email: profile?["email"] as? String)
     }
 
     func channels() async throws -> [SlackChannel] {
@@ -432,7 +435,7 @@ struct SlackClient {
                 let name = display ?? (m["real_name"] as? String) ?? (m["name"] as? String) ?? id
                 let image = (profile?["image_72"] as? String) ?? (profile?["image_48"] as? String)
                 out[id] = SlackUser(id: id, name: name, avatar: image.flatMap(URL.init(string:)),
-                                    isBot: m["is_bot"] as? Bool ?? false)
+                                    isBot: m["is_bot"] as? Bool ?? false, email: profile?["email"] as? String)
             }
             cursor = (res["response_metadata"] as? [String: Any])?["next_cursor"] as? String ?? ""
         } while !cursor.isEmpty

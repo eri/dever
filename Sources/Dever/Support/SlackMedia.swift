@@ -179,6 +179,7 @@ actor SlackDirectory {
         defer { loading = nil }
         let users = try await task.value
         cached = (team, users, Date())
+        await MainActor.run { PeopleIndex.shared.slack(users.values) }
         return users
     }
 

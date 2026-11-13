@@ -272,6 +272,7 @@ Refresh every. "Volatile" is the cadence while something is in flight.
 | Team states, members | 15 min | | | |
 | Project lead, team, target date | 15 min | | | |
 | Slack members · custom emoji | 15 min · 1 h | | | disk copy |
+| Linear members' emails (to show their Slack photo, `PeopleIndex`) | 1 h | | | one `users { id email }` query; Slack's side rides on the members list above |
 | Catalogues in pickers (channels, Linear projects, repositories, pull requests) | on opening the picker | | | |
 | Account identity (Settings) | on opening Settings | | connect, disconnect | |
 

@@ -481,7 +481,7 @@ struct IssueDetailView: View {
             }
         } label: {
             if let p = current.assignee {
-                LinearAvatar(name: p.name, avatarURL: p.avatarUrl, size: 18)
+                LinearAvatar(name: p.name, avatarURL: p.avatarUrl, size: 18, personID: p.id)
                 Text(p.name).font(.system(size: 13, weight: .medium)).foregroundStyle(Soot.ink).lineLimit(1)
             } else {
                 Image(systemName: "person.crop.circle.badge.questionmark").foregroundStyle(Soot.muted)
@@ -489,7 +489,7 @@ struct IssueDetailView: View {
             }
         } row: { c in
             if let m = c.value {
-                LinearAvatar(name: m.name, avatarURL: m.avatarUrl, size: 20)
+                LinearAvatar(name: m.name, avatarURL: m.avatarUrl, size: 20, personID: m.id)
                 Text(m.name)
             } else {
                 Image(systemName: "person.crop.circle.badge.questionmark").foregroundStyle(Soot.muted).frame(width: 20)
@@ -663,7 +663,7 @@ struct IssueDetailView: View {
                                     }
                                     .fixedSize()
                                     if let p = b.assignee {
-                                        LinearAvatar(name: p.name, avatarURL: p.avatarUrl).help(p.name)
+                                        LinearAvatar(name: p.name, avatarURL: p.avatarUrl, personID: p.id).help(p.name)
                                     } else {
                                         Image(systemName: "person.crop.circle.badge.questionmark").foregroundStyle(Soot.muted).help("Unassigned")
                                     }
@@ -827,7 +827,7 @@ struct IssueDetailView: View {
                 if let previous, isRecent(previous.date), !isRecent(item.date) { earlierDivider }
                 switch item {
                 case .created(let date, let state):
-                    eventRow(name: d.creator?.name, avatar: d.creator?.avatarUrl,
+                    eventRow(name: d.creator?.name, avatar: d.creator?.avatarUrl, personID: d.creator?.id,
                              changes: [Change(symbol: state == nil ? "plus.circle" : "", text: state.map { "created an issue with status \($0.name)" } ?? "created the issue", state: state)],
                              date: date)
                 case .pull(let p, let date):
@@ -847,7 +847,7 @@ struct IssueDetailView: View {
                         .padding(.top, grouped ? 2 : 16)
                         .padding(.bottom, 8)
                 case .event(let e, let changes):
-                    eventRow(name: e.actorName, avatar: e.actor?.avatarUrl, changes: changes, date: e.createdAt)
+                    eventRow(name: e.actorName, avatar: e.actor?.avatarUrl, personID: e.actor?.id, changes: changes, date: e.createdAt)
                 }
             }
         }
@@ -855,10 +855,10 @@ struct IssueDetailView: View {
     }
 
     /// One quiet line of history: who, what, when.
-    private func eventRow(name: String?, avatar: String?, changes: [Change], date: String) -> some View {
+    private func eventRow(name: String?, avatar: String?, personID: String? = nil, changes: [Change], date: String) -> some View {
         HStack(alignment: .top, spacing: 12) {
             Group {
-                if let name { LinearAvatar(name: name, avatarURL: avatar, size: 26) }
+                if let name { LinearAvatar(name: name, avatarURL: avatar, size: 26, personID: personID) }
                 else { Image(systemName: "plus.circle").font(.system(size: 16)).foregroundStyle(Soot.muted) }
             }
             .frame(width: 28, height: 26, alignment: .center)
@@ -905,6 +905,7 @@ struct IssueDetailView: View {
 
     private func load() async {
         descriptionExpanded = false
+        Task { await store.people(app: app) }
         error = nil
         if let cached = store.cachedDetail(route.issueID), route.updatedAt == nil || cached.updatedAt == route.updatedAt {
             detail = cached
@@ -947,7 +948,7 @@ private struct CommentRow: View {
                 if grouped {
                     Color.clear
                 } else {
-                    LinearAvatar(name: comment.authorName, avatarURL: comment.user?.avatarUrl, size: 30)
+                    LinearAvatar(name: comment.authorName, avatarURL: comment.user?.avatarUrl, size: 30, personID: comment.user?.id)
                 }
             }
             .frame(width: 30, height: grouped ? 4 : 30)
