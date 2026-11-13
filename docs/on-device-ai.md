@@ -392,12 +392,21 @@ Summaries
 - **Onboarding** has an Intelligence stage (`OnboardingIntelligence.swift`), after the channel names and
   before the first project: the tools are connected and described by then, and the projects are the way
   out of onboarding. It replaces the quiet line the Connect stage carried while there was nothing to choose.
-  - **Left:** above the headline, what is asked, by name: a lit sparkle, "Enable Local Intelligence" in
-    lime and the word Beta (its tooltip gives the meaning). A first form had the word Beta alone there,
-    and the user found the screen did not say what it was about. Then the headline "Skip the long reads", one row
-    per built use that has a picture ("Long messages", "Explain a failure"), each with one short line and
-    a switch, then Continue beside the promise of rule 3: "Runs on this Mac. Nothing leaves it." The
-    whole row is the switch; VoiceOver hears the title, the line and On or Off.
+  - **Left,** top to bottom: what is asked, by name (a lit sparkle, "Enable Local Intelligence" in lime
+    and the word Beta, whose tooltip gives the meaning); the headline "Skip the long reads"; one
+    sentence that says whose model it is and what it does here ("Apple Intelligence, the model built
+    into your Mac, sums up long messages and explains failed pipelines."); the answer, as two rows
+    drawn like the channel-naming stage's ("Turn it on", Recommended, and "Not now", with "Turn it on
+    any time in Settings"); what it costs, as three short facts with a glyph each ("Runs on your Mac's
+    own chip", "Nothing leaves it", "Nothing to install"); Continue.
+  - **Why this shape.** A first form had the word Beta alone above the headline and one switch per
+    use: the user found that the screen did not say what it was about, did not say it was Apple's
+    model running on the Mac, had no plain way to say no, and did not say that nothing had to be
+    installed. The switches per use stay in Settings; here the question is one.
+  - **What is not said.** "Nothing to install" shows only while the model is there (off or not ready,
+    the system may still have it to fetch). Nothing claims that it uses no resources: a summary keeps
+    the chip busy for one to three seconds (section 2). The chip is not named (the framework does not
+    say which part of it runs the model).
   - **Right:** on the lime stage, in the place of the window crop, a made-up project page: a long message
     of the rail as its summary, a failed pipeline with its card and the sentence behind the sparkle. What
     the Mac wrote is lit, which it never is in the app (section 4): a lime edge and a soft lime light,
@@ -405,17 +414,19 @@ Summaries
     as it came stays above its summary, dimmed, so the picture reads as before and after. Large
     sparkles sit on the lime stage around it. Every sparkle of the stage breathes on a 2.4 s beat
     (`Twinkle`), still under Reduce Motion. The
-    picture answers to the switches: off, the message is cut at four lines with "Show more" and the
+    picture answers to the choice: with "Not now", the message is cut at four lines with "Show more" and the
     failed state is plain, with no card. It is a picture: nothing in it is clickable or read by the model.
-  - **One source of truth:** the switches are the keys of Settings › Intelligence
-    (`IntelligenceFeature.settingKey`), written in one place by both screens
-    (`IntelligencePreferences.set`), which also drops what a use had written when it goes off. On by
-    default, as in Settings. The language of summaries is not asked here; Settings has it.
-  - **Off or not ready:** the same stage with, in the place of the switches, one row: "Apple Intelligence
+  - **One source of truth:** a row writes, at once and for every use the stage presents, the keys of
+    Settings › Intelligence (`IntelligenceFeature.settingKey`), through the one function both screens
+    use (`IntelligencePreferences.set`), which also drops what a use had written when it goes off. On
+    by default, as in Settings; "Turn it on" shows as chosen while any use is on, and nothing is
+    written until a row is clicked, so a choice made use by use in Settings survives a replay. The
+    language of summaries is not asked here; Settings has it.
+  - **Off or not ready:** the same stage with, in the place of the two rows, one row: "Apple Intelligence
     is off on this Mac" and "Turn it on to use it here", or "Apple Intelligence is not ready on this Mac
     yet" and "Dever will use it once it is ready" (never "downloading", section 7), with "Open System
     Settings ↗". The picture stays: it shows what Dever will do. Back from System Settings the stage
-    shows the switches by itself (`IntelligenceStatus`).
+    shows the two rows by itself (`IntelligenceStatus`).
   - **A Mac that can never run it** (macOS before 26, `deviceNotEligible`): the stage is left out, with
     its progress mark (`OnboardingView.Stage.flow`). Showing it disabled was set aside: every other
     stage asks one thing the user can answer, and here there would be nothing to choose and nothing to

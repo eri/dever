@@ -1,10 +1,12 @@
 import SwiftUI
 
-// The Intelligence stage of onboarding (docs/on-device-ai.md, section 6): what the Mac's own
-// model does in Dever today, one switch per use over the same keys as Settings › Intelligence,
-// and on the stage a long message and a failed pipeline that answer to the switches. While the
-// model is off or not ready, the reason and the way to System Settings instead of the switches.
-// On a Mac that can never run the model the stage is not part of the flow at all.
+// The Intelligence stage of onboarding (docs/on-device-ai.md, section 6): one question, whether
+// Dever uses the model built into the Mac. It says whose model it is (Apple Intelligence), what
+// it does here, and what it costs (nothing to install, nothing leaves the Mac); two rows answer
+// it, on or off, over the same keys as Settings › Intelligence, and on the stage a long message
+// and a failed pipeline show the answer. While the model is off or not ready, the reason and the
+// way to System Settings instead of the rows. On a Mac that can never run the model the stage
+// is not part of the flow at all.
 
 /// The uses the stage presents, in its order: those that exist in this build and have a picture.
 enum OnboardingIntelligence {
@@ -12,24 +14,24 @@ enum OnboardingIntelligence {
         [.messageSummary, .explainFailure].filter(IntelligenceFeature.built.contains)
     }
 
-    /// One short line under a use's title; the picture on the stage says the rest.
-    static func detail(_ feature: IntelligenceFeature) -> String {
-        switch feature {
-        case .messageSummary: "One sentence in their place"
-        case .explainFailure: "Why a pipeline failed, when you ask"
-        default: feature.detail ?? ""
-        }
-    }
-
-    static func symbol(_ feature: IntelligenceFeature) -> String {
-        feature == .explainFailure ? "xmark.circle" : "text.alignleft"
-    }
-
     /// What the stage asks, above its headline.
     static let name = "Enable Local Intelligence"
 
-    /// The promise of rule 3, in the app's own words.
-    static let privacy = "Runs on this Mac. Nothing leaves it."
+    /// Whose model it is and what it does here, in one sentence.
+    static let lead = "Apple Intelligence, the model built into your Mac, sums up long messages and explains failed pipelines."
+
+    /// What turning it on gives, under the row that does.
+    static let onDetail = "Long messages summed up, failures explained"
+    static let offDetail = "Turn it on any time in Settings"
+
+    /// What it costs, as short facts with a glyph each. "Nothing to install" only while the
+    /// model is there: off or not ready, the system may still have it to fetch. Never a word
+    /// on speed or power: a summary keeps the Mac's chip busy for a second or three.
+    static func terms(_ availability: IntelligenceAvailability) -> [(symbol: String, text: String)] {
+        var terms = [("cpu", "Runs on your Mac's own chip"), ("lock", "Nothing leaves it")]
+        if availability == .available { terms.append(("checkmark.circle", "Nothing to install")) }
+        return terms
+    }
 
     /// What the model's state means here, while there is nothing to switch.
     static func waiting(_ availability: IntelligenceAvailability) -> (title: String, detail: String) {
@@ -41,10 +43,22 @@ enum OnboardingIntelligence {
 
 struct IntelligenceControls: View {
     @ObservedObject private var status = IntelligenceStatus.shared
+    @AppStorage(IntelligenceFeature.messageSummary.settingKey) private var summaries = true
+    @AppStorage(IntelligenceFeature.explainFailure.settingKey) private var failures = true
     let next: () -> Void
 
+    /// On while any of its uses is: Settings can switch them one by one.
+    private var on: Bool {
+        OnboardingIntelligence.features.contains { $0 == .messageSummary ? summaries : failures }
+    }
+
+    /// The answer, written at once to the keys Settings reads, every use together.
+    private func choose(_ value: Bool) {
+        for feature in OnboardingIntelligence.features { IntelligencePreferences.set(feature, on: value) }
+    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 28) {
+        VStack(alignment: .leading, spacing: 24) {
             VStack(alignment: .leading, spacing: 14) {
                 // What is being asked, by name, before the benefit: the sparkle is the mark every
                 // generated text carries in the app, here lit and alive.
@@ -57,66 +71,75 @@ struct IntelligenceControls: View {
                     StageTag(kind: .beta)
                 }
                 Headline(text: "Skip the long reads")
+                Text(OnboardingIntelligence.lead).font(.system(size: 15)).foregroundStyle(Soot.muted)
+                    .lineSpacing(3).fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: 400, alignment: .leading)
             }
             Group {
                 if status.availability == .available {
                     VStack(spacing: 8) {
-                        ForEach(OnboardingIntelligence.features) { IntelligenceChoice(feature: $0) }
+                        choice(selected: on, title: "Turn it on", tag: "Recommended",
+                               detail: OnboardingIntelligence.onDetail) { choose(true) }
+                        choice(selected: !on, title: "Not now", tag: nil,
+                               detail: OnboardingIntelligence.offDetail) { choose(false) }
                     }
+                    .accessibilityElement(children: .contain)
+                    .accessibilityLabel("Local Intelligence")
                 } else {
                     IntelligenceWaiting(availability: status.availability)
                 }
             }
             .frame(maxWidth: 400)
-            HStack(spacing: 16) {
-                Button("Continue", action: next)
-                    .buttonStyle(PrimaryButton(size: .sheet))
-                    .keyboardShortcut(.defaultAction)
-                Label(OnboardingIntelligence.privacy, systemImage: "lock")
-                    .font(.system(size: 13))
-                    .foregroundStyle(Soot.muted)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
+            terms
+            Button("Continue", action: next)
+                .buttonStyle(PrimaryButton(size: .sheet))
+                .keyboardShortcut(.defaultAction)
         }
         .motion(Motion.ui, fade: true, value: status.availability)
     }
-}
 
-/// One use of the model as a row that is its own switch: the whole row toggles it.
-private struct IntelligenceChoice: View {
-    let feature: IntelligenceFeature
-    @AppStorage private var on: Bool
-
-    init(feature: IntelligenceFeature) {
-        self.feature = feature
-        _on = AppStorage(wrappedValue: true, feature.settingKey)
+    /// The facts on one line where they fit, one under the other where they do not.
+    private var terms: some View {
+        let labels = ForEach(OnboardingIntelligence.terms(status.availability), id: \.text) { term in
+            HStack(spacing: 6) {
+                Image(systemName: term.symbol).font(.system(size: 12, weight: .medium)).frame(width: 16)
+                    .accessibilityHidden(true)
+                Text(term.text).font(.system(size: 13)).lineLimit(1).fixedSize()
+            }
+            .foregroundStyle(Soot.muted)
+        }
+        return ViewThatFits(in: .horizontal) {
+            HStack(spacing: 16) { labels }
+            VStack(alignment: .leading, spacing: 6) { labels }
+        }
+        .frame(maxWidth: 400, alignment: .leading)
     }
 
-    var body: some View {
-        Button { IntelligencePreferences.set(feature, on: !on) } label: {
+    /// One of the two answers, as the channel-naming stage draws its own: a ring, the title,
+    /// one short line, a lime edge on the one that holds.
+    private func choice(selected: Bool, title: String, tag: String?, detail: String, select: @escaping () -> Void) -> some View {
+        Button(action: select) {
             HStack(spacing: 12) {
-                Image(systemName: OnboardingIntelligence.symbol(feature)).font(.system(size: 16))
-                    .foregroundStyle(on ? Soot.lime : Soot.muted).frame(width: 22)
+                CheckCircle(on: selected).frame(width: 22)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(feature.title).font(.system(size: 16, weight: .medium)).foregroundStyle(Soot.ink)
-                    Text(OnboardingIntelligence.detail(feature)).font(.system(size: 13)).foregroundStyle(Soot.muted)
-                        .lineLimit(1)
+                    HStack(spacing: 8) {
+                        Text(title).font(.system(size: 16, weight: .medium)).foregroundStyle(Soot.ink)
+                        if let tag {
+                            Text(tag).font(.system(size: 11, weight: .semibold)).foregroundStyle(Soot.lime)
+                        }
+                    }
+                    Text(detail).font(.system(size: 13)).foregroundStyle(Soot.muted).lineLimit(1)
                 }
                 Spacer()
-                // Drawn by the system so it reads as a switch; the row is the control.
-                Toggle(feature.title, isOn: .constant(on))
-                    .labelsHidden().toggleStyle(.switch).tint(Soot.lime).controlSize(.small)
-                    .allowsHitTesting(false)
             }
             .padding(.horizontal, 16)
             .frame(height: 64)
             .background(Soot.surface, in: RoundedRectangle(cornerRadius: Soot.radius))
+            .overlay(RoundedRectangle(cornerRadius: Soot.radius).strokeBorder(selected ? Soot.lime.opacity(0.5) : .clear))
         }
         .buttonStyle(RowButton(lift: .tone, radius: Soot.radius))
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(feature.title). \(OnboardingIntelligence.detail(feature))")
-        .accessibilityValue(on ? "On" : "Off")
-        .accessibilityAddTraits(.isToggle)
+        .accessibilityLabel("\(title). \(detail)")
+        .accessibilityAddTraits(selected ? .isSelected : [])
     }
 }
 

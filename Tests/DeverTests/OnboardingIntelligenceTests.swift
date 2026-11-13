@@ -26,6 +26,18 @@ final class OnboardingIntelligenceTests: XCTestCase {
         XCTAssertTrue(OnboardingIntelligence.features.allSatisfy(IntelligenceFeature.built.contains))
     }
 
+    func testNothingToInstallIsSaidOnlyWhileTheModelIsThere() {
+        let said = { (a: IntelligenceAvailability) in OnboardingIntelligence.terms(a).map(\.text) }
+        XCTAssertTrue(said(.available).contains("Nothing to install"))
+        XCTAssertFalse(said(.notReady).contains("Nothing to install"))
+        XCTAssertFalse(said(.off).contains("Nothing to install"))
+        XCTAssertTrue(said(.off).contains("Nothing leaves it"))
+    }
+
+    func testTheStageNamesAppleIntelligence() {
+        XCTAssertTrue(OnboardingIntelligence.lead.contains("Apple Intelligence"))
+    }
+
     @MainActor
     func testTheSwitchWritesTheKeySettingsReadsAndDropsWhatWasWritten() async {
         let name = "onboarding-intelligence-\(UUID().uuidString)"
