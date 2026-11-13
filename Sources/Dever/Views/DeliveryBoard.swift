@@ -51,6 +51,8 @@ struct DeliveryBoard: View {
         : .init(repository: "demo/app", number: 0)
     @State private var teams: [String: LinearTeamContext] = [:]
     @State private var notice: Notice?
+    /// The "Start with" menu of the tile is open: the tile rises above the rows it hangs over.
+    @State private var agentMenu = false
     @State private var noticeTask: Task<Void, Never>?
 
     /// What the last action did, with the way back while it can still be taken.
@@ -249,7 +251,7 @@ struct DeliveryBoard: View {
         let open = failure != nil && (why == failure || why?.number == 0)
         return startLink(item, grab: grab, failure: failure, open: open)
             // The card hangs over the rows under the tile.
-            .zIndex(open ? 1 : 0)
+            .zIndex(open || agentMenu ? 1 : 0)
     }
 
     private func startLink(_ item: DeliveryPlan.Item, grab: Bool, failure: FailureStore.Key?, open: Bool) -> some View {
@@ -288,7 +290,7 @@ struct DeliveryBoard: View {
                 }
                 Spacer(minLength: 12)
                 // Room for the action, which sits on top so it takes its own click.
-                moveButton(move, item: item).hidden().accessibilityHidden(true)
+                moveButton(move, item: item, live: false).hidden().accessibilityHidden(true)
             }
             .padding(16)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -314,7 +316,9 @@ struct DeliveryBoard: View {
     }
 
     @ViewBuilder
-    private func moveButton(_ move: Move, item: DeliveryPlan.Item) -> some View {
+    private func moveButton(_ move: Move, item: DeliveryPlan.Item, live: Bool = true) -> some View {
+        // The copy that only holds the room never opens its menu.
+        let menu = live ? $agentMenu : .constant(false)
         switch move {
         case .link(let label, let url, let help):
             Link(destination: url) {
@@ -327,9 +331,14 @@ struct DeliveryBoard: View {
             .help(help)
             .accessibilityHint("Opens on GitHub")
         case .start(let state):
-            Button("Start") { start(item, in: state) }
-                .buttonStyle(PrimaryButton())
-                .help("Move \(item.issue.identifier) to \(state.name) in Linear\(item.issue.branchName == nil ? "" : " and copy its branch name")")
+            HStack(spacing: 8) {
+                AgentStartMenu(project: project, issue: item.issue, open: menu,
+                               started: { tool, _ in start(item, in: state, with: tool) },
+                               failed: { show(Notice(text: $0, failed: true)) })
+                Button("Start") { start(item, in: state) }
+                    .buttonStyle(PrimaryButton())
+                    .help("Move \(item.issue.identifier) to \(state.name) in Linear\(item.issue.branchName == nil ? "" : " and copy its branch name")")
+            }
         case .advance(let state):
             Button("Move to \(state.name)") { advance(item, to: state) }
                 .buttonStyle(PrimaryButton())
@@ -339,12 +348,17 @@ struct DeliveryBoard: View {
                 .buttonStyle(PrimaryButton())
                 .help("Assign \(item.issue.identifier) to you in Linear")
         case .copyBranch(let branch):
-            Button("Copy branch") {
-                copy(branch)
-                show(Notice(text: "Branch name copied"))
+            HStack(spacing: 8) {
+                AgentStartMenu(project: project, issue: item.issue, title: "Continue with", open: menu,
+                               started: { tool, _ in show(Notice(text: "\(item.issue.identifier) opened in \(tool.label)")) },
+                               failed: { show(Notice(text: $0, failed: true)) })
+                Button("Copy branch") {
+                    copy(branch)
+                    show(Notice(text: "Branch name copied"))
+                }
+                .buttonStyle(SecondaryButton())
+                .help(branch)
             }
-            .buttonStyle(SecondaryButton())
-            .help(branch)
         case .none:
             EmptyView()
         }
@@ -357,10 +371,13 @@ struct DeliveryBoard: View {
         NSPasteboard.general.setString(text, forType: .string)
     }
 
-    private func start(_ item: DeliveryPlan.Item, in state: LinearTeamContext.WorkflowState) {
+    /// Moves the issue to its started state. Started by hand, the branch name goes to the clipboard;
+    /// started with an agent, the agent is already on that branch.
+    private func start(_ item: DeliveryPlan.Item, in state: LinearTeamContext.WorkflowState, with tool: AgentTool? = nil) {
         let branch = item.issue.branchName.flatMap { $0.isEmpty ? nil : $0 }
-        if let branch { copy(branch) }
-        write(item, note: "\(item.issue.identifier) moved to \(state.name)\(branch == nil ? "" : " · branch name copied")",
+        if let branch, tool == nil { copy(branch) }
+        let tail = tool.map { " · opened in \($0.label)" } ?? (branch == nil ? "" : " · branch name copied")
+        write(item, note: "\(item.issue.identifier) moved to \(state.name)\(tail)",
               change: .init(stateID: state.id),
               undo: .init(issueID: item.issue.id, state: item.issue.state)) {
             $0.state = .init(id: state.id, name: state.name, type: state.type, color: state.color)

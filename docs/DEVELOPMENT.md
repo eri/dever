@@ -38,6 +38,13 @@ Tokens are stored in the macOS Keychain (`io.github.eri.dever`), projects in `~/
   read back from the workflows' result comments and runs, refreshed with the overview (every two minutes in the background, every minute on screen) and every 30 s
   after a command until the workflow answers.
 
+## Coding agents
+
+"Start with ⌄" on an issue opens Claude Code or Codex in the user's own tool (desktop app or terminal, Settings › Agents)
+on a worktree of the issue's branch, with a short brief filled in and not sent. Dever finds the clone under the code
+folder by its `origin` remote and creates the worktree under `.dever/worktrees` there, unless the branch is already
+checked out somewhere. The audit, the decisions and the plan: [docs/agents-integration.md](agents-integration.md).
+
 ## Data freshness
 
 How Dever loads, caches and refreshes what it shows, the freshness budget of each kind of data, and the
@@ -60,7 +67,9 @@ DEVER_SNAPSHOT_DIR=/tmp/dever-shots ./build/Dever.app/Contents/MacOS/Dever
 It opens Overview, the first project and Settings in dark then light mode, saves one PNG per screen, and quits.
 Add `DEVER_SNAPSHOT_ONBOARDING=1` to capture the onboarding stages too (`DEVER_SNAPSHOT_STAGE=name|connect|repositories|channels|intelligence|project` for that stage alone), and `DEVER_SNAPSHOT_WAIT=0` to capture the loading state.
 `DEVER_SNAPSHOT_PROJECT=1` captures the second project instead of the first.
-`DEVER_SNAPSHOT_DELIVERY=busy` (or `grab`, `done`) fills the Delivery panel with a made-up project, to capture every situation.
+`DEVER_SNAPSHOT_DELIVERY=busy` (or `grab`, `done`, `agent`) fills the Delivery panel with a made-up project, to capture every situation;
+`DEVER_SNAPSHOT_AGENT_MENU=1` opens the "Start with" menu of the tile (`agent` scene) or of the issue page, and the launch argument
+`-agentCodeFolder <path>` gives that run a code folder without saving it.
 `DEVER_SNAPSHOT_ISSUE=1` opens the first project's first issue and saves `issue-{dark,light}.png` plus a `-end` capture
 scrolled to the comments; add `DEVER_SNAPSHOT_CHOICE=Status` (or `Priority`, `Assignee`) to open that chip's list, and
 `DEVER_SNAPSHOT_TRIAGE=1` to write the issue's current priority back and show the confirmation line.

@@ -2,7 +2,8 @@
 
 An audit of how Dever could work with the two coding agents the team uses most, what form that takes,
 and in what order. Facts were read from the official documentation on 2026-11-13 and from one Mac
-(read-only, structure only); every claim carries its source and its status. Nothing here is built.
+(read-only, structure only); every claim carries its source and its status. Phases 0 and 1 of the
+[plan](#8-plan) are done; the rest is not built.
 
 Contents: [the gap](#1-the-gap-today) · [facts](#2-facts) · [shapes compared](#3-shapes-compared) ·
 [decisions](#4-decisions) · [design](#5-design) · [core or plugin](#6-core-or-plugin-and-mcp-for-both) ·
@@ -71,7 +72,7 @@ Sources: `code.claude.com/docs/en/<page>` unless a full link is given.
 | SDK | Agent SDK in TypeScript and Python only; from Swift the route is spawning the CLI with `stream-json` ([headless](https://code.claude.com/docs/en/headless)) | stable |
 | Deep link, terminal | `claude-cli://open?cwd=/abs/path&q=…` (or `repo=owner/name`) opens a terminal session with the prompt **filled in, not sent**; the handler is registered after one interactive use ([deep-links](https://code.claude.com/docs/en/deep-links)) | stable |
 | Deep link, VS Code | `vscode://anthropic.claude-code/open` ([deep-links](https://code.claude.com/docs/en/deep-links)) | stable |
-| Deep link, desktop app | none documented ([desktop](https://code.claude.com/docs/en/desktop)); the app does register `claude://` | unverified + observed |
+| Deep link, desktop app | none documented ([desktop](https://code.claude.com/docs/en/desktop)); the app registers `claude://` and answers `claude://code/new?q=&folder=` (section 2.5) | internal, observed |
 | Web session with a prefilled prompt | no URL documented | unverified |
 | Transcripts | path `~/.claude/projects/<encoded cwd>/<session>.jsonl` is documented; the line format is "internal and changes between versions"; kept `cleanupPeriodDays` (30) ([sessions](https://code.claude.com/docs/en/sessions)) | path stable, format internal |
 | Listing sessions | SDK `listSessions()`, `getSessionMessages()`, `getSessionInfo()` ([agent-sdk/sessions](https://code.claude.com/docs/en/agent-sdk/sessions)); `claude agents --json` gives `state` (working, blocked, done, failed, stopped) and `status` (busy, waiting, idle) per session ([agent-view](https://code.claude.com/docs/en/agent-view)) | SDK stable; `claude agents` preview |
@@ -94,7 +95,7 @@ pages (CLI reference, app server, config reference, managed configuration) were 
 | Topic | Fact | Status |
 | --- | --- | --- |
 | Headless | `codex exec` with `--json` (events `thread.started` carrying `thread_id`, `turn.*`, `item.*`), `-o`, `--output-schema`, `-C`, `--sandbox`, `-a on-request\|never`; read-only by default; `codex exec resume <id>\|--last`. `--full-auto` is no longer supported ([non-interactive](https://learn.chatgpt.com/docs/non-interactive-mode)) | stable |
-| Interactive with a prompt | `codex "prompt"` not found in the pages read | unverified |
+| Interactive with a prompt | `codex [PROMPT]`: "Optional user prompt to start the session" (`codex --help`, 0.154) | observed |
 | SDK | TypeScript `@openai/codex-sdk`, Python `openai-codex` ([codex-sdk](https://learn.chatgpt.com/docs/codex-sdk)) | stable |
 | App server | `codex app-server`, JSON-RPC over stdio, documented "for deep integration", with thread status (`idle`, `active` + `waitingOnApproval`) for threads the client itself starts; "isn't supported for production workloads" ([app-server](https://learn.chatgpt.com/docs/app-server)) | preview |
 | Codex as an MCP server | `codex mcp-server` has been removed ([mcp-server](https://learn.chatgpt.com/docs/mcp-server)) | removed |
@@ -128,6 +129,35 @@ pages (CLI reference, app server, config reference, managed configuration) were 
   agent's pull request from GitHub alone is guessing; recognising it because Dever saw the session is not.
 - **Transcripts are private and unstable.** They hold whole conversations, their formats are disclaimed
   by both vendors, and Dever does not need them.
+
+### 2.5 Phase 0: what was checked afterwards
+
+**The Claude desktop app has a way in** [internal, observed in version 5.11492]. Read from the app's
+own bundle, where its Finder service "New Claude Code Session Here" uses it:
+
+| Link | Does |
+| --- | --- |
+| `claude://code/new?q=<prompt>&folder=<absolute path>` | opens the Code tab's new session on that folder with the prompt in the composer. `prompt` is accepted for `q`; the text is cut at 14,336 characters; `folder` may repeat |
+| `claude://code/needs-input?session=<local session id>` | brings forward a session that waits for the user (no id: the list of those) |
+| `claude://code/continue?session=last` | the last session |
+| `claude://resume?session=<uuid>` | imports a CLI session by its id and opens it: the id is the `session_id` of the hooks, so this is "Open session" for phase 2 |
+
+None of this is documented, so it can change with any update of the app: the launch must fail in
+words when the app does not answer. Not checked by a click: that the prompt is filled in and not sent
+(the app's own service relies on it for the folder; the prompt takes the same path).
+
+**Hook payloads** [stable, from the hooks pages of both tools]. `Stop` carries
+`last_assistant_message` (string or null) in Claude Code and in Codex: the last sentence needs no
+transcript. Claude Code's `Notification` carries `message` and a `notification_type` (among them
+`permission_prompt`, `idle_prompt`, `agent_needs_input`, `agent_completed`); `SessionStart` has
+`source` (startup, resume, clear, compact, fork); `SessionEnd` has `reason` (Codex: always `other`).
+`PermissionRequest` has `tool_name` and `tool_input` in both. Neither payload says which client
+(terminal or desktop app) runs the session.
+
+**Installing a plugin without the CLI** [unverified]. Claude Code documents an "Add plugins" entry in
+the desktop app and accepts a local directory as a marketplace; whether that works with no `claude`
+on the `PATH` is not stated. Codex has `codex://plugins/install/<name>?marketplace=<m>`. To settle
+with a real install at the start of phase 2.
 
 ---
 
@@ -321,13 +351,22 @@ Smallest useful step first. Days are rough, for one developer who knows the code
 
 | Phase | What | Useful alone? | Effort |
 | --- | --- | --- | --- |
-| **0. Checks** | Inspect the Claude desktop app for a way to open a session on a folder with a prompt, and to bring a session forward. Verify on real installs: the fields of Stop and PermissionRequest (is the last sentence there, in both tools), the plugin install commands from a Mac with no CLI on the `PATH`, Codex's trust review, `codex "prompt"`, the length a deep link's prompt may reach | decides the shape of 1 and 2 | 1–2 d |
-| **1. Launch** | Settings › Agents with the clones' root folder; clone lookup; worktree on the issue's branch; the brief (complete enough to stand without MCP: issue, criteria, link to the thread); "Start with … ⌄" on the Start tile and the issue page | yes: the brief and the right folder in one click | 3–4 d |
+| **0. Checks** (done, section 2.5) | Inspect the Claude desktop app for a way to open a session on a folder with a prompt, and to bring a session forward. Verify on real installs: the fields of Stop and PermissionRequest (is the last sentence there, in both tools), the plugin install commands from a Mac with no CLI on the `PATH`, Codex's trust review, `codex "prompt"`, the length a deep link's prompt may reach | decides the shape of 1 and 2 | 1–2 d |
+| **1. Launch** (done) | Settings › Agents with the clones' root folder; clone lookup; worktree on the issue's branch; the brief (complete enough to stand without MCP: issue, criteria, link to the thread); "Start with … ⌄" on the Start tile and the issue page | yes: the brief and the right folder in one click | 3–4 d |
 | **2. Observe** | The two plugins (hooks only) and "Connect / Disconnect"; `AgentBridge`; `AgentStore`; the state line on the issue and its Delivery row; the ranking; "Open session" | yes: this is the phase that fills the blind stretch | 4–5 d |
 | **3. Context** | MCP server with the read tools, the token, the skill; the brief shrinks to its short form | for the agent; invisible to the developer | 4–5 d |
 | **4. Propose and review** | `propose_update`, `ProposalStore`, "Proposed by the agent", the "review its work" situation with the criteria checklist | yes: closes the loop with Linear and Slack | 5–6 d |
 | **5. Board** | The agents board across projects; worktree clean-up | once several agents run at once | 2–3 d |
 | **6. Plugins** | The MCP client on the same layer, first case the time-and-availability tool | belongs to the plugin system's plan | there |
+
+What phase 1 built: `Model/AgentLaunch.swift` (tools, where each opens, clone lookup by `origin`
+remote, worktree folder and `git worktree add` arguments, the brief, the links), `Services/AgentLauncher.swift`
+(git, opening the tool), `Views/AgentStart.swift` (the menu), Settings › Agents, "Start with ⌄" beside
+**Start** and "Continue with ⌄" beside **Copy branch** on the Start tile, "Open with ⌄" in the issue
+page's Details. Worktrees go to `.dever/worktrees/<repository>/<branch>` in the code folder; a branch
+already checked out anywhere (the clone, a worktree another tool made) is opened where it is. Not
+verified by a click: the four openings against the real apps, and a worktree in a real repository
+(the test makes its own).
 
 Phases 1 and 2 can swap: 2 first gives the clearer development phase sooner, with sessions tied to
 issues by branch alone; 1 first gives the launch record that makes the tie exact.
@@ -340,12 +379,11 @@ data contract of section 5.6.
 
 ## 9. Open points
 
-- Where Dever puts its worktrees (beside the clone, or one folder for all), and what the desktop apps
-  show when opened on a worktree they did not create.
-- Whether the Stop hook carries the agent's last sentence in both tools; if not, Codex has it in
-  `notify`, and Claude Code would need the Notification hook's message or nothing.
+- What the desktop apps show when opened on a worktree they did not create.
 - Whether a Mac with only the desktop apps can install a plugin without the CLI (the Codex app has an
   install deep link; Claude's route is to be checked).
-- "Open session" for the Claude desktop app.
+- "Open session" for the Claude desktop app: `claude://resume?session=` is the candidate (section 2.5).
+- A project with several repositories: the menu asks which one and remembers it; whether an issue
+  could name its repository itself.
 - Sessions an agent starts itself (subagents, side sessions): one line per top session, the rest ignored.
 - The wording shown at "Connect" about project content reaching the agent's provider.

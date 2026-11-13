@@ -311,6 +311,7 @@ means the behaviour once sections 3.1 to 3.4 are in place.
 | Open the card of "CI failed on #N", a check's log | The checks (a new run) | Nothing read before the click; then the failed checks and the end of one log, kept for that run | Dropped when the pull request's checks stop failing; a reading problem says so with "Try again" |
 | "Fix CI", "Review", open a pull request, merge on GitHub | That pull request, its checks, its issue | Old until Refresh | Mark `pulls(repo)` and `issues(project)` dirty; refresh on activation |
 | Open in Linear | That issue | Old until the page reappears | Mark `issues(project)` dirty |
+| Start with / Continue with a coding agent | One issue (the move to its started state, as Start); later its branch and pull request, made in the agent | Not offered | The move is Start's optimistic write; the agent's app shows nothing Dever displays, so nothing is marked dirty: the pull request arrives within the open pull requests' budget and on activation |
 | Deploy / redeploy / delete preview | Preview phase | Optimistic phase, 30 s polling | Keep; also poll when a push started the run |
 | Open the Slack room, read | Read cursor | Cursor moved after 3 s, Overview follows | Keep; move into `SlackStore` |
 | Reply in a thread | Thread, parent's reply count | Whole channel page + cursor + thread refetched | Append the reply locally, refetch the thread only |
@@ -329,6 +330,7 @@ means the behaviour once sections 3.1 to 3.4 are in place.
 | Open in Linear, comment there, return | Comments, anything | Cached detail if the list's `updatedAt` is unchanged | Dirty on external open, refetch on activation |
 | Follow a blocker link | Another issue | Cached for the session when opened without `updatedAt` | Budget applies to every detail |
 | Open its pull request | The pull request | Old | Mark `pulls(repo)` dirty |
+| Open with a coding agent (Details) | Later, the issue's branch and pull request, made in the agent | Not offered | Nothing is written and nothing marked dirty; the pull request arrives within its budget and on activation |
 | Open the card of a failed pull request chip, a check's log | The checks (a new run) | The chip reads `GitHubStore`'s copy with its age; the explanation is read on the click | Dropped when the copy says the checks no longer fail; "No failed check on the latest commit" marks the repository to be read again |
 | Back | | Project page reloads everything | Nothing to fetch |
 
@@ -355,6 +357,7 @@ already exists for this).
 | Repository mode or workspace repository | Which pull requests belong to which project | Whole Overview refresh | Recompute from the stores; fetch only repositories not yet loaded |
 | Refresh every | The background cadence | Read at the next tick | Keep |
 | System Settings for notifications and back | Permission | Rechecked on activation | Keep |
+| Settings › Agents: the code folder, where each tool opens | Nothing remote: which local clone a launch uses | Not offered | The folder is read when the page opens and at each launch; no request |
 | System Settings for Apple Intelligence and back (Settings › Intelligence, the invitation in the Slack rail, the Intelligence stage of onboarding) | Whether the Mac's model can be used | Read again on activation and when the system says it changed (`IntelligenceStatus`); no request | Keep |
 
 ### Onboarding

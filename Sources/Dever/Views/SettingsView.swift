@@ -12,7 +12,7 @@ struct SettingsView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     enum Section: String, CaseIterable, Identifiable {
-        case accounts, repositories, overview, appearance, alerts, intelligence, launch, about
+        case accounts, repositories, agents, overview, appearance, alerts, intelligence, launch, about
         var id: String { rawValue }
 
         /// The sections this Mac has: Intelligence where a feature can run (now or after a fix in
@@ -28,6 +28,7 @@ struct SettingsView: View {
             switch self {
             case .accounts: "Accounts"
             case .repositories: "Repositories"
+            case .agents: "Agents"
             case .overview: "Overview"
             case .appearance: "Appearance"
             case .alerts: "Notifications"
@@ -40,6 +41,7 @@ struct SettingsView: View {
             switch self {
             case .accounts: "link"
             case .repositories: "shippingbox"
+            case .agents: "terminal"
             case .overview: "list.bullet.rectangle"
             case .appearance: "circle.lefthalf.filled"
             case .alerts: "bell"
@@ -61,6 +63,7 @@ struct SettingsView: View {
                     switch section {
                     case .accounts: AccountsSection(flow: flow)
                     case .repositories: RepositoriesSection()
+                    case .agents: AgentsSection()
                     case .overview: OverviewSettingsView()
                     case .appearance: AppearanceSection()
                     case .alerts: AlertsSection()
@@ -1407,6 +1410,86 @@ struct SegmentPicker<Value: Hashable>: View {
         .background(track, in: Capsule())
         .accessibilityElement(children: .contain)
         .accessibilityLabel(label)
+    }
+}
+
+// MARK: - Agents
+
+/// Where the coding agents start: the folder the clones live under, with what Dever finds there
+/// for each repository the projects follow, and where each tool opens.
+private struct AgentsSection: View {
+    @EnvironmentObject var app: AppState
+    @AppStorage(AgentPreferences.rootKey) private var root = ""
+    @AppStorage(AgentPreferences.surfaceKey(.claudeCode)) private var claudeSurface = AgentSurface.app.rawValue
+    @AppStorage(AgentPreferences.surfaceKey(.codex)) private var codexSurface = AgentSurface.app.rawValue
+    /// The clones under the folder, by repository; nil while the folder is being read.
+    @State private var clones: [String: URL]?
+
+    /// Every repository a project follows, once.
+    private var repositories: [String] {
+        var seen = Set<String>()
+        return app.projects.flatMap { app.repositories(for: $0) }.filter { seen.insert($0.lowercased()).inserted }
+    }
+
+    private var surfaces: [(label: String, value: String)] {
+        AgentSurface.allCases.map { (label: $0.label, value: $0.rawValue) }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            SectionHead(title: "Agents",
+                        detail: "Start Claude Code or Codex on an issue: in your own tool, on a worktree of the issue's branch, the brief filled in and not sent.")
+            SettingRows {
+                SettingRow(title: "Code folder",
+                           detail: root.isEmpty ? "Where your repositories are cloned. Dever finds each one by its GitHub remote."
+                               : (root as NSString).abbreviatingWithTildeInPath) {
+                    Button(root.isEmpty ? "Choose…" : "Change…") {
+                        if let url = AgentFolderPanel.choose() { root = url.path }
+                    }
+                    .buttonStyle(SecondaryButton())
+                }
+                SettingRow(title: "Claude Code opens in") {
+                    SegmentPicker(label: "Claude Code opens in", options: surfaces, selection: $claudeSurface)
+                }
+                SettingRow(title: "Codex opens in", divided: false) {
+                    SegmentPicker(label: "Codex opens in", options: surfaces, selection: $codexSurface)
+                }
+            }
+            if !root.isEmpty, !repositories.isEmpty {
+                Text("Repositories").font(.system(size: 13, weight: .semibold)).foregroundStyle(Soot.ink)
+                    .padding(.top, 28).padding(.bottom, 10)
+                    .accessibilityAddTraits(.isHeader)
+                SettingRows {
+                    ForEach(Array(repositories.enumerated()), id: \.element) { index, name in
+                        let clone = clones?[name.lowercased()]
+                        HStack(spacing: 10) {
+                            Image(systemName: clones == nil ? "circle.dotted" : clone == nil ? "questionmark.circle" : "checkmark.circle.fill")
+                                .font(.system(size: 14)).foregroundStyle(clone == nil ? Soot.muted : Soot.lime)
+                                .accessibilityHidden(true)
+                            Text(verbatim: name).font(.system(size: 14, weight: .medium)).foregroundStyle(Soot.ink).lineLimit(1)
+                            Spacer(minLength: 16)
+                            Text(verbatim: clones == nil ? "Looking…" : clone.map { ($0.path as NSString).abbreviatingWithTildeInPath } ?? "No clone under this folder")
+                                .font(.system(size: 13)).foregroundStyle(Soot.muted).lineLimit(1).truncationMode(.head)
+                        }
+                        .frame(minHeight: 44)
+                        .overlay(alignment: .bottom) {
+                            if index < repositories.count - 1 { Rectangle().fill(Soot.line).frame(height: 1) }
+                        }
+                        .accessibilityElement(children: .combine)
+                    }
+                }
+                Text("New worktrees go to .dever/worktrees in the code folder. A branch already checked out somewhere is opened where it is.")
+                    .font(.system(size: 12)).foregroundStyle(Soot.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.top, 10)
+            }
+        }
+        .task(id: root) {
+            clones = nil
+            guard !root.isEmpty else { return }
+            let folder = URL(fileURLWithPath: root, isDirectory: true)
+            clones = await Task.detached { CloneFinder.clones(under: folder) }.value
+        }
     }
 }
 

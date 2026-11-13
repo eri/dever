@@ -3,7 +3,8 @@ import Foundation
 /// Development aid: `DEVER_SNAPSHOT_DELIVERY=<scene>` fills the project page's Delivery panel
 /// with a made-up project instead of the linked one, so every situation can be captured
 /// whatever the real project holds. Scenes: `busy` (one issue in each situation), `grab`
-/// (nothing of the viewer's left, one unassigned issue to take), `done` (everything merged).
+/// (nothing of the viewer's left, one unassigned issue to take), `done` (everything merged),
+/// `agent` (the viewer's issue in progress with no pull request yet: "Continue with" an agent).
 extension DeliveryPlan {
     static var snapshotDemo: DeliveryPlan? {
         guard let scene = ProcessInfo.processInfo.environment["DEVER_SNAPSHOT_DELIVERY"] else { return nil }
@@ -61,6 +62,13 @@ extension DeliveryPlan {
             open["APP-310"] = [pull(941, "Keep scroll position", idle: 0.2)]
             issues.append(issue(311, "Bulk archive from the list", "Todo", "unstarted", nil, priority: 2, due: 4))
             issues.append(issue(312, "Webhook retries with backoff", "In Progress", "started", ana, idle: 2))
+            return DeliveryPlan(issues: issues, open: open, merged: merged, blockers: blockers,
+                                viewer: .init(linearID: "me", linearName: me.name, githubLogin: "sam"), now: now)
+        }
+        if scene == "agent" {
+            issues.append(issue(306, "Offline banner and retry", "In Progress", "started", me, priority: 2))
+            issues.append(issue(308, "Two-factor recovery codes", "Todo", "unstarted", me, priority: 2, due: 3))
+            issues.append(issue(321, "Changelog feed in the help menu", "In Progress", "started", ana, idle: 2))
             return DeliveryPlan(issues: issues, open: open, merged: merged, blockers: blockers,
                                 viewer: .init(linearID: "me", linearName: me.name, githubLogin: "sam"), now: now)
         }

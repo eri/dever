@@ -27,6 +27,8 @@ struct IssueDetailView: View {
     @State private var linksJump = 0
     @State private var linksHighlighted = false
     @State private var labelsExpanded = false
+    /// The "Open with" menu of the Details card is open: the card rises above the ones under it.
+    @State private var agentMenu = false
     /// The description opens on its first lines: Dever is for triage, Linear for reading.
     @State private var descriptionExpanded = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -367,6 +369,14 @@ struct IssueDetailView: View {
                         caption("Branch") {
                             CopyChip(value: branch, what: "branch name", maxWidth: 200)
                                 .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        // To do or in progress (not in review or QA): an agent can pick it up from here.
+                        if ["unstarted", "backlog", "started"].contains(current.state.type), !Delivery.isReviewState(current.state.name),
+                           let project = app.projects.first(where: { $0.id == route.projectID }) {
+                            AgentStartMenu(project: project, issue: current, title: "Open with", fill: Soot.ground,
+                                           edge: .topLeading, open: $agentMenu,
+                                           started: { tool, _ in show("\(current.identifier) opened in \(tool.label)", failed: false) },
+                                           failed: { show($0, failed: true) })
                         }
                     }
                     VStack(alignment: .leading, spacing: 4) {
