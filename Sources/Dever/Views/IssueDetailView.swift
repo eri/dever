@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 /// One Linear issue, read as a document with a margin: the title and the facts that decide
@@ -27,6 +28,7 @@ struct IssueDetailView: View {
     @State private var linksJump = 0
     @State private var linksHighlighted = false
     @State private var labelsExpanded = false
+    @State private var linkCopied = false
     /// The "Open with" menu of the Details card is open: the card rises above the ones under it.
     @State private var agentMenu = false
     /// The description opens on its first lines: Dever is for triage, Linear for reading.
@@ -110,6 +112,23 @@ struct IssueDetailView: View {
             .help("Back to the project (⌘[)")
             .accessibilityLabel("Back to the project")
             Spacer()
+            Button {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(route.url, forType: .string)
+                linkCopied = true
+                Task {
+                    try? await Task.sleep(nanoseconds: 1_600_000_000)
+                    linkCopied = false
+                }
+            } label: {
+                HStack(spacing: 5) {
+                    Image(systemName: linkCopied ? "checkmark" : "link").font(.system(size: 11, weight: .semibold))
+                    Text(linkCopied ? "Copied" : "Copy link")
+                }
+            }
+            .buttonStyle(TertiaryButton(tint: linkCopied ? .lime : .ink, lift: Soot.surface))
+            .help("Copy the link to \(route.identifier)")
+            .accessibilityLabel(linkCopied ? "Link copied" : "Copy the link to \(route.identifier)")
             if let url = URL(string: route.url) {
                 ExternalLink("Open in Linear", destination: url, lift: Soot.surface)
                     .padding(.trailing, -8)
