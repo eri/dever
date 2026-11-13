@@ -295,11 +295,14 @@ struct CursorArea: NSViewRepresentable {
         override func updateTrackingAreas() {
             super.updateTrackingAreas()
             trackingAreas.forEach(removeTrackingArea)
-            addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseMoved, .mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
+            // Always active: a popover opened from the button (who reacted) takes the key window,
+            // and the hand must stay while the pointer is still on the button.
+            addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseMoved, .mouseEnteredAndExited, .cursorUpdate, .activeAlways, .inVisibleRect],
                                            owner: self))
         }
         override func mouseEntered(with event: NSEvent) { claim() }
         override func mouseMoved(with event: NSEvent) { claim() }
+        override func cursorUpdate(with event: NSEvent) { claim() }
         private func claim() {
             DispatchQueue.main.async { [weak self] in
                 guard let self, let window = self.window else { return }
