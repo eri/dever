@@ -392,12 +392,19 @@ Summaries
 - **Onboarding** has an Intelligence stage (`OnboardingIntelligence.swift`), after the channel names and
   before the first project: the tools are connected and described by then, and the projects are the way
   out of onboarding. It replaces the quiet line the Connect stage carried while there was nothing to choose.
-  - **Left:** the word Beta (its tooltip gives the meaning), the headline "Skip the long reads", one row
+  - **Left:** above the headline, what is asked, by name: a lit sparkle, "Enable Local Intelligence" in
+    lime and the word Beta (its tooltip gives the meaning). A first form had the word Beta alone there,
+    and the user found the screen did not say what it was about. Then the headline "Skip the long reads", one row
     per built use that has a picture ("Long messages", "Explain a failure"), each with one short line and
     a switch, then Continue beside the promise of rule 3: "Runs on this Mac. Nothing leaves it." The
     whole row is the switch; VoiceOver hears the title, the line and On or Off.
   - **Right:** on the lime stage, in the place of the window crop, a made-up project page: a long message
-    of the rail as its summary, a failed pipeline with its card and the sentence behind the sparkle. The
+    of the rail as its summary, a failed pipeline with its card and the sentence behind the sparkle. What
+    the Mac wrote is lit, which it never is in the app (section 4): a lime edge and a soft lime light,
+    and above it a lime sparkle with "Summed up by your Mac" or "Explained by your Mac"; the message
+    as it came stays above its summary, dimmed, so the picture reads as before and after. Large
+    sparkles sit on the lime stage around it. Every sparkle of the stage breathes on a 2.4 s beat
+    (`Twinkle`), still under Reduce Motion. The
     picture answers to the switches: off, the message is cut at four lines with "Show more" and the
     failed state is plain, with no card. It is a picture: nothing in it is clickable or read by the model.
   - **One source of truth:** the switches are the keys of Settings › Intelligence

@@ -25,6 +25,9 @@ enum OnboardingIntelligence {
         feature == .explainFailure ? "xmark.circle" : "text.alignleft"
     }
 
+    /// What the stage asks, above its headline.
+    static let name = "Enable Local Intelligence"
+
     /// The promise of rule 3, in the app's own words.
     static let privacy = "Runs on this Mac. Nothing leaves it."
 
@@ -43,7 +46,16 @@ struct IntelligenceControls: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 28) {
             VStack(alignment: .leading, spacing: 14) {
-                StageTag(kind: .beta)
+                // What is being asked, by name, before the benefit: the sparkle is the mark every
+                // generated text carries in the app, here lit and alive.
+                HStack(spacing: 8) {
+                    Image(systemName: "sparkles").font(.system(size: 17, weight: .semibold))
+                        .foregroundStyle(Soot.lime).modifier(Twinkle())
+                        .accessibilityHidden(true)
+                    Text(OnboardingIntelligence.name).font(.system(size: 17, weight: .semibold))
+                        .foregroundStyle(Soot.lime)
+                    StageTag(kind: .beta)
+                }
                 Headline(text: "Skip the long reads")
             }
             Group {
@@ -84,7 +96,7 @@ private struct IntelligenceChoice: View {
         Button { IntelligencePreferences.set(feature, on: !on) } label: {
             HStack(spacing: 12) {
                 Image(systemName: OnboardingIntelligence.symbol(feature)).font(.system(size: 16))
-                    .foregroundStyle(Soot.ink).frame(width: 22)
+                    .foregroundStyle(on ? Soot.lime : Soot.muted).frame(width: 22)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(feature.title).font(.system(size: 16, weight: .medium)).foregroundStyle(Soot.ink)
                     Text(OnboardingIntelligence.detail(feature)).font(.system(size: 13)).foregroundStyle(Soot.muted)
@@ -168,8 +180,11 @@ struct IntelligencePicture: View {
             Text("#proj-checkout").font(Theme.smallStrong).foregroundStyle(Soot.muted)
             message(initial: "A", tint: Theme.chart1, name: "Ada", time: "9:41") {
                 if summaries {
-                    SummarisedMessage(text: Self.summary)
-                    Text("Show original").font(.system(size: 12, weight: .semibold)).foregroundStyle(Soot.muted)
+                    // Before and after: the message as it came, dimmed, then what the Mac wrote of it.
+                    Text(Self.long).font(.system(size: 13)).foregroundStyle(Soot.muted.opacity(0.6))
+                        .lineSpacing(2).lineLimit(3)
+                    written("Summed up by your Mac")
+                    SummarisedMessage(text: Self.summary).modifier(Lit())
                 } else {
                     Text(Self.long).font(.system(size: 14)).foregroundStyle(Soot.ink.opacity(0.92))
                         .lineSpacing(3).lineLimit(4)
@@ -201,6 +216,15 @@ struct IntelligencePicture: View {
         }
     }
 
+    /// Says which part of the picture the Mac wrote: the sparkle, lit, and a few words.
+    private func written(_ words: String) -> some View {
+        HStack(spacing: 5) {
+            Image(systemName: "sparkles").font(.system(size: 12, weight: .semibold)).modifier(Twinkle())
+            Text(words).font(.system(size: 11, weight: .semibold))
+        }
+        .foregroundStyle(Soot.lime)
+    }
+
     private var pipeline: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Start here").font(Theme.smallStrong).foregroundStyle(Soot.muted).padding(.bottom, 6)
@@ -220,13 +244,15 @@ struct IntelligencePicture: View {
                         PipelineGlyph(state: .failing)
                         Text("test › Run unit tests").font(.system(size: 12)).foregroundStyle(Soot.ink)
                     }
-                    HStack(alignment: .top, spacing: 6) {
-                        Image(systemName: "sparkles").font(.system(size: 10, weight: .semibold))
-                            .foregroundStyle(Soot.muted).frame(height: 16)
-                        Text(Self.reason).font(.system(size: 12)).foregroundStyle(Soot.ink.opacity(0.92)).lineSpacing(2)
+                    VStack(alignment: .leading, spacing: 6) {
+                        written("Explained by your Mac")
+                        Text(Self.reason).font(.system(size: 13)).foregroundStyle(Soot.ink).lineSpacing(2)
                             .fixedSize(horizontal: false, vertical: true)
                     }
-                    .padding(.leading, 20)
+                    .padding(10)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Soot.surface, in: RoundedRectangle(cornerRadius: 8))
+                    .modifier(Lit())
                     Text("1 failing · 17 passing").font(.system(size: 12)).foregroundStyle(Soot.muted)
                 }
                 .padding(12)
@@ -239,5 +265,56 @@ struct IntelligencePicture: View {
         }
         .padding(20)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+}
+
+// MARK: - Sparkles
+
+/// A sparkle that breathes: it dims and shrinks a little, then comes back, every 2.4 s. Still
+/// and full under Reduce Motion. Computed from the clock, like `Skeleton`, so it animates
+/// nothing around it.
+struct Twinkle: ViewModifier {
+    /// Where in its cycle this one starts, 0 to 1, so that neighbours do not pulse together.
+    var phase: Double = 0
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    func body(content: Content) -> some View {
+        TimelineView(.animation(minimumInterval: 1.0 / 30, paused: reduceMotion)) { context in
+            let t = context.date.timeIntervalSinceReferenceDate / 2.4 + phase
+            let wave = reduceMotion ? 1 : 0.5 + 0.5 * cos(t * 2 * .pi)
+            content.opacity(0.6 + 0.4 * wave).scaleEffect(0.86 + 0.14 * wave)
+        }
+    }
+}
+
+/// What the Mac wrote, in the picture: a lime edge and a soft lime light around it.
+private struct Lit: ViewModifier {
+    func body(content: Content) -> some View {
+        content
+            .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Soot.lime.opacity(0.7)))
+            .shadow(color: Soot.lime.opacity(0.28), radius: 10)
+    }
+}
+
+/// Sparkles on the lime stage, around the picture: large, in the ground's ink, each on its own
+/// beat. Decoration only.
+struct SparkleField: View {
+    private static let marks: [(x: CGFloat, y: CGFloat, size: CGFloat, phase: Double)] = [
+        (0.13, 0.13, 64, 0), (0.30, 0.07, 24, 0.4), (0.80, 0.16, 40, 0.7),
+        (0.60, 0.90, 52, 0.2), (0.22, 0.88, 28, 0.55), (0.90, 0.82, 22, 0.85),
+    ]
+
+    var body: some View {
+        GeometryReader { geo in
+            ForEach(Self.marks.indices, id: \.self) { index in
+                let mark = Self.marks[index]
+                Image(systemName: "sparkle").font(.system(size: mark.size, weight: .semibold))
+                    .foregroundStyle(Soot.limeInk.opacity(0.22))
+                    .modifier(Twinkle(phase: mark.phase))
+                    .position(x: geo.size.width * mark.x, y: geo.size.height * mark.y)
+            }
+        }
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
     }
 }

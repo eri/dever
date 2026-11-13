@@ -554,6 +554,7 @@ private struct StageView: View {
     var body: some View {
         ZStack {
             RoundedRectangle(cornerRadius: Soot.radius).fill(Soot.lime)
+            if stage == .intelligence { SparkleField().transition(.opacity) }
             GeometryReader { geo in
                 // The crop is drawn at true size, then scaled to fill most of the stage's height.
                 // Fit the height, and the width up to the GitHub column (the right edge may crop).
