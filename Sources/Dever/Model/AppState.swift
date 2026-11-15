@@ -293,7 +293,11 @@ final class AppState: ObservableObject {
         return dir.appendingPathComponent("projects.json")
     }()
 
+    /// The app's state, for what answers from outside a view (a coding agent's question).
+    static weak var current: AppState?
+
     init() {
+        defer { Self.current = self }
         repositoryMode = UserDefaults.standard.string(forKey: RepositoryMode.key).flatMap(RepositoryMode.init(rawValue:)) ?? .perProject
         workspaceRepository = UserDefaults.standard.string(forKey: RepositoryMode.workspaceKey)
         // Snapshots: DEVER_SNAPSHOT_REPO_MODE=single|perProject|mixed[:owner/name] runs under that mode.

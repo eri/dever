@@ -2,7 +2,7 @@
 
 An audit of how Dever could work with the two coding agents the team uses most, what form that takes,
 and in what order. Facts were read from the official documentation on 2026-11-13 and from one Mac
-(read-only, structure only); every claim carries its source and its status. Phases 0, 1 and 2 of the
+(read-only, structure only); every claim carries its source and its status. Phases 0 to 3 of the
 [plan](#8-plan) are done; the rest is not built.
 
 Contents: [the gap](#1-the-gap-today) · [facts](#2-facts) · [shapes compared](#3-shapes-compared) ·
@@ -359,7 +359,7 @@ app (a panel, a row) needs more than MCP, and that part belongs to the plugin sy
 | Hook payloads change | fields are documented but both tools move fast | the bridge reads five events and three fields; unknown fields are ignored; a version check in Settings › Agents says when a tool is newer than the last one tested |
 | Hooks blocked by an organisation | managed hooks, Codex's trust review | both tools run the same `command` hook; Settings says Codex asks for a review of the hooks once, and cannot tell whether it was done |
 | Private conversations | transcripts hold everything | Dever never opens them; the one sentence shown comes from the hook, stays in memory, and is gone at quit |
-| Slack and Linear content reaching a model provider | an agent that calls `get_thread` sends the thread to Anthropic or OpenAI | it only happens on the agent's call, in a tool the user chose; said once at "Connect"; per-tool switch for thread access in Settings › Agents. This is new for an app whose AI is otherwise on-device, and the README's claim must stay true as worded |
+| Slack and Linear content reaching a model provider | an agent that calls `get_thread` sends the thread to Anthropic or OpenAI | it only happens on the agent's call, in a tool the user chose; said on the settings page; a "Project context" switch per agent, on by default. This is new for an app whose AI is otherwise on-device, and the README's claim must stay true as worded |
 | A local server other processes can call | loopback is reachable by anything on the Mac | bearer token from the Keychain, loopback only, read tools only, proposals never applied without a click |
 | Prompt injection through project content | a Slack message can tell the agent what to do | Dever's tools cannot write; the worst outcome is a bad proposal the user reads before applying |
 | A stale state taken for a live one | a killed session sends nothing | ages on every state, "working" turns old after ten minutes |
@@ -378,7 +378,7 @@ Smallest useful step first. Days are rough, for one developer who knows the code
 | **0. Checks** (done, section 2.5) | Inspect the Claude desktop app for a way to open a session on a folder with a prompt, and to bring a session forward. Verify on real installs: the fields of Stop and PermissionRequest (is the last sentence there, in both tools), the plugin install commands from a Mac with no CLI on the `PATH`, Codex's trust review, `codex "prompt"`, the length a deep link's prompt may reach | decides the shape of 1 and 2 | 1–2 d |
 | **1. Launch** (done) | Settings › Agents with each repository's clone; clone lookup; worktree on the issue's branch; the brief (complete enough to stand without MCP: issue, criteria, link to the thread); "Start with … ⌄" on the Start tile and the issue page | yes: the brief and the right folder in one click | 3–4 d |
 | **2. Observe** (done, except the ranking) | The two plugins (hooks only) and "Connect / Disconnect"; `AgentBridge`; `AgentStore`; the state line on the issue and its Delivery row; the ranking; "Open session" | yes: this is the phase that fills the blind stretch | 4–5 d |
-| **3. Context** | MCP server with the read tools, the token, the skill; the brief shrinks to its short form | for the agent; invisible to the developer | 4–5 d |
+| **3. Context** (done) | MCP server with the read tools, the token, the skill; the brief shrinks to its short form | for the agent; invisible to the developer | 4–5 d |
 | **4. Propose and review** | `propose_update`, `ProposalStore`, "Proposed by the agent", the "review its work" situation with the criteria checklist | yes: closes the loop with Linear and Slack | 5–6 d |
 | **5. Board** | The agents board across projects; worktree clean-up | once several agents run at once | 2–3 d |
 | **6. Plugins** | The MCP client on the same layer, first case the time-and-availability tool | belongs to the plugin system's plan | there |
@@ -428,6 +428,34 @@ session's hooks reaching Dever after "Connect" (the path is tested end to end wi
 and a payload, and the install against the real tools, but not the two together in a signed-in
 session), Codex's trust review of the hooks, and "Open session" (`codex://threads/<id>`,
 `claude://resume?session=<id>`).
+
+What phase 3 built: the plugin of each agent now also carries an MCP server and a skill.
+`Model/AgentContext.swift` holds the protocol and what an agent is told; `Services/AgentContextServer.swift`
+answers from the stores; the bridge serves `POST /mcp/<tool>`.
+
+- **Three tools, read only, one argument (the issue's identifier)**: `get_issue` (the issue with its
+  comments, parent, sub-issues, blockers and links), `get_thread` (the Slack thread Linear links to the
+  issue, read from Slack at that moment), `get_pull_requests` (matched like Delivery matches them, from
+  `GitHubStore` as last read, with the age of that reading per repository). Nothing is fetched that Dever
+  would not fetch for its own screens, except the thread, which is read when asked.
+- **The server is a command, not a URL**: `dever-mcp <tool>` speaks the protocol on its standard input
+  and output and carries each request to the listener, reading the port and the token at each request.
+  The agents' configuration therefore holds no port and no token, and survives a relaunch of Dever;
+  without Dever the command answers "Dever is not running" itself.
+- **A switch per agent, "Project context", on by default** (decision 7: read freely). Off, the agent is
+  offered no tool and refused if it calls one. What an agent reads goes to its own model provider, only
+  when it asks: the settings page says so in one line.
+- **The skill** tells the agent to call `get_issue` first, and to carry on without the tools when Dever
+  is not there. The brief gains one line pointing at the tools, only when the agent has them.
+- **An older plugin is replaced at launch** in a tool the user connected (the version is read from the
+  tool's own plugin list); a tool not connected is left alone.
+- Checked against the real tools, in configuration folders made for the test: Claude Code lists one
+  skill, seven hooks and one MCP server for the plugin, and runs the command at its health check; Codex
+  lists the server as enabled. Not verified by a click: an agent in a signed-in session calling a tool
+  and getting an issue back.
+
+Still short of the plan: the brief keeps the issue's description (it is the cheapest context and
+costs no call), and there is no `list_my_issues` (nothing asked for it yet).
 
 Phases 1 and 2 can swap: 2 first gives the clearer development phase sooner, with sessions tied to
 issues by branch alone; 1 first gives the launch record that makes the tie exact.

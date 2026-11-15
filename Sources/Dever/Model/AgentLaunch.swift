@@ -73,6 +73,16 @@ enum AgentPreferences {
     /// The preferred agent: a tool's raw value, "ask", or nothing while it was never asked.
     static let preferredKey = "agentPreferred"
 
+    /// Whether a tool may read project context (the issue, its Slack thread, its pull requests)
+    /// through Dever; on unless switched off.
+    static func contextKey(_ tool: AgentTool) -> String { "agentContext.\(tool.rawValue)" }
+    static func context(_ tool: AgentTool) -> Bool {
+        UserDefaults.standard.object(forKey: contextKey(tool)) as? Bool ?? true
+    }
+    /// Whether Dever's plugin was in the tool when it was last asked: what a brief may promise.
+    static func followedKey(_ tool: AgentTool) -> String { "agentFollowed.\(tool.rawValue)" }
+    static func followed(_ tool: AgentTool) -> Bool { UserDefaults.standard.bool(forKey: followedKey(tool)) }
+
     static var preferred: AgentChoice {
         get { AgentChoice(stored: UserDefaults.standard.string(forKey: preferredKey)) }
         set { UserDefaults.standard.set(newValue.stored, forKey: preferredKey) }
@@ -226,7 +236,7 @@ enum AgentBrief {
     static let limit = 12_000
 
     static func text(identifier: String, title: String, url: String, branch: String?, description: String?,
-                     links: [String] = [], parent: String? = nil, blockedBy: [String] = []) -> String {
+                     links: [String] = [], parent: String? = nil, blockedBy: [String] = [], tools: Bool = false) -> String {
         var lines = ["Work on \(identifier): \(title)"]
         if let branch, !branch.isEmpty { lines.append("Branch: \(branch) (this folder is a worktree on it)") }
         lines.append("Issue: \(url)")
@@ -235,6 +245,8 @@ enum AgentBrief {
         let seen = Set([url])
         let extra = links.filter { !seen.contains($0) }
         if !extra.isEmpty { lines.append("Links: \(extra.joined(separator: " "))") }
+        // Only when the agent has them: the comments, the Slack thread and the pull requests are a call away.
+        if tools { lines.append("More context (comments, the Slack thread, pull requests and checks): the dever tools, with \(identifier).") }
         let head = lines.joined(separator: "\n")
         let body = (description ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         guard !body.isEmpty else { return head }
@@ -243,12 +255,12 @@ enum AgentBrief {
         return head + "\n\n" + cut
     }
 
-    static func text(issue: LinearIssue, detail: LinearIssueDetail?) -> String {
+    static func text(issue: LinearIssue, detail: LinearIssueDetail?, tools: Bool = false) -> String {
         text(identifier: issue.identifier, title: issue.title, url: issue.url,
              branch: detail?.branchName ?? issue.branchName, description: detail?.description,
              links: (detail?.attachments?.nodes ?? []).map(\.url),
              parent: detail?.parent.map { "\($0.identifier) \($0.title)" },
-             blockedBy: (detail?.blockedBy ?? []).map(\.identifier))
+             blockedBy: (detail?.blockedBy ?? []).map(\.identifier), tools: tools)
     }
 }
 

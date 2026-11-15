@@ -44,7 +44,8 @@ Tokens are stored in the macOS Keychain (`io.github.eri.dever`), projects in `~/
 on a worktree of the issue's branch, with a short brief filled in and not sent. The first start on a repository asks where
 its clone is (checked by its `origin` remote, then remembered; Settings › Agents lists them); the worktree goes beside the
 clone, in `.dever/worktrees`, unless the branch is already checked out somewhere. "Connect" in Settings › Agents has the agent install Dever's plugin (hooks that post to
-a listener on the loopback interface); the issue then shows its agent working, waiting or finished, from memory only.
+a listener on the loopback interface); the issue then shows its agent working, waiting or finished, from memory only. The same plugin gives the agent three read-only
+tools (`get_issue`, `get_thread`, `get_pull_requests`) answered by Dever over that listener, unless "Project context" is off for it.
 `DEVER_TEST_REAL_TOOLS=1 swift test --filter RealTools` installs and removes the plugin with the tools on the Mac, each in
 a configuration folder made for the test. The audit, the decisions and the plan: [docs/agents-integration.md](agents-integration.md).
 

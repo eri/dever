@@ -19,11 +19,14 @@ enum AgentPluginError: LocalizedError, Equatable {
 /// tools' configuration files. "Disconnect" has the tool remove it.
 enum AgentPlugin {
     static let name = "dever"
-    static let version = "1.0.0"
-    static let summary = "Tells Dever, on this Mac, when a session starts, works, waits for you and finishes."
+    static let version = "1.1.0"
+    static let summary = "Tells Dever, on this Mac, when a session starts, works, waits for you and finishes, and lets the agent read the issue it works on."
 
     /// The command every hook runs.
     static var hook: URL { AgentBridge.folder.appendingPathComponent("dever-hook") }
+
+    /// The command the agent runs to ask Dever something: the plugin's MCP server.
+    static var context: URL { AgentBridge.folder.appendingPathComponent("dever-mcp") }
 
     /// The marketplace folder a tool installs the plugin from.
     static func marketplace(_ tool: AgentTool) -> URL {
@@ -56,6 +59,57 @@ enum AgentPlugin {
 
     """
 
+    /// The plugin's MCP server, as the agent sees it: a command speaking the protocol on its standard
+    /// input and output. It only carries each request to Dever's listener and the answer back, so
+    /// the agent needs no port and no token; without Dever running it answers that Dever is not there.
+    static let contextScript = """
+    #!/bin/sh
+    # Dever: lets a coding agent ask the Dever app, on this Mac only, about the issue it works on.
+    # Each request read here is carried to Dever's local listener, and the answer written back.
+    address="${DEVER_BRIDGE:-$HOME/Library/Application Support/Dever/agent/bridge.json}"
+    while IFS= read -r line; do
+      [ -n "$line" ] || continue
+      port=""; token=""
+      if [ -r "$address" ]; then
+        port=$(sed -n 's/.*"port" *: *\\([0-9][0-9]*\\).*/\\1/p' "$address")
+        token=$(sed -n 's/.*"token" *: *"\\([0-9a-f]*\\)".*/\\1/p' "$address")
+      fi
+      if [ -n "$port" ] && answer=$(printf '%s' "$line" | /usr/bin/curl -s -f -m 60 -X POST -H "Authorization: Bearer $token" \\
+          -H "Content-Type: application/json" --data-binary @- "http://127.0.0.1:$port/mcp/$1" 2>/dev/null); then
+        [ -n "$answer" ] && printf '%s\\n' "$answer"
+      else
+        id=$(printf '%s' "$line" | awk 'match($0, /"id"[ \\t]*:[ \\t]*("[^"]*"|[0-9]+)/) { s = substr($0, RSTART, RLENGTH); sub(/^"id"[ \\t]*:[ \\t]*/, "", s); print s }')
+        [ -n "$id" ] && printf '{"jsonrpc":"2.0","id":%s,"error":{"code":-32000,"message":"Dever is not running on this Mac"}}\\n' "$id"
+      fi
+    done
+    exit 0
+
+    """
+
+    /// The skill that tells the agent when the tools help.
+    static let skill = """
+    ---
+    name: dever
+    description: Use when working on a Linear issue (an identifier like ENG-123, often with a brief that says "Work on ENG-123"), or when you need an issue's comments, the Slack thread it came from, or the state of its pull requests and checks. The dever tools read them from the Dever app on this Mac.
+    ---
+
+    # Dever
+
+    Dever is the developer's project dashboard on this Mac. Its tools read what it knows about a Linear issue. They change nothing.
+
+    - `get_issue`: the issue as Linear has it, with its comments, its parent, what blocks it and its links. Call it first: the brief you were given is short on purpose.
+    - `get_thread`: the Slack thread the issue came from, when there is one. Decisions and constraints are often there and not in the issue.
+    - `get_pull_requests`: the issue's pull requests, their checks and reviews, and how old that reading is.
+
+    Each takes the issue's identifier. If a tool says Dever is not running or that project context is switched off, carry on without it and say so in your answer; do not ask the developer to paste the content unless you are blocked.
+
+    """
+
+    /// The plugin's `.mcp.json`: one server, the command above with the tool's name.
+    static func contextJSON(_ tool: AgentTool, command: String) -> String {
+        "{\n  \"mcpServers\": {\n    \"\(name)\": {\"command\": \(quoted(command)), \"args\": [\(quoted(tool.rawValue))]}\n  }\n}\n"
+    }
+
     /// The plugin's `hooks.json`: each event runs the hook command with the tool's name.
     static func hooksJSON(_ tool: AgentTool, command: String) -> String {
         let entries = events(tool).map { event in
@@ -71,7 +125,7 @@ enum AgentPlugin {
     }
 
     /// Every file of the plugin, by its path inside the marketplace folder.
-    static func files(_ tool: AgentTool, hook: String) -> [String: String] {
+    static func files(_ tool: AgentTool, hook: String, context: String) -> [String: String] {
         let command = "'" + hook.replacingOccurrences(of: "'", with: "'\\''") + "'"
         let description = quoted(summary)
         switch tool {
@@ -87,6 +141,8 @@ enum AgentPlugin {
 
                 """,
                 "\(name)/hooks/hooks.json": hooksJSON(tool, command: command),
+                "\(name)/.mcp.json": contextJSON(tool, command: context),
+                "\(name)/skills/\(name)/SKILL.md": skill,
             ]
         case .codex:
             return [
@@ -97,10 +153,13 @@ enum AgentPlugin {
 
                 """,
                 "plugins/\(name)/.codex-plugin/plugin.json": """
-                {"name": "\(name)", "version": "\(version)", "description": \(description), "interface": {"displayName": "Dever"}}
+                {"name": "\(name)", "version": "\(version)", "description": \(description), "interface": {"displayName": "Dever"},
+                 "skills": "./skills/", "mcpServers": "./.mcp.json"}
 
                 """,
                 "plugins/\(name)/hooks/hooks.json": hooksJSON(tool, command: command),
+                "plugins/\(name)/.mcp.json": contextJSON(tool, command: context),
+                "plugins/\(name)/skills/\(name)/SKILL.md": skill,
             ]
         }
     }
@@ -108,11 +167,13 @@ enum AgentPlugin {
     private static func write(_ tool: AgentTool) throws {
         let files = FileManager.default
         try files.createDirectory(at: AgentBridge.folder, withIntermediateDirectories: true)
-        try hookScript.write(to: hook, atomically: true, encoding: .utf8)
-        try files.setAttributes([.posixPermissions: 0o755], ofItemAtPath: hook.path)
+        for (script, text) in [(hook, hookScript), (context, contextScript)] {
+            try text.write(to: script, atomically: true, encoding: .utf8)
+            try files.setAttributes([.posixPermissions: 0o755], ofItemAtPath: script.path)
+        }
         let root = marketplace(tool)
         try? files.removeItem(at: root)
-        for (path, text) in Self.files(tool, hook: hook.path) {
+        for (path, text) in Self.files(tool, hook: hook.path, context: context.path) {
             let file = root.appendingPathComponent(path)
             try files.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
             try text.write(to: file, atomically: true, encoding: .utf8)
@@ -173,21 +234,45 @@ enum AgentPlugin {
         text.split(whereSeparator: \.isNewline).last.map(String.init) ?? "no reason given"
     }
 
-    /// Whether the tool's own list of plugins has Dever's.
+    /// The version of Dever's plugin in the tool's own list of plugins; nil when it is not there.
+    /// Codex says it on the plugin's line, Claude Code on the lines under it.
+    static func installedVersion(_ tool: AgentTool, list: String) -> String? {
+        let lines = list.split(whereSeparator: \.isNewline).map(String.init)
+        guard let at = lines.firstIndex(where: { $0.contains("\(name)@\(name)") && (tool == .claudeCode || $0.contains("installed")) }) else { return nil }
+        for line in lines[at...].prefix(tool == .claudeCode ? 4 : 1) {
+            if let found = line.range(of: #"[0-9]+\.[0-9]+\.[0-9]+"#, options: .regularExpression) { return String(line[found]) }
+        }
+        return "unknown"
+    }
+
+    /// Whether the tool's own list of plugins has Dever's; remembered, for what a brief may promise.
     static func connected(_ tool: AgentTool, binary: URL) async -> Bool {
-        await Task.detached(priority: .utility) {
+        let version = await Task.detached(priority: .utility) { () -> String? in
             let list = run(tool, binary: binary, ["list"])
-            return list.ok && list.said.split(whereSeparator: \.isNewline).contains { line in
-                line.contains("\(name)@\(name)") && (tool == .claudeCode || line.contains("installed"))
-            }
+            return list.ok ? installedVersion(tool, list: list.said) : nil
         }.value
+        UserDefaults.standard.set(version != nil, forKey: AgentPreferences.followedKey(tool))
+        return version != nil
+    }
+
+    /// A tool that has an older plugin of Dever's gets this one: the user connected it, and a newer
+    /// Dever must not leave it with hooks or tools that no longer match. Tools not connected are left alone.
+    static func updateIfOutdated(_ tool: AgentTool, binary: URL) async {
+        let version = await Task.detached(priority: .utility) { () -> String? in
+            let list = run(tool, binary: binary, ["list"])
+            return list.ok ? installedVersion(tool, list: list.said) : nil
+        }.value
+        UserDefaults.standard.set(version != nil, forKey: AgentPreferences.followedKey(tool))
+        guard let version, version != Self.version else { return }
+        try? await connect(tool, binary: binary)
     }
 
     /// Writes the plugin and has the tool add the marketplace and install it.
     static func connect(_ tool: AgentTool, binary: URL) async throws {
         try await Task.detached(priority: .userInitiated) {
             try write(tool)
-            // A marketplace left from an earlier connect is replaced: removing one that is not there fails, harmlessly.
+            // What an earlier connect left is replaced: removing what is not there fails, harmlessly.
+            _ = run(tool, binary: binary, [tool == .claudeCode ? "uninstall" : "remove", "\(name)@\(name)"])
             _ = run(tool, binary: binary, ["marketplace", "remove", name])
             let added = run(tool, binary: binary, ["marketplace", "add", marketplace(tool).path])
             guard added.ok else { throw AgentPluginError.refused(tool, lastLine(added.said)) }

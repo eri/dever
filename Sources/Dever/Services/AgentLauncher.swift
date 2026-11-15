@@ -35,7 +35,8 @@ enum AgentLauncher {
         guard let clone = AgentPreferences.clone(of: repository) else { throw AgentLaunchError.cloneUnknown(repository) }
         guard let branch = (detail?.branchName ?? issue.branchName).flatMap({ $0.isEmpty ? nil : $0 }) else { throw AgentLaunchError.noBranch }
         let surface = AgentPreferences.surface(tool)
-        let brief = AgentBrief.text(issue: issue, detail: detail)
+        let brief = AgentBrief.text(issue: issue, detail: detail,
+                                    tools: AgentPreferences.followed(tool) && AgentPreferences.context(tool))
 
         let folder = try await Task.detached(priority: .userInitiated) {
             try worktree(clone: clone, branch: branch)

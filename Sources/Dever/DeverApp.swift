@@ -33,7 +33,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     func applicationDidFinishLaunching(_ notification: Notification) {
         UNUserNotificationCenter.current().delegate = self
         // The coding agents' hooks tell Dever about their sessions here; a capture run listens to nothing.
-        if ProcessInfo.processInfo.environment["DEVER_SNAPSHOT_DIR"] == nil { AgentBridge.shared.start() }
+        if ProcessInfo.processInfo.environment["DEVER_SNAPSHOT_DIR"] == nil {
+            AgentBridge.shared.start()
+            Task {
+                for tool in AgentTool.allCases {
+                    guard let binary = AgentPlugin.binary(tool, codexApp: AgentApps.app(.codex)) else { continue }
+                    await AgentPlugin.updateIfOutdated(tool, binary: binary)
+                }
+            }
+        }
         // The content view runs under the transparent title bar, so a double-click there
         // reaches SwiftUI instead of the frame and the window never zooms. Do what the
         // frame would have done: the action set in System Settings for a title bar

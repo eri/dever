@@ -89,11 +89,18 @@ final class AgentSessionTests: XCTestCase {
 
     func testThePluginRunsOneCommandPerEventAndNamesTheTool() throws {
         for tool in AgentTool.allCases {
-            let files = AgentPlugin.files(tool, hook: "/Users/someone/Library/Application Support/Dever/agent/dever-hook")
-            XCTAssertEqual(files.count, 3)
-            for (path, text) in files {
+            let files = AgentPlugin.files(tool, hook: "/Users/someone/Library/Application Support/Dever/agent/dever-hook",
+                                          context: "/Users/someone/Library/Application Support/Dever/agent/dever-mcp")
+            XCTAssertEqual(files.count, 5)
+            for (path, text) in files where path.hasSuffix(".json") {
                 XCTAssertNoThrow(try JSONSerialization.jsonObject(with: Data(text.utf8)), path)
             }
+            // The MCP server is one command with the tool's name, and the skill comes with it.
+            let mcpPath = try XCTUnwrap(files.keys.first { $0.hasSuffix(".mcp.json") })
+            let servers = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(files[mcpPath]!.utf8)) as? [String: [String: [String: Any]]])["mcpServers"]!
+            XCTAssertEqual(servers["dever"]?["command"] as? String, "/Users/someone/Library/Application Support/Dever/agent/dever-mcp")
+            XCTAssertEqual(servers["dever"]?["args"] as? [String], [tool.rawValue])
+            XCTAssertTrue(files.keys.contains { $0.hasSuffix("skills/dever/SKILL.md") })
             let hooksPath = try XCTUnwrap(files.keys.first { $0.hasSuffix("hooks/hooks.json") })
             let hooks = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(files[hooksPath]!.utf8)) as? [String: [String: Any]])["hooks"]!
             XCTAssertEqual(Set(hooks.keys), Set(AgentPlugin.events(tool)))
@@ -145,6 +152,46 @@ final class AgentSessionTests: XCTestCase {
         XCTAssertEqual(AgentStore.shared.sessions[id]?.state, .working)
         XCTAssertEqual(AgentStore.shared.sessions[id]?.tool, .codex)
 
+        // A question from the agent takes the same road: the plugin's MCP command carries it and brings the answer back.
+        let mcp = folder.appendingPathComponent("dever-mcp")
+        try AgentPlugin.contextScript.write(to: mcp, atomically: true, encoding: .utf8)
+        // Off the main actor: Dever answers on it, as in the app, where the agent is another process.
+        func ask(_ lines: [String], bridge: String) async throws -> [[String: Any]] {
+            let text = try await Task.detached { try exchange(lines, script: mcp.path, bridge: bridge, home: folder.path) }.value
+            return text.split(whereSeparator: \.isNewline).compactMap { try? JSONSerialization.jsonObject(with: Data($0.utf8)) as? [String: Any] }
+        }
+        @Sendable func exchange(_ lines: [String], script: String, bridge: String, home: String) throws -> String {
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/bin/sh")
+            process.arguments = [script, "codex"]
+            process.environment = ["DEVER_BRIDGE": bridge, "HOME": home]
+            let input = Pipe(), output = Pipe()
+            process.standardInput = input
+            process.standardOutput = output
+            try process.run()
+            input.fileHandleForWriting.write(Data((lines.joined(separator: "\n") + "\n").utf8))
+            try input.fileHandleForWriting.close()
+            let data = output.fileHandleForReading.readDataToEndOfFile()
+            process.waitUntilExit()
+            return String(decoding: data, as: UTF8.self)
+        }
+        let answers = try await ask([#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26"}}"#,
+                               #"{"jsonrpc":"2.0","method":"notifications/initialized"}"#,
+                               #"{"jsonrpc":"2.0","id":"two","method":"tools/list"}"#,
+                               #"{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"get_issue","arguments":{}}}"#], bridge: address.path)
+        XCTAssertEqual(answers.count, 3)
+        XCTAssertEqual((answers[0]["result"] as? [String: Any])?["protocolVersion"] as? String, "2025-03-26")
+        XCTAssertEqual(answers[1]["id"] as? String, "two")
+        let listed = ((answers[1]["result"] as? [String: Any])?["tools"] as? [[String: Any]])?.compactMap { $0["name"] as? String }
+        XCTAssertEqual(listed, ["get_issue", "get_thread", "get_pull_requests"])
+        XCTAssertEqual((answers[2]["result"] as? [String: Any])?["isError"] as? Bool, true)
+        // Without Dever the command answers for it, with the request's own id.
+        let alone = try await ask([#"{"jsonrpc":"2.0","id":7,"method":"tools/list"}"#, #"{"jsonrpc":"2.0","method":"notifications/initialized"}"#],
+                            bridge: folder.appendingPathComponent("absent.json").path)
+        XCTAssertEqual(alone.count, 1)
+        XCTAssertEqual(alone.first?["id"] as? Int, 7)
+        XCTAssertNotNil(alone.first?["error"])
+
         // Without Dever (no address file), and with a wrong token, the hook still succeeds and nothing arrives.
         XCTAssertEqual(try call("{}", bridge: folder.appendingPathComponent("absent.json").path), 0)
         let forged = folder.appendingPathComponent("forged.json")
@@ -180,6 +227,20 @@ final class AgentSessionTests: XCTestCase {
             try await AgentPlugin.connect(tool, binary: binary)
             let after = await AgentPlugin.connected(tool, binary: binary)
             XCTAssertTrue(after, tool.label)
+            if ProcessInfo.processInfo.environment["DEVER_TEST_PRINT"] == "1" {
+                for arguments in tool == .claudeCode ? [["plugin", "details", "dever@dever"], ["mcp", "list"]] : [["mcp", "list"]] {
+                    let process = Process()
+                    process.executableURL = binary
+                    process.arguments = (tool == .codex ? ["-c", "approval_policy=\"on-request\""] : []) + arguments
+                    let pipe = Pipe()
+                    process.standardOutput = pipe
+                    process.standardError = pipe
+                    process.standardInput = FileHandle.nullDevice
+                    try process.run()
+                    let data = pipe.fileHandleForReading.readDataToEndOfFile()
+                    print("=== \(tool.rawValue) \(arguments.joined(separator: " "))\n" + String(decoding: data, as: UTF8.self))
+                }
+            }
             // Connecting twice replaces, it does not fail.
             try await AgentPlugin.connect(tool, binary: binary)
             try await AgentPlugin.disconnect(tool, binary: binary)
@@ -187,5 +248,79 @@ final class AgentSessionTests: XCTestCase {
             XCTAssertFalse(gone, tool.label)
         }
         XCTAssertGreaterThan(tried, 0, "no tool found on this Mac")
+    }
+
+    func testAnAgentsQuestionIsReadAndAnsweredInTheProtocol() throws {
+        func read(_ json: String) -> AgentMCP.Request? { AgentMCP.read(Data(json.utf8))?.request }
+        XCTAssertEqual(read(#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"x"}}"#), .initialize(version: "x"))
+        XCTAssertEqual(read(#"{"jsonrpc":"2.0","id":1,"method":"tools/list"}"#), .list)
+        XCTAssertEqual(read(#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#), .notification)
+        XCTAssertEqual(read(#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"get_thread","arguments":{"issue":"ENG-12"}}}"#),
+                       .call(.init(tool: "get_thread", issue: "ENG-12")))
+        XCTAssertEqual(read(#"{"jsonrpc":"2.0","id":2,"method":"resources/list"}"#), .unknown("resources/list"))
+        XCTAssertNil(read("not json"))
+        // A switched-off agent is offered nothing.
+        XCTAssertEqual((AgentMCP.listing(allowed: false)["tools"] as? [Any])?.count, 0)
+        XCTAssertEqual((AgentMCP.listing(allowed: true)["tools"] as? [Any])?.count, 3)
+        let answer = try XCTUnwrap(JSONSerialization.jsonObject(with: AgentMCP.text("hello", id: 5)) as? [String: Any])
+        XCTAssertEqual(answer["id"] as? Int, 5)
+        XCTAssertEqual(((answer["result"] as? [String: Any])?["content"] as? [[String: String]])?.first?["text"], "hello")
+    }
+
+    func testWhatAnAgentIsToldOfAThreadAndOfPullRequests() throws {
+        let now = Date(timeIntervalSince1970: 1_794_571_200)
+        // A message's link, and a reply's link with its parent.
+        let parent = try XCTUnwrap(AgentContextText.slackLocation("https://team.slack.com/archives/C0123/p1700000000123456"))
+        XCTAssertEqual(parent.channel, "C0123")
+        XCTAssertEqual(parent.ts, "1700000000.123456")
+        XCTAssertNil(parent.thread)
+        XCTAssertEqual(AgentContextText.slackLocation("https://team.slack.com/archives/C0123/p1700000999000100?thread_ts=1700000000.123456&cid=C0123")?.thread,
+                       "1700000000.123456")
+        XCTAssertNil(AgentContextText.slackLocation("https://github.com/acme/app/pull/3"))
+        XCTAssertNil(AgentContextText.slackLocation("https://team.slack.com/archives/C0123"))
+
+        XCTAssertEqual(AgentContextText.mentions("ask <@U1> and <@U9>", names: ["U1": "Ana"]), "ask @Ana and <@U9>")
+        let messages = [SlackMessage(ts: "1700000100.000000", user: "U2", text: "On it <@U1>"),
+                        SlackMessage(ts: "1700000000.000000", user: "U1", text: "Export is broken")]
+        let thread = AgentContextText.thread(messages, names: ["U1": "Ana", "U2": "Sam"], channel: "app", now: now)
+        XCTAssertTrue(thread.hasPrefix("Slack thread in #app (2 messages, oldest first):"))
+        XCTAssertLessThan(try XCTUnwrap(thread.range(of: "Ana: Export is broken")).lowerBound, try XCTUnwrap(thread.range(of: "Sam: On it @Ana")).lowerBound)
+
+        let open = GitHubPull(id: 1, number: 12, title: "Export CSV", html_url: "https://github.com/acme/app/pull/12", draft: false,
+                              user: .init(login: "sam"), updated_at: "", head: .init(ref: "sam/eng-12"), merged_at: nil,
+                              requested_reviewers: [.init(login: "ana")], checks: "FAILURE", verdicts: ["APPROVED", "CHANGES_REQUESTED"])
+        let said = AgentContextText.pulls(identifier: "ENG-12", open: [open], merged: [],
+                                          repositories: [(name: "acme/app", readAt: now.addingTimeInterval(-240)), (name: "acme/api", readAt: nil)], now: now)
+        XCTAssertTrue(said.contains("#12 Export CSV: open, branch sam/eng-12, by sam, checks FAIL, changes requested, review asked of ana"))
+        XCTAssertTrue(said.contains("(acme/app: read from GitHub 4 min ago.)"))
+        XCTAssertTrue(said.contains("(acme/api: not read by Dever yet"))
+        XCTAssertTrue(AgentContextText.pulls(identifier: "ENG-12", open: [], merged: [], repositories: [(name: "acme/app", readAt: now)], now: now)
+            .hasPrefix("No pull request found for ENG-12"))
+        XCTAssertEqual(AgentContextText.pulls(identifier: "ENG-12", open: [], merged: [], repositories: [], now: now),
+                       "The project of ENG-12 follows no repository in Dever.")
+
+        // The brief promises the tools only when the agent has them.
+        XCTAssertTrue(AgentBrief.text(identifier: "ENG-1", title: "T", url: "u", branch: nil, description: nil, tools: true).contains("the dever tools, with ENG-1"))
+        XCTAssertFalse(AgentBrief.text(identifier: "ENG-1", title: "T", url: "u", branch: nil, description: nil).contains("dever tools"))
+    }
+
+    func testThePluginsVersionIsReadFromEachToolsList() {
+        let claude = """
+        Installed plugins:
+
+          ❯ dever@dever
+            Version: 1.0.0
+            Scope: user
+            Status: ✔ enabled
+        """
+        XCTAssertEqual(AgentPlugin.installedVersion(.claudeCode, list: claude), "1.0.0")
+        XCTAssertNil(AgentPlugin.installedVersion(.claudeCode, list: "Installed plugins:\n\n  ❯ other@market\n    Version: 3.0.0"))
+        let codex = """
+        PLUGIN       STATUS              VERSION  SOURCE
+        other@market installed, enabled  2.0.0    /somewhere
+        dever@dever  installed, enabled  1.1.0    /Users/someone/agent/codex-plugin/plugins/dever
+        """
+        XCTAssertEqual(AgentPlugin.installedVersion(.codex, list: codex), "1.1.0")
+        XCTAssertNil(AgentPlugin.installedVersion(.codex, list: "dever@dever  available  1.1.0  /x"))
     }
 }

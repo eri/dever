@@ -1531,11 +1531,11 @@ private struct AgentsSection: View {
             HStack(spacing: 7) {
                 Image(systemName: "lock.fill").font(.system(size: 11, weight: .semibold)).foregroundStyle(Soot.lime)
                     .accessibilityHidden(true)
-                Text("Following stays on this Mac: Dever reads no conversation.")
+                Text("Following stays on this Mac. Project context goes to the agent only when it asks.")
                     .font(.system(size: 13)).foregroundStyle(Soot.ink.opacity(0.85))
             }
             .padding(.top, 14)
-            .help("Following adds Dever's plugin to the agent, with the agent's own plugin command: a few hooks that tell Dever when a session starts, works, waits for you and finishes. Dever keeps that state and the agent's last sentence in memory.")
+            .help("Following adds Dever's plugin to the agent, with the agent's own plugin command: a few hooks that tell Dever when a session starts, works, waits for you and finishes, and three tools the agent can call to read an issue, its Slack thread and its pull requests. Dever keeps a session's state and the agent's last sentence in memory, and reads no conversation.")
 
             HStack(alignment: .firstTextBaseline) {
                 Text("Your clones").font(.system(size: 13, weight: .semibold)).foregroundStyle(Soot.ink)
@@ -1624,6 +1624,7 @@ private struct AgentCard: View {
     let tool: AgentTool
     let entry: AgentUsageEntry?
     @AppStorage private var surface: String
+    @AppStorage private var context: Bool
     /// nil while the agent is being asked.
     @State private var connected: Bool?
     @State private var busy = false
@@ -1635,6 +1636,7 @@ private struct AgentCard: View {
         self.tool = tool
         self.entry = entry
         _surface = AppStorage(wrappedValue: AgentSurface.app.rawValue, AgentPreferences.surfaceKey(tool))
+        _context = AppStorage(wrappedValue: true, AgentPreferences.contextKey(tool))
     }
 
     private var followed: Binding<Bool> {
@@ -1675,6 +1677,21 @@ private struct AgentCard: View {
                               selection: $surface, width: nil, track: Soot.ground)
             }
             row("Usage left") { left }
+            // What the agent may ask Dever: only once it is followed, since the plugin carries the tools.
+            HStack(alignment: .center, spacing: 12) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Project context").font(.system(size: 13, weight: .medium)).foregroundStyle(Soot.ink)
+                    Text("It can read the issue, its Slack thread and its pull requests")
+                        .font(.system(size: 12)).foregroundStyle(Soot.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 8)
+                Toggle("\(tool.label) can read project context", isOn: $context)
+                    .labelsHidden().toggleStyle(.switch).tint(Soot.lime).controlSize(.small)
+            }
+            .opacity(connected == true ? 1 : 0.5)
+            .disabled(connected != true)
+            .help("When \(tool.label) asks, Dever answers with the issue, the Slack thread Linear links to it, and its pull requests. What it reads goes to \(tool.label)'s own model, like anything else you give it.")
         }
         .padding(20)
         .frame(maxWidth: .infinity, alignment: .topLeading)

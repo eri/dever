@@ -58,6 +58,18 @@ final class AgentBridge: @unchecked Sendable {
             if let data { buffer.append(data) }
             switch BridgeRequest.parse(buffer) {
             case .request(let method, let path, let bearer, let body):
+                let parts = path.split(separator: "/")
+                // `POST /mcp/<tool>` with the token: a question from the agent, answered from the stores.
+                if method == "POST", parts.count == 2, parts[0] == "mcp", bearer == self.token, !self.token.isEmpty,
+                   let tool = AgentTool(rawValue: String(parts[1])) {
+                    Task { @MainActor in
+                        let answer = await AgentContextServer.answer(body, tool: tool)
+                        let head = answer == nil ? "HTTP/1.1 202 Accepted\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                            : "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: \(answer!.count)\r\nConnection: close\r\n\r\n"
+                        connection.send(content: Data(head.utf8) + (answer ?? Data()), completion: .contentProcessed { _ in connection.cancel() })
+                    }
+                    return
+                }
                 let status = self.handle(method: method, path: path, bearer: bearer, body: body)
                 let answer = "HTTP/1.1 \(status)\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
                 connection.send(content: Data(answer.utf8), completion: .contentProcessed { _ in connection.cancel() })
