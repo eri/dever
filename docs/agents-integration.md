@@ -228,7 +228,7 @@ Taken with the user, one question at a time (2026-11-13).
 | 12 | When the agent has finished | **A "review its work" step**: the agent's account, the acceptance criteria to tick, CI and preview, then its proposals |
 | 13 | Colleagues | **Local only.** Each developer sees their own agents; nothing is written anywhere to share the state |
 | 14 | Installing into the tools | **A "Connect" button per tool in Settings › Agents**, showing exactly what is added, installed by the tool's own plugin command, removed by "Disconnect". Dever never edits their configuration files by hand |
-| 16 | Which agent a start uses | **The user's preferred agent, asked at the first start** ("Which agent do you use?"): then one button, "Start with <agent>", and a chevron for another one this time. "Ask each time" keeps the menu. Settings › Agents shows the agents as tiles with their own marks; the wording names no tool, so another agent is a case in `AgentTool` and nothing else |
+| 16 | Which agent a start uses | **The user's preferred agent, asked at the first start** ("Which agent do you use?"): then one button, "Start with <agent>", and a chevron for another one this time. "Ask each time" keeps the menu; "Most usage left" makes the button the agent with the most room at that moment (the share left of its tightest window; an agent whose usage cannot be read is never ranked on a guess: it is taken when the readable ones are under a tenth, or when nothing is known). Settings › Agents shows the agents as tiles with their own marks; the wording names no tool, so another agent is a case in `AgentTool` and nothing else |
 | 15 | Core or plugin | **Core, on the plugin system's mechanism** (section 6) |
 
 ---
