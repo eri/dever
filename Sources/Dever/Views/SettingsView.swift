@@ -1415,9 +1415,10 @@ struct SegmentPicker<Value: Hashable>: View {
 
 // MARK: - Agents
 
-/// The coding agents: which one a start uses, where each opens, and where each repository the
-/// projects follow is cloned on this Mac. Every tool in `AgentTool` gets its tile and its row;
-/// nothing here names one.
+/// The coding agents, one card each: everything about an agent sits in its card (whether Dever
+/// follows its sessions, where it opens, what is left of its plan), so an agent is named once.
+/// Above, which one a start uses; below, where the repositories are cloned. Every tool in
+/// `AgentTool` gets its segment and its card; nothing here names one.
 private struct AgentsSection: View {
     @EnvironmentObject var app: AppState
     @AppStorage(AgentPreferences.preferredKey) private var preferred = ""
@@ -1426,10 +1427,6 @@ private struct AgentsSection: View {
     /// What the last pick or search did, or why it was refused.
     @State private var note: (text: String, failed: Bool)?
     @State private var searching = false
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Namespace private var ring
-
-    private var choice: AgentChoice { AgentChoice(stored: preferred) }
 
     /// Every repository a project follows, once.
     private var repositories: [String] {
@@ -1437,79 +1434,42 @@ private struct AgentsSection: View {
         return app.projects.flatMap { app.repositories(for: $0) }.filter { seen.insert($0.lowercased()).inserted }
     }
 
-    /// What the choice means at a start, in one line.
-    private var consequence: String {
-        switch choice {
-        case .unset: "Not chosen yet: the first start asks"
-        case .ask: "Every start shows the agents to pick from"
-        case .tool(let tool): "One click starts \(tool.label); the chevron beside it offers the others"
-        }
+    /// The choice as the picker's value: a never-asked preference shows as "Ask each time".
+    private var choice: Binding<String> {
+        Binding(get: { preferred.isEmpty ? AgentChoice.ask.stored : preferred }, set: { preferred = $0 })
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            SectionHead(title: "Agents",
-                        detail: "Start a coding agent on an issue: in your own tool, on a worktree of the issue's branch, the brief filled in and not sent.")
-            title("Your agent")
-            HStack(spacing: 16) {
+            SectionHead(title: "Agents", detail: "Start a coding agent on an issue, in your own tool, on a worktree of its branch.")
+            SettingRows {
+                SettingRow(title: "Start with", detail: "A chevron offers the others", divided: false) {
+                    SegmentPicker(label: "Start with",
+                                  options: AgentTool.allCases.map { (label: $0.label, value: AgentChoice.tool($0).stored) }
+                                      + [(label: "Ask each time", value: AgentChoice.ask.stored)],
+                                  selection: choice)
+                }
+            }
+            // Side by side: the agents compare at a glance, and a third one wraps under them.
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 280), spacing: 16, alignment: .top)], alignment: .leading, spacing: 16) {
                 ForEach(AgentTool.allCases) { tool in
-                    tile(.tool(tool), name: tool.label, detail: AgentApps.app(tool) == nil ? "App not found" : "Installed") {
-                        AgentMark(tool: tool, size: 44)
-                    }
-                }
-                tile(.ask, name: "Ask each time", detail: "Any of them") {
-                    // The agents' marks, fanned: any of them.
-                    ZStack {
-                        ForEach(Array(AgentTool.allCases.enumerated()), id: \.element) { index, tool in
-                            AgentMark(tool: tool, size: 30)
-                                .offset(x: CGFloat(index) * 18 - CGFloat(AgentTool.allCases.count - 1) * 9)
-                        }
-                    }
-                    .frame(height: 44)
+                    AgentCard(tool: tool, entry: usage.entries[tool])
                 }
             }
-            .accessibilityElement(children: .contain)
-            .accessibilityLabel("Your agent")
-            Text(consequence).font(.system(size: 13)).foregroundStyle(Soot.muted)
-                .padding(.top, 14)
-                .id(preferred)
-                .transition(.opacity)
-
-            title("Follow your sessions")
-            SettingRows {
-                ForEach(Array(AgentTool.allCases.enumerated()), id: \.element) { index, tool in
-                    AgentConnectRow(tool: tool, divided: index < AgentTool.allCases.count - 1)
-                }
+            .padding(.top, 16)
+            // The one sentence about what following means, short enough to be read.
+            HStack(spacing: 7) {
+                Image(systemName: "lock.fill").font(.system(size: 11, weight: .semibold)).foregroundStyle(Soot.lime)
+                    .accessibilityHidden(true)
+                Text("Following stays on this Mac: Dever reads no conversation.")
+                    .font(.system(size: 13)).foregroundStyle(Soot.ink.opacity(0.85))
             }
-            Text("Connecting adds Dever's plugin to the agent, with the agent's own plugin command: a few hooks that tell Dever, on this Mac only, when a session starts, works, waits for you and finishes. Dever keeps that state and the agent's last sentence in memory; it reads no conversation and nothing leaves the Mac.")
-                .font(.system(size: 12)).foregroundStyle(Soot.muted)
-                .fixedSize(horizontal: false, vertical: true)
-                .padding(.top, 10)
+            .padding(.top, 12)
+            .help("Following adds Dever's plugin to the agent, with the agent's own plugin command: a few hooks that tell Dever when a session starts, works, waits for you and finishes. Dever keeps that state and the agent's last sentence in memory.")
 
             HStack(alignment: .firstTextBaseline) {
-                title("What is left")
-                Spacer(minLength: 16)
-                // One time for the block: the last successful reading.
-                if let read = usage.entries.values.compactMap(\.usage?.readAt).max() {
-                    Text("Updated \(read.formatted(date: .omitted, time: .shortened))")
-                        .font(.system(size: 12)).foregroundStyle(Soot.muted)
-                }
-            }
-            SettingRows {
-                ForEach(Array(AgentTool.allCases.enumerated()), id: \.element) { index, tool in
-                    AgentUsageRow(tool: tool, entry: usage.entries[tool], divided: index < AgentTool.allCases.count - 1)
-                }
-            }
-
-            title("Where it opens")
-            SettingRows {
-                ForEach(Array(AgentTool.allCases.enumerated()), id: \.element) { index, tool in
-                    AgentSurfaceRow(tool: tool, divided: index < AgentTool.allCases.count - 1)
-                }
-            }
-
-            HStack(alignment: .firstTextBaseline) {
-                title("Your clones")
+                Text("Your clones").font(.system(size: 13, weight: .semibold)).foregroundStyle(Soot.ink)
+                    .accessibilityAddTraits(.isHeader)
                 Spacer(minLength: 16)
                 if !repositories.isEmpty {
                     Button(searching ? "Looking…" : "Find them in a folder…", action: search)
@@ -1518,6 +1478,7 @@ private struct AgentsSection: View {
                         .help("Pick a folder; Dever finds the clones under it by their GitHub remote")
                 }
             }
+            .padding(.top, 28).padding(.bottom, 10)
             if repositories.isEmpty {
                 Text("No project follows a repository yet.").font(.system(size: 13)).foregroundStyle(Soot.muted)
             } else {
@@ -1530,24 +1491,20 @@ private struct AgentsSection: View {
                                     .accessibilityHidden(true)
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text(verbatim: name).font(.system(size: 14, weight: .medium)).foregroundStyle(Soot.ink).lineLimit(1)
-                                    HStack(spacing: 5) {
-                                        Image(systemName: clone == nil ? "questionmark.folder" : "folder.fill")
-                                            .font(.system(size: 11)).foregroundStyle(clone == nil ? Soot.muted : Soot.lime)
-                                            .accessibilityHidden(true)
-                                        Text(verbatim: clone.map { ($0.path as NSString).abbreviatingWithTildeInPath } ?? "Asked the first time an agent starts on it")
-                                            .font(.system(size: 12)).foregroundStyle(Soot.muted).lineLimit(1).truncationMode(.middle)
-                                    }
+                                    Text(verbatim: clone.map { ($0.path as NSString).abbreviatingWithTildeInPath } ?? "Asked at the first start on it")
+                                        .font(.system(size: 12)).foregroundStyle(Soot.muted).lineLimit(1).truncationMode(.middle)
                                 }
                                 Spacer(minLength: 16)
                                 Button(clone == nil ? "Choose…" : "Change…") { choose(name) }
                                     .buttonStyle(SecondaryButton())
                                     .accessibilityLabel("\(clone == nil ? "Choose" : "Change") the folder of \(name)")
                             }
-                            .frame(minHeight: 60)
+                            .frame(minHeight: 56)
                             if index < repositories.count - 1 { Rectangle().fill(Soot.line).frame(height: 1) }
                         }
                     }
                 }
+                .help("A worktree goes beside its clone, in .dever/worktrees. A branch already checked out somewhere is opened where it is.")
             }
             if let note {
                 Text(note.text).font(.system(size: 12)).foregroundStyle(note.failed ? Theme.negative : Soot.muted)
@@ -1555,48 +1512,10 @@ private struct AgentsSection: View {
                     .padding(.top, 10)
                     .transition(.opacity)
             }
-            Text("A worktree goes beside its clone, in .dever/worktrees. A branch already checked out somewhere is opened where it is.")
-                .font(.system(size: 12)).foregroundStyle(Soot.muted)
-                .fixedSize(horizontal: false, vertical: true)
-                .padding(.top, 10)
         }
         .motion(Motion.ui, fade: true, value: note?.text)
-        .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: preferred)
         .onAppear { clones = AgentPreferences.clones }
         .task { await usage.refresh() }
-    }
-
-    private func title(_ text: String) -> some View {
-        Text(text).font(.system(size: 13, weight: .semibold)).foregroundStyle(Soot.ink)
-            .padding(.top, 28).padding(.bottom, 10)
-            .accessibilityAddTraits(.isHeader)
-    }
-
-    /// One choice of "Your agent": a mark, a name, a quiet word, the lime ring on the chosen one.
-    private func tile<Mark: View>(_ option: AgentChoice, name: String, detail: String, @ViewBuilder mark: () -> Mark) -> some View {
-        let on = choice == option
-        return Button {
-            withAnimation(reduceMotion ? nil : .spring(response: 0.3, dampingFraction: 0.85)) { preferred = option.stored }
-        } label: {
-            VStack(spacing: 10) {
-                mark()
-                VStack(spacing: 1) {
-                    Text(name).font(.system(size: 13, weight: on ? .semibold : .medium)).foregroundStyle(on ? Soot.ink : Soot.muted)
-                    Text(detail).font(.system(size: 11)).foregroundStyle(Soot.muted)
-                }
-            }
-            .frame(width: 148, height: 124)
-            .background(Soot.surface, in: RoundedRectangle(cornerRadius: 12))
-            .overlay {
-                if on {
-                    RoundedRectangle(cornerRadius: 12).strokeBorder(Soot.lime, lineWidth: 2)
-                        .matchedGeometryEffect(id: "ring", in: ring)
-                }
-            }
-        }
-        .buttonStyle(RowButton(lift: .tone, radius: 12))
-        .accessibilityLabel("\(name), \(detail)")
-        .accessibilityAddTraits(on ? .isSelected : [])
     }
 
     private func choose(_ repository: String) {
@@ -1629,64 +1548,75 @@ private struct AgentsSection: View {
     }
 }
 
-/// One agent's row of "Follow your sessions": whether Dever's plugin is in the tool, and the
-/// button that has the tool install or remove it.
-private struct AgentConnectRow: View {
+/// One agent: its mark and name, a switch to follow its sessions (the agent installs or removes
+/// Dever's plugin), where it opens, and what is left of its plan when the agent lets it be read.
+private struct AgentCard: View {
     let tool: AgentTool
-    let divided: Bool
-    /// nil while the tool is being asked.
+    let entry: AgentUsageEntry?
+    @AppStorage private var surface: String
+    /// nil while the agent is being asked.
     @State private var connected: Bool?
     @State private var busy = false
     @State private var problem: String?
     @State private var binary: URL?
+    @State private var looked = false
 
-    private var status: String {
-        if busy { return connected == true ? "Disconnecting…" : "Connecting…" }
-        guard binary != nil else { return "\(tool.label) was not found on this Mac" }
+    init(tool: AgentTool, entry: AgentUsageEntry?) {
+        self.tool = tool
+        self.entry = entry
+        _surface = AppStorage(wrappedValue: AgentSurface.app.rawValue, AgentPreferences.surfaceKey(tool))
+    }
+
+    private var followed: Binding<Bool> {
+        Binding(get: { connected == true }, set: { change(connect: $0) })
+    }
+
+    /// The word under the name: only what needs saying.
+    private var status: (text: String, failed: Bool) {
+        if let problem { return (problem, true) }
+        if busy { return (connected == true ? "Stopping…" : "Connecting…", false) }
+        if looked, binary == nil { return ("Not found on this Mac", false) }
         switch connected {
-        case nil: return "Checking…"
-        case true?: return tool == .codex ? "Connected · Codex asks you to review the hooks once" : "Connected"
-        case false?: return "Not connected: Dever does not see its sessions"
+        case nil: return ("Checking…", false)
+        case true?: return ("Sessions followed", false)
+        case false?: return ("Sessions not followed", false)
         }
     }
 
     var body: some View {
-        VStack(spacing: 0) {
+        VStack(alignment: .leading, spacing: 14) {
             HStack(spacing: 12) {
-                AgentMark(tool: tool, size: 24)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(tool.label).font(.system(size: 14, weight: .medium)).foregroundStyle(Soot.ink)
-                    HStack(spacing: 5) {
-                        if connected == true, !busy {
-                            Image(systemName: "checkmark.circle.fill").font(.system(size: 11)).foregroundStyle(Soot.lime)
-                                .accessibilityHidden(true)
-                        }
-                        Text(problem ?? status).font(.system(size: 12))
-                            .foregroundStyle(problem == nil ? Soot.muted : Theme.negative)
-                            .lineLimit(2)
-                    }
+                AgentMark(tool: tool, size: 32)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(tool.label).font(.system(size: 15, weight: .semibold)).foregroundStyle(Soot.ink)
+                    Text(status.text).font(.system(size: 12)).foregroundStyle(status.failed ? Theme.negative : Soot.muted)
+                        .lineLimit(2).fixedSize(horizontal: false, vertical: true)
                 }
-                Spacer(minLength: 16)
-                if binary != nil, let connected {
-                    if connected {
-                        Button("Disconnect") { change(connect: false) }.buttonStyle(SecondaryButton())
-                            .disabled(busy)
-                            .accessibilityLabel("Disconnect \(tool.label)")
-                    } else {
-                        Button("Connect") { change(connect: true) }.buttonStyle(PrimaryButton())
-                            .disabled(busy)
-                            .accessibilityLabel("Connect \(tool.label)")
-                    }
-                }
+                Spacer(minLength: 8)
+                Toggle("Follow \(tool.label)'s sessions", isOn: followed)
+                    .labelsHidden().toggleStyle(.switch).tint(Soot.lime).controlSize(.small)
+                    .disabled(busy || binary == nil || connected == nil)
+                    .help(tool == .codex ? "Dever shows what \(tool.label) is doing on an issue. \(tool.label) asks you to review the hooks once."
+                                         : "Dever shows what \(tool.label) is doing on an issue")
             }
-            .frame(minHeight: 60)
-            if divided { Rectangle().fill(Soot.line).frame(height: 1) }
+            row("Opens in") {
+                SegmentPicker(label: "\(tool.label) opens in",
+                              options: AgentSurface.allCases.map { (label: $0.label, value: $0.rawValue) },
+                              selection: $surface, width: nil, track: Soot.ground)
+            }
+            row("Left") { left }
         }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .background(Soot.surface, in: RoundedRectangle(cornerRadius: 12))
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(tool.label)
         .task {
             binary = AgentPlugin.binary(tool, codexApp: AgentApps.app(.codex))
+            looked = true
             guard let binary else { return }
             if ProcessInfo.processInfo.environment["DEVER_SNAPSHOT_DIR"] != nil {
-                // A capture asks no tool: DEVER_SNAPSHOT_AGENT_SESSION shows them connected.
+                // A capture asks no tool: DEVER_SNAPSHOT_AGENT_SESSION shows them followed.
                 connected = ProcessInfo.processInfo.environment["DEVER_SNAPSHOT_AGENT_SESSION"] != nil
                 return
             }
@@ -1694,8 +1624,61 @@ private struct AgentConnectRow: View {
         }
     }
 
+    /// A small label, then its control: the card's one pattern.
+    private func row<Control: View>(_ label: String, @ViewBuilder control: () -> Control) -> some View {
+        HStack(alignment: .center, spacing: 12) {
+            Text(label).font(.system(size: 12, weight: .medium)).foregroundStyle(Soot.muted)
+                .frame(width: 58, alignment: .leading)
+            control()
+        }
+        .frame(minHeight: 40)
+    }
+
+    /// What is left of the plan: a meter per window, or a few quiet words. The time of the reading
+    /// and the resets are in the tooltip, and come into view when the value is old or tight.
+    private var left: some View {
+        TimelineView(.periodic(from: .now, by: 60)) { context in
+            let now = context.date
+            let usage = entry?.usage
+            let live = usage?.live(at: now) ?? []
+            Group {
+                if let usage, !live.isEmpty {
+                    VStack(alignment: .leading, spacing: 6) {
+                        ForEach(Array(live.enumerated()), id: \.offset) { _, window in
+                            HStack(spacing: 8) {
+                                Text(window.minutes == 300 ? "5 h" : window.minutes == 10_080 ? "Week" : window.name)
+                                    .font(.system(size: 12)).foregroundStyle(Soot.muted).frame(width: 34, alignment: .leading)
+                                UsageBar(left: Double(window.leftPercent) / 100, tight: window.leftPercent < 10 || usage.limitReached)
+                                Text("\(window.leftPercent)%").font(.system(size: 12, weight: .medium)).monospacedDigit()
+                                    .foregroundStyle(Soot.ink).frame(width: 36, alignment: .trailing)
+                            }
+                        }
+                        if usage.tight(at: now) || now.timeIntervalSince(usage.readAt) > AgentUsage.fresh || entry?.problem != nil {
+                            Text(entry?.problem ?? usage.short(at: now)).font(.system(size: 12))
+                                .foregroundStyle(entry?.problem == nil ? Soot.muted : Theme.negative).lineLimit(2)
+                        }
+                    }
+                } else {
+                    Text(quiet(usage, now: now)).font(.system(size: 13)).foregroundStyle(Soot.muted)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+            .help(usage.map { "\($0.line(at: now))\nUpdated \($0.readAt.formatted(date: .omitted, time: .shortened))" }
+                  ?? (tool.usageIsReadable ? "\(tool.label) is asked when this page opens" : "\(tool.label) does not let another app read its usage yet"))
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("Left: \(usage.map { $0.line(at: now) } ?? quiet(usage, now: now))")
+        }
+    }
+
+    private func quiet(_ usage: AgentUsage?, now: Date) -> String {
+        if let usage { return usage.short(at: now) }
+        if let problem = entry?.problem { return problem }
+        if entry?.loading == true { return "Asking…" }
+        return tool.usageIsReadable ? "Not read yet" : "Not readable yet"
+    }
+
     private func change(connect: Bool) {
-        guard let binary else { return }
+        guard let binary, !busy else { return }
         busy = true
         problem = nil
         Task {
@@ -1704,126 +1687,26 @@ private struct AgentConnectRow: View {
             } catch {
                 problem = error.localizedDescription
             }
-            // What the tool itself says now, whatever the commands answered.
+            // What the agent itself says now, whatever the commands answered.
             connected = await AgentPlugin.connected(tool, binary: binary)
             busy = false
         }
     }
 }
 
-/// One agent's row of "What is left": its mark, its name, and a meter per window of its plan.
-/// The words stay out of the way: when a window resets is in the tooltip, and comes onto the row
-/// only when it matters (little left, limit reached, a reading that is old or failed).
-private struct AgentUsageRow: View {
-    let tool: AgentTool
-    let entry: AgentUsageEntry?
-    let divided: Bool
-
-    var body: some View {
-        // The minute ticks so an old reading and a reset that passed are said without a new reading.
-        TimelineView(.periodic(from: .now, by: 60)) { context in
-            let now = context.date
-            let usage = entry?.usage
-            let live = usage?.live(at: now) ?? []
-            VStack(spacing: 0) {
-                HStack(alignment: .center, spacing: 12) {
-                    AgentMark(tool: tool, size: 24)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(tool.label).font(.system(size: 14, weight: .medium)).foregroundStyle(Soot.ink)
-                        if let note = note(usage, now: now) {
-                            Text(note.text).font(.system(size: 12)).foregroundStyle(note.failed ? Theme.negative : Soot.muted)
-                                .lineLimit(2)
-                        }
-                    }
-                    Spacer(minLength: 16)
-                    if let usage, !live.isEmpty {
-                        VStack(alignment: .trailing, spacing: 8) {
-                            ForEach(Array(live.enumerated()), id: \.offset) { _, window in
-                                meter(window, reached: usage.limitReached)
-                            }
-                        }
-                    } else {
-                        Text(quiet(usage, now: now)).font(.system(size: 13)).foregroundStyle(Soot.muted)
-                    }
-                }
-                .frame(minHeight: 56)
-                .padding(.vertical, live.count > 1 ? 6 : 0)
-                if divided { Rectangle().fill(Soot.line).frame(height: 1) }
-            }
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel("\(tool.label): \(usage.map { $0.line(at: now) } ?? quiet(usage, now: now))")
-            .help(usage.map { $0.line(at: now) } ?? reason)
-        }
-    }
-
-    /// "5 h ▬▬▬ 62%": the window, what is left of it, the figure.
-    private func meter(_ window: AgentUsage.Window, reached: Bool) -> some View {
-        HStack(spacing: 10) {
-            Text(window.minutes == 300 ? "5 hours" : window.minutes == 10_080 ? "Week" : window.name)
-                .font(.system(size: 12)).foregroundStyle(Soot.muted)
-            UsageBar(left: Double(window.leftPercent) / 100, tight: window.leftPercent < 10 || reached)
-            Text("\(window.leftPercent)%").font(.system(size: 13, weight: .medium)).monospacedDigit()
-                .foregroundStyle(Soot.ink).frame(width: 40, alignment: .trailing)
-        }
-    }
-
-    /// The one line under the name, only when there is something to act on or to doubt.
-    private func note(_ usage: AgentUsage?, now: Date) -> (text: String, failed: Bool)? {
-        if let problem = entry?.problem, usage != nil { return (problem, true) }
-        guard let usage, !usage.lapsed(at: now) else { return nil }
-        if usage.tight(at: now) || now.timeIntervalSince(usage.readAt) > AgentUsage.fresh { return (usage.short(at: now), false) }
-        return nil
-    }
-
-    /// In the meters' place when there is none.
-    private func quiet(_ usage: AgentUsage?, now: Date) -> String {
-        if let usage { return usage.short(at: now) }
-        if let problem = entry?.problem { return problem }
-        if entry?.loading == true { return "Asking…" }
-        return tool.usageIsReadable ? "Not read yet" : "Not readable yet"
-    }
-
-    private var reason: String {
-        tool.usageIsReadable ? "\(tool.label) is asked when this page opens" : "\(tool.label) does not let another app read its usage yet"
-    }
-}
-
-/// What is left of a window: a thin track, filled by the share that remains.
+/// What is left of a window: a thin track as wide as its room, filled by the share that remains.
 private struct UsageBar: View {
     let left: Double
     let tight: Bool
     var body: some View {
-        Capsule().fill(Soot.ground).frame(width: 160, height: 6)
-            .overlay(alignment: .leading) {
-                Capsule().fill(tight ? Theme.chart3 : Soot.lime).frame(width: max(4, 160 * left), height: 6)
-            }
-    }
-}
-
-/// One agent's row of "Where it opens": its mark, its name, desktop app or terminal.
-private struct AgentSurfaceRow: View {
-    let tool: AgentTool
-    let divided: Bool
-    @AppStorage private var surface: String
-
-    init(tool: AgentTool, divided: Bool) {
-        self.tool = tool
-        self.divided = divided
-        _surface = AppStorage(wrappedValue: AgentSurface.app.rawValue, AgentPreferences.surfaceKey(tool))
-    }
-
-    var body: some View {
-        VStack(spacing: 0) {
-            HStack(spacing: 12) {
-                AgentMark(tool: tool, size: 24)
-                Text(tool.label).font(.system(size: 14, weight: .medium)).foregroundStyle(Soot.ink)
-                Spacer(minLength: 16)
-                SegmentPicker(label: "\(tool.label) opens in",
-                              options: AgentSurface.allCases.map { (label: $0.label, value: $0.rawValue) }, selection: $surface)
-            }
-            .frame(minHeight: 56)
-            if divided { Rectangle().fill(Soot.line).frame(height: 1) }
+        GeometryReader { geo in
+            Capsule().fill(Soot.ground)
+                .overlay(alignment: .leading) {
+                    Capsule().fill(tight ? Theme.chart3 : Soot.lime).frame(width: max(4, geo.size.width * left))
+                }
         }
+        .frame(height: 6)
+        .frame(maxWidth: .infinity)
     }
 }
 

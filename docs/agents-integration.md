@@ -400,7 +400,8 @@ readable by the user only), `Services/AgentPlugin.swift` (the plugin of each too
 folder, and the tool's own commands to install and remove it), `Model/AgentSession.swift` and
 `Model/AgentStore.swift` (the state machine and the sessions, memory only), the line and the chip
 of `Views/AgentSessionViews.swift` on the Start tile, the Delivery rows and the issue page, and
-"Follow your sessions" in Settings › Agents. What was learnt building it:
+the "follow its sessions" switch of each agent's card in Settings › Agents (the page is one card per
+agent: followed or not, where it opens, what is left; the agent is named once). What was learnt building it:
 
 - **Both tools install a plugin from the binary inside their desktop app**, with no CLI on the `PATH`:
   `claude plugin marketplace add <folder>` then `plugin install dever@dever`; `codex plugin marketplace add
