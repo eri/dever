@@ -1475,7 +1475,15 @@ private struct AgentsSection: View {
                 .id(preferred)
                 .transition(.opacity)
 
-            title("What is left")
+            HStack(alignment: .firstTextBaseline) {
+                title("What is left")
+                Spacer(minLength: 16)
+                // One time for the block: the last successful reading.
+                if let read = usage.entries.values.compactMap(\.usage?.readAt).max() {
+                    Text("Updated \(read.formatted(date: .omitted, time: .shortened))")
+                        .font(.system(size: 12)).foregroundStyle(Soot.muted)
+                }
+            }
             SettingRows {
                 ForEach(Array(AgentTool.allCases.enumerated()), id: \.element) { index, tool in
                     AgentUsageRow(tool: tool, entry: usage.entries[tool], divided: index < AgentTool.allCases.count - 1)
@@ -1610,16 +1618,16 @@ private struct AgentsSection: View {
     }
 }
 
-/// One agent's row of "What is left": its plan's windows as the tool reports them, with the time
-/// of the reading; or why there is nothing to show. A value is never drawn without its age.
+/// One agent's row of "What is left": its mark, its name, and a meter per window of its plan.
+/// The words stay out of the way: when a window resets is in the tooltip, and comes onto the row
+/// only when it matters (little left, limit reached, a reading that is old or failed).
 private struct AgentUsageRow: View {
     let tool: AgentTool
     let entry: AgentUsageEntry?
-
     let divided: Bool
 
     var body: some View {
-        // The minute ticks so "read 6 min ago" and a reset that passed are said without a new reading.
+        // The minute ticks so an old reading and a reset that passed are said without a new reading.
         TimelineView(.periodic(from: .now, by: 60)) { context in
             let now = context.date
             let usage = entry?.usage
@@ -1627,46 +1635,63 @@ private struct AgentUsageRow: View {
             VStack(spacing: 0) {
                 HStack(alignment: .center, spacing: 12) {
                     AgentMark(tool: tool, size: 24)
-                    VStack(alignment: .leading, spacing: 3) {
+                    VStack(alignment: .leading, spacing: 2) {
                         Text(tool.label).font(.system(size: 14, weight: .medium)).foregroundStyle(Soot.ink)
-                        Text(words(usage, now: now)).font(.system(size: 12)).foregroundStyle(Soot.muted)
-                            .fixedSize(horizontal: false, vertical: true)
-                        if let problem = entry?.problem, usage != nil {
-                            Text(problem).font(.system(size: 12)).foregroundStyle(Theme.negative)
-                                .fixedSize(horizontal: false, vertical: true)
+                        if let note = note(usage, now: now) {
+                            Text(note.text).font(.system(size: 12)).foregroundStyle(note.failed ? Theme.negative : Soot.muted)
+                                .lineLimit(2)
                         }
                     }
                     Spacer(minLength: 16)
-                    if let usage, !usage.lapsed(at: now), !live.isEmpty {
-                        VStack(alignment: .trailing, spacing: 6) {
+                    if let usage, !live.isEmpty {
+                        VStack(alignment: .trailing, spacing: 8) {
                             ForEach(Array(live.enumerated()), id: \.offset) { _, window in
-                                HStack(spacing: 8) {
-                                    Text(window.minutes == 300 ? "5 h" : window.minutes == 10_080 ? "week" : window.name)
-                                        .font(.system(size: 11)).foregroundStyle(Soot.muted)
-                                    UsageBar(left: Double(window.leftPercent) / 100, tight: window.leftPercent < 10 || usage.limitReached)
-                                    Text("\(window.leftPercent)%").font(.system(size: 12, weight: .medium)).monospacedDigit()
-                                        .foregroundStyle(Soot.ink).frame(width: 36, alignment: .trailing)
-                                }
+                                meter(window, reached: usage.limitReached)
                             }
                         }
-                        .accessibilityHidden(true)
+                    } else {
+                        Text(quiet(usage, now: now)).font(.system(size: 13)).foregroundStyle(Soot.muted)
                     }
                 }
-                .frame(minHeight: 64)
-                .padding(.vertical, 4)
+                .frame(minHeight: 56)
+                .padding(.vertical, live.count > 1 ? 6 : 0)
                 if divided { Rectangle().fill(Soot.line).frame(height: 1) }
             }
-            .accessibilityElement(children: .combine)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("\(tool.label): \(usage.map { $0.line(at: now) } ?? quiet(usage, now: now))")
+            .help(usage.map { $0.line(at: now) } ?? reason)
         }
     }
 
-    private func words(_ usage: AgentUsage?, now: Date) -> String {
-        if let usage {
-            return "\(usage.line(at: now))\nUpdated \(usage.readAt.formatted(date: .omitted, time: .shortened))"
+    /// "5 h ▬▬▬ 62%": the window, what is left of it, the figure.
+    private func meter(_ window: AgentUsage.Window, reached: Bool) -> some View {
+        HStack(spacing: 10) {
+            Text(window.minutes == 300 ? "5 hours" : window.minutes == 10_080 ? "Week" : window.name)
+                .font(.system(size: 12)).foregroundStyle(Soot.muted)
+            UsageBar(left: Double(window.leftPercent) / 100, tight: window.leftPercent < 10 || reached)
+            Text("\(window.leftPercent)%").font(.system(size: 13, weight: .medium)).monospacedDigit()
+                .foregroundStyle(Soot.ink).frame(width: 40, alignment: .trailing)
         }
+    }
+
+    /// The one line under the name, only when there is something to act on or to doubt.
+    private func note(_ usage: AgentUsage?, now: Date) -> (text: String, failed: Bool)? {
+        if let problem = entry?.problem, usage != nil { return (problem, true) }
+        guard let usage, !usage.lapsed(at: now) else { return nil }
+        if usage.tight(at: now) || now.timeIntervalSince(usage.readAt) > AgentUsage.fresh { return (usage.short(at: now), false) }
+        return nil
+    }
+
+    /// In the meters' place when there is none.
+    private func quiet(_ usage: AgentUsage?, now: Date) -> String {
+        if let usage { return usage.short(at: now) }
         if let problem = entry?.problem { return problem }
-        if entry?.loading == true { return "Asking \(tool.label)…" }
-        return tool.usageIsReadable ? "Not read yet" : "\(tool.label) does not let another app read its usage yet"
+        if entry?.loading == true { return "Asking…" }
+        return tool.usageIsReadable ? "Not read yet" : "Not readable yet"
+    }
+
+    private var reason: String {
+        tool.usageIsReadable ? "\(tool.label) is asked when this page opens" : "\(tool.label) does not let another app read its usage yet"
     }
 }
 
@@ -1675,9 +1700,9 @@ private struct UsageBar: View {
     let left: Double
     let tight: Bool
     var body: some View {
-        Capsule().fill(Soot.ground).frame(width: 120, height: 6)
+        Capsule().fill(Soot.ground).frame(width: 160, height: 6)
             .overlay(alignment: .leading) {
-                Capsule().fill(tight ? Theme.chart3 : Soot.lime).frame(width: max(4, 120 * left), height: 6)
+                Capsule().fill(tight ? Theme.chart3 : Soot.lime).frame(width: max(4, 160 * left), height: 6)
             }
     }
 }
