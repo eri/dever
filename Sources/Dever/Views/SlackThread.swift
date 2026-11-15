@@ -1426,7 +1426,11 @@ private struct MessageRow: View {
     private var author: String { user?.name ?? "App" }
     private var me: String? { app.slack?.userID }
 
+    /// The replies are open under this message (in the rail; the room has its pane).
+    private var threadShown: Bool { threadOpen && openThread == nil }
+
     var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
         HStack(alignment: .top, spacing: 10) {
             Group {
                 if grouped {
@@ -1487,7 +1491,9 @@ private struct MessageRow: View {
                     if let r = message.reply_count, r > 0 {
                         Button {
                             if let openThread { openThread(message); return }
-                            threadOpen.toggle()
+                            // The block opens and the rows under it make room in one movement
+                            // (the room's spring); a fade only under Reduce Motion.
+                            Motion.run(Motion.move, fade: true) { threadOpen.toggle() }
                             if threadOpen, thread == nil { Task { await loadThread() } }
                         } label: {
                             HStack(spacing: 6) {
@@ -1505,7 +1511,9 @@ private struct MessageRow: View {
                                     Text("Last reply \(Date(timeIntervalSince1970: last).formatted(.relative(presentation: .named)))")
                                         .font(.system(size: 12, weight: .regular)).foregroundStyle(Soot.muted)
                                 }
-                                if openThread != nil { Image(systemName: "chevron.right").font(.system(size: 9, weight: .semibold)) }
+                                // In the room it leads to the pane; in the rail it turns down while the replies are open.
+                                Image(systemName: "chevron.right").font(.system(size: 9, weight: .semibold))
+                                    .rotationEffect(.degrees(threadShown && !Motion.reduced ? 90 : 0))
                             }
                         }
                         .buttonStyle(TertiaryButton(lift: Soot.surface, font: .system(size: 12, weight: .semibold)))
@@ -1514,15 +1522,29 @@ private struct MessageRow: View {
                     }
                 }
                 .padding(.top, 4)
-                if threadOpen, openThread == nil {
-                    // Out of the text column, under the avatar: the replies get the row's full width.
-                    ThreadReplies(replies: thread, failed: threadFailed, users: users, channels: channels, customEmoji: customEmoji, actions: actions)
-                        .padding(.leading, -((wide ? 36 : 32) + 10))
-                }
-                if replying, openThread == nil {
-                    ReplyComposer(sending: sending, send: { await send($0) }, cancel: { replying = false })
-                }
             }
+        }
+        // The thread's spine: a line from under the author's picture down to the replies, the
+        // way a thread is drawn everywhere. It says the block below belongs to this message.
+        .background(alignment: .topLeading) {
+            if threadShown {
+                RoundedRectangle(cornerRadius: 1).fill(Soot.edge).frame(width: 2)
+                    .padding(.top, grouped ? 22 : (wide ? 36 : 32) + 6)
+                    .padding(.bottom, -6)
+                    .padding(.leading, (wide ? 36 : 32) / 2 - 1)
+                    .transition(.opacity)
+            }
+        }
+        if threadShown {
+            // Under the row, at its full width: the replies are not squeezed into the text column.
+            // The block grows from the spine's end, where the reader's eye already is.
+            ThreadReplies(replies: thread, failed: threadFailed, users: users, channels: channels, customEmoji: customEmoji, actions: actions)
+                .transition(Motion.reduced ? .opacity : .opacity.combined(with: .scale(scale: 0.97, anchor: .topLeading)))
+        }
+        if replying, openThread == nil {
+            ReplyComposer(sending: sending, send: { await send($0) }, cancel: { replying = false })
+                .padding(.leading, (wide ? 36 : 32) + 10)
+        }
         }
         .opacity(!wide && read && !newReplies ? 0.55 : 1)
         .padding(.vertical, 4)
@@ -1654,7 +1676,11 @@ private struct MessageRow: View {
 
     private func loadThread() async {
         threadFailed = false
-        do { thread = try await actions.replies(message) } catch { threadFailed = true }
+        do {
+            let replies = try await actions.replies(message)
+            // The waiting line gives way to the replies and the block takes their height at once.
+            Motion.run(Motion.move, fade: true) { thread = replies }
+        } catch { threadFailed = true }
     }
 }
 
