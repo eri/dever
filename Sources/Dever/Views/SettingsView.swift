@@ -1443,20 +1443,20 @@ private struct AgentsSection: View {
         VStack(alignment: .leading, spacing: 0) {
             SectionHead(title: "Agents", detail: "Start a coding agent on an issue, in your own tool, on a worktree of its branch.")
             SettingRows {
-                SettingRow(title: "Start with", detail: "A chevron offers the others", divided: false) {
-                    SegmentPicker(label: "Start with",
+                SettingRow(title: "Default agent", detail: "Used by an issue's Start button", divided: false) {
+                    SegmentPicker(label: "Default agent",
                                   options: AgentTool.allCases.map { (label: $0.label, value: AgentChoice.tool($0).stored) }
                                       + [(label: "Ask each time", value: AgentChoice.ask.stored)],
                                   selection: choice)
                 }
             }
             // Side by side: the agents compare at a glance, and a third one wraps under them.
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 280), spacing: 16, alignment: .top)], alignment: .leading, spacing: 16) {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 280), spacing: 20, alignment: .top)], alignment: .leading, spacing: 20) {
                 ForEach(AgentTool.allCases) { tool in
                     AgentCard(tool: tool, entry: usage.entries[tool])
                 }
             }
-            .padding(.top, 16)
+            .padding(.top, 20)
             // The one sentence about what following means, short enough to be read.
             HStack(spacing: 7) {
                 Image(systemName: "lock.fill").font(.system(size: 11, weight: .semibold)).foregroundStyle(Soot.lime)
@@ -1464,7 +1464,7 @@ private struct AgentsSection: View {
                 Text("Following stays on this Mac: Dever reads no conversation.")
                     .font(.system(size: 13)).foregroundStyle(Soot.ink.opacity(0.85))
             }
-            .padding(.top, 12)
+            .padding(.top, 14)
             .help("Following adds Dever's plugin to the agent, with the agent's own plugin command: a few hooks that tell Dever when a session starts, works, waits for you and finishes. Dever keeps that state and the agent's last sentence in memory.")
 
             HStack(alignment: .firstTextBaseline) {
@@ -1584,9 +1584,9 @@ private struct AgentCard: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: 18) {
             HStack(spacing: 12) {
-                AgentMark(tool: tool, size: 32)
+                AgentMark(tool: tool, size: 36)
                 VStack(alignment: .leading, spacing: 1) {
                     Text(tool.label).font(.system(size: 15, weight: .semibold)).foregroundStyle(Soot.ink)
                     Text(status.text).font(.system(size: 12)).foregroundStyle(status.failed ? Theme.negative : Soot.muted)
@@ -1604,9 +1604,9 @@ private struct AgentCard: View {
                               options: AgentSurface.allCases.map { (label: $0.label, value: $0.rawValue) },
                               selection: $surface, width: nil, track: Soot.ground)
             }
-            row("Left") { left }
+            row("Usage left") { left }
         }
-        .padding(16)
+        .padding(20)
         .frame(maxWidth: .infinity, alignment: .topLeading)
         .background(Soot.surface, in: RoundedRectangle(cornerRadius: 12))
         .accessibilityElement(children: .contain)
@@ -1624,14 +1624,12 @@ private struct AgentCard: View {
         }
     }
 
-    /// A small label, then its control: the card's one pattern.
+    /// A small caption above its control: the card's one pattern, with room around it.
     private func row<Control: View>(_ label: String, @ViewBuilder control: () -> Control) -> some View {
-        HStack(alignment: .center, spacing: 12) {
+        VStack(alignment: .leading, spacing: 8) {
             Text(label).font(.system(size: 12, weight: .medium)).foregroundStyle(Soot.muted)
-                .frame(width: 58, alignment: .leading)
-            control()
+            control().frame(minHeight: 32, alignment: .center)
         }
-        .frame(minHeight: 40)
     }
 
     /// What is left of the plan: a meter per window, or a few quiet words. The time of the reading
@@ -1643,9 +1641,9 @@ private struct AgentCard: View {
             let live = usage?.live(at: now) ?? []
             Group {
                 if let usage, !live.isEmpty {
-                    VStack(alignment: .leading, spacing: 6) {
+                    VStack(alignment: .leading, spacing: 8) {
                         ForEach(Array(live.enumerated()), id: \.offset) { _, window in
-                            HStack(spacing: 8) {
+                            HStack(spacing: 10) {
                                 Text(window.minutes == 300 ? "5 h" : window.minutes == 10_080 ? "Week" : window.name)
                                     .font(.system(size: 12)).foregroundStyle(Soot.muted).frame(width: 34, alignment: .leading)
                                 UsageBar(left: Double(window.leftPercent) / 100, tight: window.leftPercent < 10 || usage.limitReached)
