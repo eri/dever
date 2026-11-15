@@ -48,6 +48,7 @@ struct AgentStartMenu: View {
     @EnvironmentObject var app: AppState
     @Environment(\.openSettings) private var openSettings
     @ObservedObject private var store = IssueStore.shared
+    @ObservedObject private var usage = AgentUsageStore.shared
     let project: Project
     let issue: LinearIssue
     var title = "Start with"
@@ -89,6 +90,11 @@ struct AgentStartMenu: View {
                     HStack(spacing: 8) {
                         AgentMark(tool: tool, size: 18)
                         Text(busy.map { "Opening \($0.label)…" } ?? "\(title) \(tool.label)").lineLimit(1)
+                        // Out of room, or nearly: said on the button, in words in its tooltip.
+                        if usage.entries[tool]?.usage?.tight(at: Date()) == true {
+                            Image(systemName: "exclamationmark.triangle.fill").font(.system(size: 11)).foregroundStyle(Theme.chart3)
+                                .accessibilityLabel("Little usage left")
+                        }
                     }
                     .font(.system(size: 14, weight: .medium))
                     .padding(.leading, 10).padding(.trailing, 14)
@@ -96,7 +102,8 @@ struct AgentStartMenu: View {
                 }
                 .buttonStyle(MenuTriggerButton(fill: fill))
                 .disabled(busy != nil || !ready)
-                .help(branch.map { "Opens \(tool.label) on a worktree of \($0), the brief filled in and not sent" } ?? "Linear gives no branch for this issue")
+                .help([branch.map { "Opens \(tool.label) on a worktree of \($0), the brief filled in and not sent" } ?? "Linear gives no branch for this issue",
+                       usage.entries[tool]?.usage.map { "\(tool.label): \($0.line(at: Date()))" }].compactMap { $0 }.joined(separator: "\n"))
                 chevron.frame(width: 30, height: ButtonSize.panel.height)
             } else {
                 HStack(spacing: 6) {
@@ -120,6 +127,8 @@ struct AgentStartMenu: View {
         // Above the siblings drawn after it, which the menu hangs over.
         .zIndex(open ? 1 : 0)
         .closesOnOutsideClick(open) { set(false) }
+        // What is left of each plan, read when the control shows and when its menu opens, within the budget.
+        .task(id: open) { await usage.refresh() }
         .onAppear {
             if ProcessInfo.processInfo.environment["DEVER_SNAPSHOT_AGENT_MENU"] == "1" {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { set(true) }
@@ -174,7 +183,8 @@ struct AgentStartMenu: View {
             }
             ForEach(listed) { tool in
                 MenuPanelRow(agent: tool, title: tool.label,
-                             detail: "\(AgentPreferences.surface(tool).label) · brief filled in, not sent") {
+                             detail: usage.entries[tool]?.usage.map { $0.short(at: Date()) }
+                                 ?? "\(AgentPreferences.surface(tool).label) · brief filled in, not sent") {
                     if choice == .unset { preferred = AgentChoice.tool(tool).stored }
                     start(tool)
                 }
@@ -222,6 +232,7 @@ struct AgentStartMenu: View {
             do {
                 let folder = try await AgentLauncher.start(tool: tool, issue: issue, detail: detail ?? store.cachedDetail(issue.id),
                                                            repository: repository)
+                usage.markDirty(tool)
                 started(tool, folder)
             } catch {
                 failed(error.localizedDescription)

@@ -159,6 +159,29 @@ the desktop app and accepts a local directory as a marketplace; whether that wor
 on the `PATH` is not stated. Codex has `codex://plugins/install/<name>?marketplace=<m>`. To settle
 with a real install at the start of phase 2.
 
+### 2.6 What is left of each plan
+
+Asked after phase 1: can Dever read each tool's remaining usage, to say which one has room?
+
+| Tool | From outside? | How | Status |
+| --- | --- | --- | --- |
+| Codex | **Yes, on demand** | its own binary run as `codex app-server` for one question, `account/rateLimits/read` ([app-server](https://learn.chatgpt.com/docs/app-server), "Rate limits"): the windows (`usedPercent`, `windowDurationMins`, `resetsAt`), credits, the plan. No session, no model call, about two seconds; works with the login made in the desktop app. Either window can be absent (a plan without a five-hour limit, credits only); an API-key login answers "chatgpt authentication required" | documented method; the app server as a whole is preview; observed on 0.154 |
+| Claude Code | **No on-demand read** | the status line's `rate_limits` (terminal sessions only, a command the user installs), the `StopFailure` hook on a rate limit ("limit reached"), or the agent itself relaying its usage from inside a session Dever started. All arrive with phase 2 | documented for the first two; the third is internal |
+
+There is no official HTTP API at either vendor for an individual's plan window. Dever does not call
+their private usage routes with the user's login, and does not read their credential stores or
+session files: the Codex figure comes from the tool answering through its documented interface with
+the login it already holds, and Dever never sees that login. The app-server page says its
+authentication is not permitted for commercial or hosted services (local and open-source apps may
+use it): to re-read if Dever is ever sold.
+
+Built: `Model/AgentUsage.swift` (the reading, its sentences, its ageing), `Services/CodexUsageReader.swift`,
+`Model/AgentUsageStore.swift` (memory only), the line on the menu's rows, a warning on the preferred
+agent's button when under a tenth is left or the limit is reached, and "What is left" in Settings ›
+Agents. The two plans are not comparable as amounts of work, so nothing ranks them: a tool is only
+flagged when it is itself out of room, and never from an unknown or old value. A recommendation
+("the other one has room") waits for Claude Code's figures.
+
 ---
 
 ## 3. Shapes compared

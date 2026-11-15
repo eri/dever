@@ -1421,6 +1421,7 @@ struct SegmentPicker<Value: Hashable>: View {
 private struct AgentsSection: View {
     @EnvironmentObject var app: AppState
     @AppStorage(AgentPreferences.preferredKey) private var preferred = ""
+    @ObservedObject private var usage = AgentUsageStore.shared
     @State private var clones = AgentPreferences.clones
     /// What the last pick or search did, or why it was refused.
     @State private var note: (text: String, failed: Bool)?
@@ -1473,6 +1474,13 @@ private struct AgentsSection: View {
                 .padding(.top, 14)
                 .id(preferred)
                 .transition(.opacity)
+
+            title("What is left")
+            SettingRows {
+                ForEach(Array(AgentTool.allCases.enumerated()), id: \.element) { index, tool in
+                    AgentUsageRow(tool: tool, entry: usage.entries[tool], divided: index < AgentTool.allCases.count - 1)
+                }
+            }
 
             title("Where it opens")
             SettingRows {
@@ -1536,6 +1544,7 @@ private struct AgentsSection: View {
         .motion(Motion.ui, fade: true, value: note?.text)
         .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: preferred)
         .onAppear { clones = AgentPreferences.clones }
+        .task { await usage.refresh() }
     }
 
     private func title(_ text: String) -> some View {
@@ -1598,6 +1607,78 @@ private struct AgentsSection: View {
             note = (added == 0 ? "No new clone found under \((folder.path as NSString).abbreviatingWithTildeInPath)"
                                : "\(added) clone\(added == 1 ? "" : "s") found", false)
         }
+    }
+}
+
+/// One agent's row of "What is left": its plan's windows as the tool reports them, with the time
+/// of the reading; or why there is nothing to show. A value is never drawn without its age.
+private struct AgentUsageRow: View {
+    let tool: AgentTool
+    let entry: AgentUsageEntry?
+
+    let divided: Bool
+
+    var body: some View {
+        // The minute ticks so "read 6 min ago" and a reset that passed are said without a new reading.
+        TimelineView(.periodic(from: .now, by: 60)) { context in
+            let now = context.date
+            let usage = entry?.usage
+            let live = usage?.live(at: now) ?? []
+            VStack(spacing: 0) {
+                HStack(alignment: .center, spacing: 12) {
+                    AgentMark(tool: tool, size: 24)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(tool.label).font(.system(size: 14, weight: .medium)).foregroundStyle(Soot.ink)
+                        Text(words(usage, now: now)).font(.system(size: 12)).foregroundStyle(Soot.muted)
+                            .fixedSize(horizontal: false, vertical: true)
+                        if let problem = entry?.problem, usage != nil {
+                            Text(problem).font(.system(size: 12)).foregroundStyle(Theme.negative)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                    Spacer(minLength: 16)
+                    if let usage, !usage.lapsed(at: now), !live.isEmpty {
+                        VStack(alignment: .trailing, spacing: 6) {
+                            ForEach(Array(live.enumerated()), id: \.offset) { _, window in
+                                HStack(spacing: 8) {
+                                    Text(window.minutes == 300 ? "5 h" : window.minutes == 10_080 ? "week" : window.name)
+                                        .font(.system(size: 11)).foregroundStyle(Soot.muted)
+                                    UsageBar(left: Double(window.leftPercent) / 100, tight: window.leftPercent < 10 || usage.limitReached)
+                                    Text("\(window.leftPercent)%").font(.system(size: 12, weight: .medium)).monospacedDigit()
+                                        .foregroundStyle(Soot.ink).frame(width: 36, alignment: .trailing)
+                                }
+                            }
+                        }
+                        .accessibilityHidden(true)
+                    }
+                }
+                .frame(minHeight: 64)
+                .padding(.vertical, 4)
+                if divided { Rectangle().fill(Soot.line).frame(height: 1) }
+            }
+            .accessibilityElement(children: .combine)
+        }
+    }
+
+    private func words(_ usage: AgentUsage?, now: Date) -> String {
+        if let usage {
+            return "\(usage.line(at: now))\nUpdated \(usage.readAt.formatted(date: .omitted, time: .shortened))"
+        }
+        if let problem = entry?.problem { return problem }
+        if entry?.loading == true { return "Asking \(tool.label)…" }
+        return tool.usageIsReadable ? "Not read yet" : "\(tool.label) does not let another app read its usage yet"
+    }
+}
+
+/// What is left of a window: a thin track, filled by the share that remains.
+private struct UsageBar: View {
+    let left: Double
+    let tight: Bool
+    var body: some View {
+        Capsule().fill(Soot.ground).frame(width: 120, height: 6)
+            .overlay(alignment: .leading) {
+                Capsule().fill(tight ? Theme.chart3 : Soot.lime).frame(width: max(4, 120 * left), height: 6)
+            }
     }
 }
 
