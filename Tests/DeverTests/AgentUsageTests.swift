@@ -81,4 +81,33 @@ final class AgentUsageTests: XCTestCase {
         XCTAssertNil(CodexUsageReader.binary(app: URL(fileURLWithPath: "/nowhere/Nothing.app"))
             .flatMap { $0.path.hasPrefix("/nowhere") ? $0 : nil })
     }
+
+    func testTheAgentWithTheMostUsageLeftIsPickedOnlyFromWhatIsKnown() throws {
+        func entry(_ short: Double, _ week: Double = 0, reached: Bool = false) -> AgentUsageEntry {
+            .init(usage: AgentUsage(windows: [.init(usedPercent: short, minutes: 300, resetsAt: now.addingTimeInterval(3600)),
+                                              .init(usedPercent: week, minutes: 10_080, resetsAt: now.addingTimeInterval(86_400))],
+                                    plan: nil, limitReached: reached, readAt: now))
+        }
+        // The tightest window counts: 62% of five hours but 30% of the week is 30% left.
+        XCTAssertEqual(AgentRecommendation.left(entry(38, 70).usage, at: now), 30)
+        XCTAssertEqual(AgentRecommendation.left(entry(38, reached: true).usage, at: now), 0)
+        XCTAssertNil(AgentRecommendation.left(nil, at: now))
+        XCTAssertNil(AgentRecommendation.left(entry(38).usage, at: now.addingTimeInterval(5 * 86_400)))
+
+        // One tool readable with room: it is picked, on its own figure.
+        XCTAssertEqual(AgentRecommendation.pick([.codex: entry(38)], at: now, fallback: .claudeCode), .init(tool: .codex, reason: "62% left"))
+        // Nearly out: the tool whose usage is unknown is taken, and the reason says why.
+        XCTAssertEqual(AgentRecommendation.pick([.codex: entry(95)], at: now, fallback: .claudeCode),
+                       .init(tool: .claudeCode, reason: "Codex is nearly out"))
+        XCTAssertEqual(AgentRecommendation.pick([.codex: entry(10, reached: true)], at: now, fallback: .codex).tool, .claudeCode)
+        // Nothing known: the agent used last, and it says so.
+        XCTAssertEqual(AgentRecommendation.pick([:], at: now, fallback: .codex), .init(tool: .codex, reason: "usage not known yet"))
+        XCTAssertEqual(AgentRecommendation.pick([.codex: entry(38)], at: now.addingTimeInterval(5 * 86_400), fallback: .claudeCode).tool, .claudeCode)
+        // Both known: the one with more room; a tie goes to the agent used last.
+        XCTAssertEqual(AgentRecommendation.pick([.codex: entry(38), .claudeCode: entry(20)], at: now, fallback: .codex), .init(tool: .claudeCode, reason: "80% left"))
+        XCTAssertEqual(AgentRecommendation.pick([.codex: entry(50), .claudeCode: entry(50)], at: now, fallback: .codex).tool, .codex)
+        XCTAssertEqual(AgentRecommendation.pick([.codex: entry(99), .claudeCode: entry(100)], at: now, fallback: .codex),
+                       .init(tool: .codex, reason: "1% left"))
+        XCTAssertEqual(AgentChoice(stored: AgentChoice.mostLeft.stored), .mostLeft)
+    }
 }

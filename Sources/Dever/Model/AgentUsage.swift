@@ -170,3 +170,40 @@ extension AgentTool {
     /// figures only arrive from inside a session (phase 2).
     var usageIsReadable: Bool { self == .codex }
 }
+
+/// Which agent has the most usage left, for the "Most usage left" choice. The two plans are not
+/// amounts of the same thing, so this only compares what each tool says of its own windows: the
+/// share left of the tightest one. A tool whose usage cannot be read is never ranked on a guess:
+/// it is taken when the tools that can be read are nearly out, or when nothing is known at all.
+enum AgentRecommendation {
+    struct Pick: Equatable {
+        var tool: AgentTool
+        /// Why, in a few words: "62% left", "Codex is nearly out", "usage not known yet".
+        var reason: String
+    }
+
+    /// Under this share of its tightest window a tool is "nearly out".
+    static let low = 10
+
+    /// The share left of the tightest window that still stands: 0 once the limit is reached, 100
+    /// for a plan without a window; nil when nothing can be said (never read, or all reset since).
+    static func left(_ usage: AgentUsage?, at now: Date) -> Int? {
+        guard let usage, !usage.lapsed(at: now) else { return nil }
+        if usage.limitReached { return 0 }
+        return usage.live(at: now).map(\.leftPercent).min() ?? 100
+    }
+
+    /// `fallback` is the agent used last: the choice when nothing is known.
+    static func pick(_ entries: [AgentTool: AgentUsageEntry], at now: Date, fallback: AgentTool,
+                     tools: [AgentTool] = AgentTool.allCases) -> Pick {
+        let known = tools.compactMap { tool in left(entries[tool]?.usage, at: now).map { (tool: tool, left: $0) } }
+        let unknown = tools.filter { tool in !known.contains { $0.tool == tool } }
+        guard let best = known.max(by: { ($0.left, $0.tool == fallback ? 1 : 0) < ($1.left, $1.tool == fallback ? 1 : 0) }) else {
+            return Pick(tool: tools.contains(fallback) ? fallback : tools[0], reason: "usage not known yet")
+        }
+        if best.left < low, let other = unknown.first(where: { $0 == fallback }) ?? unknown.first {
+            return Pick(tool: other, reason: "\(best.tool.label) is nearly out")
+        }
+        return Pick(tool: best.tool, reason: best.left == 0 ? "limit reached everywhere" : "\(best.left)% left")
+    }
+}

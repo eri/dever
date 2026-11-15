@@ -1434,22 +1434,92 @@ private struct AgentsSection: View {
         return app.projects.flatMap { app.repositories(for: $0) }.filter { seen.insert($0.lowercased()).inserted }
     }
 
-    /// The choice as the picker's value: a never-asked preference shows as "Ask each time".
-    private var choice: Binding<String> {
-        Binding(get: { preferred.isEmpty ? AgentChoice.ask.stored : preferred }, set: { preferred = $0 })
+    private var choice: AgentChoice { AgentChoice(stored: preferred) }
+    @AppStorage(AgentPreferences.lastToolKey) private var lastTool = AgentTool.claudeCode.rawValue
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Namespace private var ring
+
+    /// One choice of "Default agent": a mark, a name, the lime ring on the chosen one. A
+    /// preference never asked shows as "Ask each time".
+    private func choiceTile<Mark: View>(_ option: AgentChoice, name: String, @ViewBuilder mark: () -> Mark) -> some View {
+        let on = choice == option || (option == .ask && choice == .unset)
+        return Button {
+            withAnimation(reduceMotion ? nil : .spring(response: 0.3, dampingFraction: 0.85)) { preferred = option.stored }
+        } label: {
+            VStack(spacing: 8) {
+                mark().frame(height: 28)
+                Text(name).font(.system(size: 13, weight: on ? .semibold : .medium)).foregroundStyle(on ? Soot.ink : Soot.muted)
+                    .lineLimit(1).minimumScaleFactor(0.9)
+            }
+            .frame(maxWidth: .infinity)
+            .frame(height: 84)
+            .background(Soot.surface, in: RoundedRectangle(cornerRadius: 12))
+            .overlay {
+                if on {
+                    RoundedRectangle(cornerRadius: 12).strokeBorder(Soot.lime, lineWidth: 2)
+                        .matchedGeometryEffect(id: "ring", in: ring)
+                }
+            }
+        }
+        .buttonStyle(RowButton(lift: .tone, radius: 12))
+        .accessibilityLabel(name)
+        .accessibilityAddTraits(on ? .isSelected : [])
+    }
+
+    /// What the choice does at a start, in one line; for "Most usage left", who it is right now.
+    @ViewBuilder private var consequence: some View {
+        switch choice {
+        case .tool(let tool):
+            Text("An issue's Start button opens \(tool.label); a chevron offers the others.")
+                .font(.system(size: 13)).foregroundStyle(Soot.muted)
+        case .ask, .unset:
+            Text("An issue's Start button shows the agents to pick from.")
+                .font(.system(size: 13)).foregroundStyle(Soot.muted)
+        case .mostLeft:
+            TimelineView(.periodic(from: .now, by: 60)) { context in
+                let pick = AgentRecommendation.pick(usage.entries, at: context.date, fallback: AgentTool(rawValue: lastTool) ?? .claudeCode)
+                let unread = AgentTool.allCases.filter { !$0.usageIsReadable }.map(\.label)
+                HStack(spacing: 6) {
+                    Text("Right now:").foregroundStyle(Soot.muted)
+                    AgentMark(tool: pick.tool, size: 16)
+                    Text("\(pick.tool.label) · \(pick.reason)").fontWeight(.medium).foregroundStyle(Soot.ink)
+                    if !unread.isEmpty {
+                        Text("· \(ListFormatter.localizedString(byJoining: unread))'s usage cannot be read yet")
+                            .foregroundStyle(Soot.muted).lineLimit(1)
+                    }
+                }
+                .font(.system(size: 13))
+                .accessibilityElement(children: .combine)
+            }
+        }
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             SectionHead(title: "Agents", detail: "Start a coding agent on an issue, in your own tool, on a worktree of its branch.")
-            SettingRows {
-                SettingRow(title: "Default agent", detail: "Used by an issue's Start button", divided: false) {
-                    SegmentPicker(label: "Default agent",
-                                  options: AgentTool.allCases.map { (label: $0.label, value: AgentChoice.tool($0).stored) }
-                                      + [(label: "Ask each time", value: AgentChoice.ask.stored)],
-                                  selection: choice)
+            Text("Default agent").font(.system(size: 13, weight: .semibold)).foregroundStyle(Soot.ink)
+                .padding(.bottom, 10)
+                .accessibilityAddTraits(.isHeader)
+            HStack(spacing: 12) {
+                ForEach(AgentTool.allCases) { tool in
+                    choiceTile(.tool(tool), name: tool.label) { AgentMark(tool: tool, size: 28) }
+                }
+                choiceTile(.mostLeft, name: "Most usage left") {
+                    // A gauge: whichever agent has the most room when you start.
+                    Image(systemName: "gauge.with.needle.fill").font(.system(size: 22, weight: .medium))
+                        .foregroundStyle(choice == .mostLeft ? Soot.lime : Soot.muted)
+                }
+                choiceTile(.ask, name: "Ask each time") {
+                    Image(systemName: "questionmark.circle").font(.system(size: 22, weight: .medium))
+                        .foregroundStyle(choice == .ask || choice == .unset ? Soot.ink : Soot.muted)
                 }
             }
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel("Default agent")
+            consequence
+                .padding(.top, 10)
+                .id(preferred)
+                .transition(.opacity)
             // Side by side: the agents compare at a glance, and a third one wraps under them.
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 280), spacing: 20, alignment: .top)], alignment: .leading, spacing: 20) {
                 ForEach(AgentTool.allCases) { tool in

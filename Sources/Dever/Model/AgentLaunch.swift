@@ -27,13 +27,15 @@ enum AgentTool: String, CaseIterable, Identifiable {
     }
 }
 
-/// The agent a start uses: not asked yet, asked at each start, or always the same one.
+/// The agent a start uses: not asked yet, asked at each start, always the same one, or whichever
+/// has the most usage left at that moment.
 enum AgentChoice: Equatable {
-    case unset, ask, tool(AgentTool)
+    case unset, ask, tool(AgentTool), mostLeft
 
     init(stored: String?) {
         switch stored {
         case "ask": self = .ask
+        case "mostLeft": self = .mostLeft
         case let raw?: self = AgentTool(rawValue: raw).map(AgentChoice.tool) ?? .unset
         case nil: self = .unset
         }
@@ -43,6 +45,7 @@ enum AgentChoice: Equatable {
         switch self {
         case .unset: ""
         case .ask: "ask"
+        case .mostLeft: "mostLeft"
         case .tool(let tool): tool.rawValue
         }
     }

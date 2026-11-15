@@ -76,16 +76,26 @@ struct AgentStartMenu: View {
     }
     private var branch: String? { issue.branchName.flatMap { $0.isEmpty ? nil : $0 } }
     private var ready: Bool { branch != nil && repository != nil }
-    /// The tools the menu lists: all of them, the one started last first; with a preferred agent, the others.
+    /// The agent the button starts: the chosen one, or the one with the most usage left right now.
+    private var picked: AgentRecommendation.Pick? {
+        switch choice {
+        case .tool(let tool): return .init(tool: tool, reason: "")
+        case .mostLeft:
+            return AgentRecommendation.pick(usage.entries, at: Date(), fallback: AgentTool(rawValue: lastTool) ?? .claudeCode)
+        case .ask, .unset: return nil
+        }
+    }
+    /// The tools the menu lists: all of them, the one started last first; with a button, the others.
     private var listed: [AgentTool] {
         let all = AgentTool.allCases.sorted { a, _ in a.rawValue == lastTool }
-        if case .tool(let mine) = choice { return all.filter { $0 != mine } }
+        if let mine = picked?.tool { return all.filter { $0 != mine } }
         return all
     }
 
     var body: some View {
         HStack(spacing: 4) {
-            if case .tool(let tool) = choice {
+            if let picked {
+                let tool = picked.tool
                 Button { start(tool) } label: {
                     HStack(spacing: 8) {
                         AgentMark(tool: tool, size: 18)
@@ -102,7 +112,8 @@ struct AgentStartMenu: View {
                 }
                 .buttonStyle(MenuTriggerButton(fill: fill))
                 .disabled(busy != nil || !ready)
-                .help([branch.map { "Opens \(tool.label) on a worktree of \($0), the brief filled in and not sent" } ?? "Linear gives no branch for this issue",
+                .help([choice == .mostLeft ? "\(tool.label) has the most usage left: \(picked.reason)" : nil,
+                       branch.map { "Opens \(tool.label) on a worktree of \($0), the brief filled in and not sent" } ?? "Linear gives no branch for this issue",
                        usage.entries[tool]?.usage.map { "\(tool.label): \($0.line(at: Date()))" }].compactMap { $0 }.joined(separator: "\n"))
                 chevron.frame(width: 30, height: ButtonSize.panel.height)
             } else {
@@ -178,7 +189,7 @@ struct AgentStartMenu: View {
                 MenuPanelHead(title: "Which agent do you use?", detail: "One click from now on; Settings changes it")
             case .ask:
                 MenuPanelHead(title: "\(title)…", detail: branch.map { "A worktree on \($0)" } ?? "Linear gives no branch for this issue")
-            case .tool:
+            case .tool, .mostLeft:
                 MenuPanelHead(title: "Another agent, this time", detail: branch.map { "A worktree on \($0)" } ?? "Linear gives no branch for this issue")
             }
             ForEach(listed) { tool in
