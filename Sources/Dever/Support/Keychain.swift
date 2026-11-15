@@ -26,6 +26,29 @@ enum Keychain {
         }
     }
 
+    /// What reading an item found: a value, no item at all, or an item that could not be read (the
+    /// Keychain refused, or its content is not what is expected). The last two must never be
+    /// confused: "nothing stored" may be written over, "could not read" may not.
+    enum Lookup<T> {
+        case found(T), absent, unreadable
+    }
+
+    static func lookup<T: Decodable>(_ type: T.Type, for key: String) -> Lookup<T> {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: key,
+            kSecReturnData as String: true,
+            kSecMatchLimit as String: kSecMatchLimitOne,
+        ]
+        var out: CFTypeRef?
+        let status = SecItemCopyMatching(query as CFDictionary, &out)
+        if status == errSecItemNotFound { return .absent }
+        guard status == errSecSuccess, let data = out as? Data,
+              let value = try? JSONDecoder().decode(T.self, from: data) else { return .unreadable }
+        return .found(value)
+    }
+
     static func load<T: Decodable>(_ type: T.Type, for key: String) -> T? {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,

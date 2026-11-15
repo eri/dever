@@ -276,6 +276,8 @@ final class AppState: ObservableObject {
         }
         return out
     }
+    /// The stored credentials exist but could not be read at launch: see `saveCredentials`.
+    private var credentialsUnreadable = false
     private let simulatedMissing = Set(simulated("DEVER_SNAPSHOT_DISCONNECTED").keys.compactMap(ServiceKind.init(rawValue:)))
     private let simulatedFailing = simulated("DEVER_SNAPSHOT_FAILING")
     private var simulatedMode: RepositoryMode?
@@ -306,11 +308,16 @@ final class AppState: ObservableObject {
         // DEVER_SNAPSHOT_REPOS=owner/a,owner/b gives the first project those repositories (not saved).
         let simulatedRepos = ProcessInfo.processInfo.environment["DEVER_SNAPSHOT_REPOS"]?
             .split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) } ?? []
-        if let stored = Keychain.load(StoredCredentials.self, for: Self.credentialsKey) {
+        switch Keychain.lookup(StoredCredentials.self, for: Self.credentialsKey) {
+        case .found(let stored):
             github = stored.github
             slack = stored.slack
             linear = stored.linear
-        } else {
+        case .unreadable:
+            // The tokens are there but this launch could not read them (the Keychain refused, or
+            // asked and got no answer). Run without them and write nothing over them.
+            credentialsUnreadable = true
+        case .absent:
             // One-time migration from the former one-item-per-service layout.
             github = Keychain.load(GitHubCredentials.self, for: "github")
             slack = Keychain.load(SlackCredentials.self, for: "slack.oauth")
@@ -573,6 +580,12 @@ final class AppState: ObservableObject {
     private func saveCredentials() {
         // A snapshot run with simulated connections never writes its pretend state back.
         guard !isSimulating else { return }
+        // Stored tokens this launch could not read are not replaced by nothing: only by a tool
+        // the user connected since.
+        if credentialsUnreadable {
+            guard github != nil || slack != nil || linear != nil else { return }
+            credentialsUnreadable = false
+        }
         try? Keychain.save(StoredCredentials(github: github, slack: slack, linear: linear), for: Self.credentialsKey)
     }
 
