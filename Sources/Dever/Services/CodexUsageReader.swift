@@ -25,10 +25,12 @@ enum CodexUsageError: LocalizedError, Equatable {
 /// question (`account/rateLimits/read`, documented), then ended. No session, no model call, and
 /// Dever never sees the login: the tool uses the one the user already made. About two seconds.
 enum CodexUsageReader {
+    /// Where the desktop app has kept its binary, newest layout first: it moved between versions.
+    static let bundled = ["Contents/Resources/codex-cli/bin/codex", "Contents/Resources/codex"]
+
     /// The binary inside the desktop app, else one where package managers put it.
     static func binary(app: URL?) -> URL? {
-        let candidates = [app?.appendingPathComponent("Contents/Resources/codex").path,
-                          "/opt/homebrew/bin/codex", "/usr/local/bin/codex"].compactMap { $0 }
+        let candidates = bundled.compactMap { app?.appendingPathComponent($0).path } + ["/opt/homebrew/bin/codex", "/usr/local/bin/codex"]
         return candidates.first(where: FileManager.default.isExecutableFile).map { URL(fileURLWithPath: $0) }
     }
 
