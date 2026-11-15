@@ -34,6 +34,7 @@ struct SituationGlyph: View {
 struct DeliveryBoard: View {
     @EnvironmentObject var app: AppState
     @ObservedObject private var store = IssueStore.shared
+    @ObservedObject private var agents = AgentStore.shared
     let plan: DeliveryPlan
     let project: Project
     /// Pull request chips name their repository once the project follows more than one.
@@ -249,9 +250,18 @@ struct DeliveryBoard: View {
         let failure = failure(of: item)
         // A capture opens it on whichever pull request the demo starts with.
         let open = failure != nil && (why == failure || why?.number == 0)
-        return startLink(item, grab: grab, failure: failure, open: open)
-            // The card hangs over the rows under the tile.
-            .zIndex(open || agentMenu ? 1 : 0)
+        return VStack(alignment: .leading, spacing: 8) {
+            startLink(item, grab: grab, failure: failure, open: open)
+                // The card hangs over the rows under the tile.
+                .zIndex(1)
+            // The agent on this issue's branch, when one of the connected tools has a session there.
+            if let session = agents.session(branch: item.issue.branchName) {
+                AgentSessionLine(session: session, lift: Soot.surface)
+                    .padding(.horizontal, 16)
+                    .transition(.opacity)
+            }
+        }
+        .zIndex(open || agentMenu ? 1 : 0)
     }
 
     private func startLink(_ item: DeliveryPlan.Item, grab: Bool, failure: FailureStore.Key?, open: Bool) -> some View {
@@ -534,6 +544,7 @@ struct DeliveryBoard: View {
             IDPill(text: issue.identifier)
             Text(MarkdownTheme.inline(issue.title, size: 14)).font(.system(size: 14)).foregroundStyle(Soot.ink).lineLimit(1)
                 .help(issue.title)
+            if let session = agents.session(branch: issue.branchName) { AgentSessionChip(session: session) }
             Spacer(minLength: 12)
             HStack(spacing: 6) {
                 Text(word(item)).font(.system(size: 12, weight: urgent ? .semibold : .medium))

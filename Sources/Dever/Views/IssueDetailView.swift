@@ -8,6 +8,7 @@ import SwiftUI
 struct IssueDetailView: View {
     @EnvironmentObject var app: AppState
     @ObservedObject private var store = IssueStore.shared
+    @ObservedObject private var agents = AgentStore.shared
     @ObservedObject private var github = GitHubStore.shared
     @ObservedObject private var intelligence = IntelligenceStatus.shared
     @AppStorage(IntelligenceFeature.explainFailure.settingKey) private var explainsFailures = true
@@ -388,6 +389,9 @@ struct IssueDetailView: View {
                         caption("Branch") {
                             CopyChip(value: branch, what: "branch name", maxWidth: 200)
                                 .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        if let session = agents.session(branch: branch) {
+                            caption("Agent") { AgentSessionLine(session: session) }
                         }
                         // To do or in progress (not in review or QA): an agent can pick it up from here.
                         if ["unstarted", "backlog", "started"].contains(current.state.type), !Delivery.isReviewState(current.state.name),

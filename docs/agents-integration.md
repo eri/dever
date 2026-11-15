@@ -2,7 +2,7 @@
 
 An audit of how Dever could work with the two coding agents the team uses most, what form that takes,
 and in what order. Facts were read from the official documentation on 2026-11-13 and from one Mac
-(read-only, structure only); every claim carries its source and its status. Phases 0 and 1 of the
+(read-only, structure only); every claim carries its source and its status. Phases 0, 1 and 2 of the
 [plan](#8-plan) are done; the rest is not built.
 
 Contents: [the gap](#1-the-gap-today) · [facts](#2-facts) · [shapes compared](#3-shapes-compared) ·
@@ -357,7 +357,7 @@ app (a panel, a row) needs more than MCP, and that part belongs to the plugin sy
 | --- | --- | --- |
 | The Claude desktop app has no documented way in | only `claude-cli://` (terminal) is documented | phase 0 inspects the app; whatever is found is undocumented and may break on any update, so the clipboard fallback stays, and the launch is tested at each app update |
 | Hook payloads change | fields are documented but both tools move fast | the bridge reads five events and three fields; unknown fields are ignored; a version check in Settings › Agents says when a tool is newer than the last one tested |
-| Hooks blocked by an organisation | `allowedHttpHookUrls`, managed hooks, Codex's trust review | Claude Code hooks use a `command` too if `http` is refused; Settings says "installed, not trusted yet" for Codex until its review is done |
+| Hooks blocked by an organisation | managed hooks, Codex's trust review | both tools run the same `command` hook; Settings says Codex asks for a review of the hooks once, and cannot tell whether it was done |
 | Private conversations | transcripts hold everything | Dever never opens them; the one sentence shown comes from the hook, stays in memory, and is gone at quit |
 | Slack and Linear content reaching a model provider | an agent that calls `get_thread` sends the thread to Anthropic or OpenAI | it only happens on the agent's call, in a tool the user chose; said once at "Connect"; per-tool switch for thread access in Settings › Agents. This is new for an app whose AI is otherwise on-device, and the README's claim must stay true as worded |
 | A local server other processes can call | loopback is reachable by anything on the Mac | bearer token from the Keychain, loopback only, read tools only, proposals never applied without a click |
@@ -377,7 +377,7 @@ Smallest useful step first. Days are rough, for one developer who knows the code
 | --- | --- | --- | --- |
 | **0. Checks** (done, section 2.5) | Inspect the Claude desktop app for a way to open a session on a folder with a prompt, and to bring a session forward. Verify on real installs: the fields of Stop and PermissionRequest (is the last sentence there, in both tools), the plugin install commands from a Mac with no CLI on the `PATH`, Codex's trust review, `codex "prompt"`, the length a deep link's prompt may reach | decides the shape of 1 and 2 | 1–2 d |
 | **1. Launch** (done) | Settings › Agents with each repository's clone; clone lookup; worktree on the issue's branch; the brief (complete enough to stand without MCP: issue, criteria, link to the thread); "Start with … ⌄" on the Start tile and the issue page | yes: the brief and the right folder in one click | 3–4 d |
-| **2. Observe** | The two plugins (hooks only) and "Connect / Disconnect"; `AgentBridge`; `AgentStore`; the state line on the issue and its Delivery row; the ranking; "Open session" | yes: this is the phase that fills the blind stretch | 4–5 d |
+| **2. Observe** (done, except the ranking) | The two plugins (hooks only) and "Connect / Disconnect"; `AgentBridge`; `AgentStore`; the state line on the issue and its Delivery row; the ranking; "Open session" | yes: this is the phase that fills the blind stretch | 4–5 d |
 | **3. Context** | MCP server with the read tools, the token, the skill; the brief shrinks to its short form | for the agent; invisible to the developer | 4–5 d |
 | **4. Propose and review** | `propose_update`, `ProposalStore`, "Proposed by the agent", the "review its work" situation with the criteria checklist | yes: closes the loop with Linear and Slack | 5–6 d |
 | **5. Board** | The agents board across projects; worktree clean-up | once several agents run at once | 2–3 d |
@@ -393,6 +393,40 @@ logo of theirs. Worktrees go beside their clone, in `.dever/worktrees/<clone fol
 already checked out anywhere (the clone, a worktree another tool made) is opened where it is. Not
 verified by a click: the four openings against the real apps, and a worktree in a real repository
 (the test makes its own).
+
+What phase 2 built: `Services/AgentBridge.swift` (a listener on the loopback interface, a port and a
+token made at each launch and written to `~/Library/Application Support/Dever/agent/bridge.json`,
+readable by the user only), `Services/AgentPlugin.swift` (the plugin of each tool, written into that
+folder, and the tool's own commands to install and remove it), `Model/AgentSession.swift` and
+`Model/AgentStore.swift` (the state machine and the sessions, memory only), the line and the chip
+of `Views/AgentSessionViews.swift` on the Start tile, the Delivery rows and the issue page, and
+"Follow your sessions" in Settings › Agents. What was learnt building it:
+
+- **Both tools install a plugin from the binary inside their desktop app**, with no CLI on the `PATH`:
+  `claude plugin marketplace add <folder>` then `plugin install dever@dever`; `codex plugin marketplace add
+  <folder>` then `plugin add dever@dever`. Checked against the real tools, each with a configuration folder
+  made for the test (`DEVER_TEST_REAL_TOOLS=1 swift test --filter RealTools`). Where the Claude desktop
+  app keeps its Claude Code binary is internal and may move.
+- **The hooks run one command**, `dever-hook <tool>`: it posts the hook's payload to the listener with
+  the token, waits two seconds at most, prints nothing and always succeeds, so an agent is never held
+  back and nothing happens when Dever is not running. Codex has no `http` hook, so both tools use the
+  same command.
+- **The payload carries more than Dever wants** (the prompt, a tool's input and output). It only
+  travels over the loopback interface, and Dever decodes seven fields and drops the rest on arrival.
+- **Events**: SessionStart, UserPromptSubmit, PermissionRequest, PostToolUse, Stop, SessionEnd, plus
+  Notification for Claude Code. PostToolUse is there so that a session that waited for a permission
+  reads "working" again once it was given; its cost is one short process per tool call.
+- **The token is in a file, not in the Keychain** as first planned: a hook command cannot read the
+  Keychain without a prompt. The file is `0600` and the token changes at every launch.
+- **A session is tied to an issue by the branch** checked out in its folder, read with git when the
+  session starts, is asked something and finishes.
+
+Not built in this phase: the ranking (an issue whose agent waits moving to the top of Delivery), and
+Claude Code's usage (the status line forwarder, the rate-limit hook). Not verified by a click: a real
+session's hooks reaching Dever after "Connect" (the path is tested end to end with the hook command
+and a payload, and the install against the real tools, but not the two together in a signed-in
+session), Codex's trust review of the hooks, and "Open session" (`codex://threads/<id>`,
+`claude://resume?session=<id>`).
 
 Phases 1 and 2 can swap: 2 first gives the clearer development phase sooner, with sessions tied to
 issues by branch alone; 1 first gives the launch record that makes the tie exact.

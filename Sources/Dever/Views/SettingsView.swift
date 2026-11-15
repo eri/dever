@@ -1475,6 +1475,17 @@ private struct AgentsSection: View {
                 .id(preferred)
                 .transition(.opacity)
 
+            title("Follow your sessions")
+            SettingRows {
+                ForEach(Array(AgentTool.allCases.enumerated()), id: \.element) { index, tool in
+                    AgentConnectRow(tool: tool, divided: index < AgentTool.allCases.count - 1)
+                }
+            }
+            Text("Connecting adds Dever's plugin to the agent, with the agent's own plugin command: a few hooks that tell Dever, on this Mac only, when a session starts, works, waits for you and finishes. Dever keeps that state and the agent's last sentence in memory; it reads no conversation and nothing leaves the Mac.")
+                .font(.system(size: 12)).foregroundStyle(Soot.muted)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.top, 10)
+
             HStack(alignment: .firstTextBaseline) {
                 title("What is left")
                 Spacer(minLength: 16)
@@ -1614,6 +1625,88 @@ private struct AgentsSection: View {
             searching = false
             note = (added == 0 ? "No new clone found under \((folder.path as NSString).abbreviatingWithTildeInPath)"
                                : "\(added) clone\(added == 1 ? "" : "s") found", false)
+        }
+    }
+}
+
+/// One agent's row of "Follow your sessions": whether Dever's plugin is in the tool, and the
+/// button that has the tool install or remove it.
+private struct AgentConnectRow: View {
+    let tool: AgentTool
+    let divided: Bool
+    /// nil while the tool is being asked.
+    @State private var connected: Bool?
+    @State private var busy = false
+    @State private var problem: String?
+    @State private var binary: URL?
+
+    private var status: String {
+        if busy { return connected == true ? "Disconnecting…" : "Connecting…" }
+        guard binary != nil else { return "\(tool.label) was not found on this Mac" }
+        switch connected {
+        case nil: return "Checking…"
+        case true?: return tool == .codex ? "Connected · Codex asks you to review the hooks once" : "Connected"
+        case false?: return "Not connected: Dever does not see its sessions"
+        }
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 12) {
+                AgentMark(tool: tool, size: 24)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(tool.label).font(.system(size: 14, weight: .medium)).foregroundStyle(Soot.ink)
+                    HStack(spacing: 5) {
+                        if connected == true, !busy {
+                            Image(systemName: "checkmark.circle.fill").font(.system(size: 11)).foregroundStyle(Soot.lime)
+                                .accessibilityHidden(true)
+                        }
+                        Text(problem ?? status).font(.system(size: 12))
+                            .foregroundStyle(problem == nil ? Soot.muted : Theme.negative)
+                            .lineLimit(2)
+                    }
+                }
+                Spacer(minLength: 16)
+                if binary != nil, let connected {
+                    if connected {
+                        Button("Disconnect") { change(connect: false) }.buttonStyle(SecondaryButton())
+                            .disabled(busy)
+                            .accessibilityLabel("Disconnect \(tool.label)")
+                    } else {
+                        Button("Connect") { change(connect: true) }.buttonStyle(PrimaryButton())
+                            .disabled(busy)
+                            .accessibilityLabel("Connect \(tool.label)")
+                    }
+                }
+            }
+            .frame(minHeight: 60)
+            if divided { Rectangle().fill(Soot.line).frame(height: 1) }
+        }
+        .task {
+            binary = AgentPlugin.binary(tool, codexApp: AgentApps.app(.codex))
+            guard let binary else { return }
+            if ProcessInfo.processInfo.environment["DEVER_SNAPSHOT_DIR"] != nil {
+                // A capture asks no tool: DEVER_SNAPSHOT_AGENT_SESSION shows them connected.
+                connected = ProcessInfo.processInfo.environment["DEVER_SNAPSHOT_AGENT_SESSION"] != nil
+                return
+            }
+            connected = await AgentPlugin.connected(tool, binary: binary)
+        }
+    }
+
+    private func change(connect: Bool) {
+        guard let binary else { return }
+        busy = true
+        problem = nil
+        Task {
+            do {
+                if connect { try await AgentPlugin.connect(tool, binary: binary) } else { try await AgentPlugin.disconnect(tool, binary: binary) }
+            } catch {
+                problem = error.localizedDescription
+            }
+            // What the tool itself says now, whatever the commands answered.
+            connected = await AgentPlugin.connected(tool, binary: binary)
+            busy = false
         }
     }
 }

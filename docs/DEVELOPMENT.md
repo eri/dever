@@ -43,7 +43,10 @@ Tokens are stored in the macOS Keychain (`io.github.eri.dever`), projects in `~/
 "Start with <agent>" on an issue opens the user's preferred coding agent (Claude Code or Codex, asked at the first start; Settings › Agents) in the user's own tool (desktop app or terminal, Settings › Agents)
 on a worktree of the issue's branch, with a short brief filled in and not sent. The first start on a repository asks where
 its clone is (checked by its `origin` remote, then remembered; Settings › Agents lists them); the worktree goes beside the
-clone, in `.dever/worktrees`, unless the branch is already checked out somewhere. The audit, the decisions and the plan: [docs/agents-integration.md](agents-integration.md).
+clone, in `.dever/worktrees`, unless the branch is already checked out somewhere. "Connect" in Settings › Agents has the agent install Dever's plugin (hooks that post to
+a listener on the loopback interface); the issue then shows its agent working, waiting or finished, from memory only.
+`DEVER_TEST_REAL_TOOLS=1 swift test --filter RealTools` installs and removes the plugin with the tools on the Mac, each in
+a configuration folder made for the test. The audit, the decisions and the plan: [docs/agents-integration.md](agents-integration.md).
 
 ## Data freshness
 
@@ -69,7 +72,8 @@ Add `DEVER_SNAPSHOT_ONBOARDING=1` to capture the onboarding stages too (`DEVER_S
 `DEVER_SNAPSHOT_PROJECT=1` captures the second project instead of the first.
 `DEVER_SNAPSHOT_DELIVERY=busy` (or `grab`, `done`, `agent`) fills the Delivery panel with a made-up project, to capture every situation;
 `DEVER_SNAPSHOT_AGENT_MENU=1` opens the "Start with" menu of the tile (`agent` scene) or of the issue page; the launch argument
-`-agentPreferred claudeCode` (or `codex`, `ask`, `""` for never asked) gives that run a preferred agent without saving it, and `DEVER_SNAPSHOT_AGENT_USAGE=1` shows a made-up plan usage instead of asking Codex.
+`-agentPreferred claudeCode` (or `codex`, `ask`, `""` for never asked) gives that run a preferred agent without saving it, `DEVER_SNAPSHOT_AGENT_USAGE=1` shows a made-up plan usage instead of asking Codex, and `DEVER_SNAPSHOT_AGENT_SESSION=working|waiting|finished|stale`
+puts a made-up agent session on the `agent` scene's issue (a capture run starts no listener and asks no tool).
 `DEVER_SNAPSHOT_ISSUE=1` opens the first project's first issue and saves `issue-{dark,light}.png` plus a `-end` capture
 scrolled to the comments; add `DEVER_SNAPSHOT_CHOICE=Status` (or `Priority`, `Assignee`) to open that chip's list, and
 `DEVER_SNAPSHOT_TRIAGE=1` to write the issue's current priority back and show the confirmation line.

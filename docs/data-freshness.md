@@ -270,6 +270,7 @@ Refresh every. "Volatile" is the cadence while something is in flight.
 | Linear issue rows, blockers | 60 s | | any issue write (local, at once), activation | `updatedAt` delta |
 | Linear issue detail (open issue) | 60 s | | write, opened externally | compare `updatedAt` from the delta |
 | Team states, members | 15 min | | | |
+| A coding agent's session on an issue's branch (working, waiting for the user, finished; the agent's last sentence) | none: pushed by the agent's hooks, never fetched | | each hook call | no request: local, memory only (`AgentStore`), empty after a relaunch until the session speaks again. A "working" not heard for 10 min is drawn as old ("last heard 14 min ago"), never as current |
 | A coding agent's plan usage (what is left of its windows, as the tool reports it; Codex only: Claude Code has no outside read) | 5 min, while the "Start with" control, its menu or Settings › Agents is on screen; never in the background | | a start made from Dever (the next opening reads again); the menu opening | no request by Dever: the tool's own binary is run for one question (about 2 s, one child process) and makes its own call; memory only (`AgentUsageStore`). Past 5 min the value says its age; once its windows have reset it is no longer said |
 | Project lead, team, target date | 15 min | | | |
 | Slack members · custom emoji | 15 min · 1 h | | | disk copy |
@@ -314,6 +315,7 @@ means the behaviour once sections 3.1 to 3.4 are in place.
 | "Fix CI", "Review", open a pull request, merge on GitHub | That pull request, its checks, its issue | Old until Refresh | Mark `pulls(repo)` and `issues(project)` dirty; refresh on activation |
 | Open in Linear | That issue | Old until the page reappears | Mark `issues(project)` dirty |
 | The "Start with" control on screen, its menu opening | The agents' plan usage | Not offered | Read within the 5 min budget; nothing shown until a value arrives (no skeleton for an optional line) |
+| "Open session" on an agent's line | Nothing Dever displays from a service | Not offered | The session's state keeps arriving by its hooks; nothing to mark dirty |
 | Start with / Continue with a coding agent | One issue (the move to its started state, as Start); later its branch and pull request, made in the agent | Not offered | The move is Start's optimistic write; the agent's app shows nothing Dever displays, so nothing is marked dirty: the pull request arrives within the open pull requests' budget and on activation |
 | Deploy / redeploy / delete preview | Preview phase | Optimistic phase, 30 s polling | Keep; also poll when a push started the run |
 | Open the Slack room, read | Read cursor | Cursor moved after 3 s, Overview follows | Keep; move into `SlackStore` |
@@ -361,6 +363,7 @@ already exists for this).
 | Refresh every | The background cadence | Read at the next tick | Keep |
 | System Settings for notifications and back | Permission | Rechecked on activation | Keep |
 | Settings › Agents: each repository's clone, where each tool opens | Nothing remote: which local clone a launch uses | Not offered | The folders are read when the page opens and at each launch; no request |
+| Settings › Agents: Connect / Disconnect an agent | Whether Dever hears that agent's sessions | Not offered | The agent itself is asked for its plugin list when the page opens and after each change; sessions already known stay until they end |
 | Settings › Agents: what is left of each agent's plan | The usage, by work done in the tool | Not offered | Read on opening the page when older than 5 min; a failed reading keeps the last value with its time and the tool's own reason |
 | System Settings for Apple Intelligence and back (Settings › Intelligence, the invitation in the Slack rail, the Intelligence stage of onboarding) | Whether the Mac's model can be used | Read again on activation and when the system says it changed (`IntelligenceStatus`); no request | Keep |
 

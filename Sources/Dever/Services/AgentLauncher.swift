@@ -85,7 +85,7 @@ enum AgentLauncher {
         return folder
     }
 
-    private static func git(_ arguments: [String], in folder: URL, timeout: TimeInterval = 15) -> (status: Int32, output: String, error: String) {
+    static func git(_ arguments: [String], in folder: URL, timeout: TimeInterval = 15) -> (status: Int32, output: String, error: String) {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
         process.arguments = arguments
