@@ -1515,7 +1515,9 @@ private struct MessageRow: View {
                 }
                 .padding(.top, 4)
                 if threadOpen, openThread == nil {
+                    // Out of the text column, under the avatar: the replies get the row's full width.
                     ThreadReplies(replies: thread, failed: threadFailed, users: users, channels: channels, customEmoji: customEmoji, actions: actions)
+                        .padding(.leading, -((wide ? 36 : 32) + 10))
                 }
                 if replying, openThread == nil {
                     ReplyComposer(sending: sending, send: { await send($0) }, cancel: { replying = false })
@@ -1943,15 +1945,18 @@ private struct SlackImage: View {
         Group {
             if let image {
                 Button { NotificationCenter.default.post(name: .previewSlackFile, object: file) } label: {
-                    Image(decorative: image, scale: 2).resizable().aspectRatio(contentMode: .fill)
-                        .frame(width: width, height: width / ratio)
+                    // As wide as the column allows, up to Slack's thumbnail: a fixed width pushed
+                    // a narrow column (a thread in the rail) past its edge, text included.
+                    Color.clear.aspectRatio(ratio, contentMode: .fit).frame(maxWidth: width)
+                        .overlay(Image(decorative: image, scale: 2).resizable().aspectRatio(contentMode: .fill))
+                        .clipped()
                         }
                         .buttonStyle(RowButton(lift: .none))
                         .help("Preview \(file.displayName)")
             } else if failed {
                 FileRow(file: file)
             } else {
-                Skeleton(radius: 8).frame(width: width, height: width / ratio)
+                Skeleton(radius: 8).aspectRatio(ratio, contentMode: .fit).frame(maxWidth: width)
             }
         }
         .frame(maxWidth: width, alignment: .leading)
@@ -2151,19 +2156,28 @@ private struct ThreadReplies: View {
     var channels: [String: String] = [:]
     var customEmoji: [String: URL] = [:]
     var actions = SlackMessageActions()
-    /// Without the indent and bar, for the thread pane.
+    /// Without the block around them, for the thread pane.
     var bare = false
+    /// In the rail a long thread opens on its latest replies; the earlier ones are a click away.
+    @State private var showAll = false
+    private static let latest = 3
 
     var body: some View {
-        VStack(alignment: .leading, spacing: bare ? 14 : 10) {
+        VStack(alignment: .leading, spacing: 14) {
             if failed {
                 Text("Couldn't load the replies.").font(.system(size: 12)).foregroundStyle(Soot.muted)
             } else if let replies {
-                ForEach(replies) { reply in
+                let hidden = bare || showAll ? 0 : max(0, replies.count - Self.latest)
+                if hidden > 0 {
+                    Button("^[Show \(hidden) earlier reply](inflect: true)") { Motion.run(Motion.move) { showAll = true } }
+                        .buttonStyle(TertiaryButton(tint: .muted, lift: Soot.surface, font: .system(size: 12, weight: .semibold)))
+                        .padding(.leading, -8).padding(.vertical, -4)
+                }
+                ForEach(replies.suffix(replies.count - hidden)) { reply in
                     let user = reply.user.flatMap { users[$0] }
-                    HStack(alignment: .top, spacing: 8) {
-                        SlackAvatar(user: user, name: user?.name ?? "App", size: bare ? 28 : 22, radius: bare ? 7 : 6)
-                        VStack(alignment: .leading, spacing: 2) {
+                    HStack(alignment: .top, spacing: bare ? 8 : 10) {
+                        SlackAvatar(user: user, name: user?.name ?? "App", size: bare ? 28 : 24, radius: bare ? 7 : 6)
+                        VStack(alignment: .leading, spacing: 3) {
                             HStack(alignment: .firstTextBaseline, spacing: 6) {
                                 Text(user?.name ?? "App").font(.system(size: 13, weight: .semibold)).foregroundStyle(Soot.ink)
                                 Text(reply.date.formatted(.relative(presentation: .named))).font(.system(size: 11)).foregroundStyle(Soot.muted)
@@ -2178,9 +2192,13 @@ private struct ThreadReplies: View {
                 WaitingLine().frame(width: 120).accessibilityElement().accessibilityLabel("Loading replies")
             }
         }
-        .padding(.leading, bare ? 0 : 10)
+        // In the rail the replies sit in a block of their own, as wide as the message: set apart
+        // from the channel by a tone, not squeezed into the parent's text column behind a bar.
+        .padding(bare ? 0 : 12)
+        .frame(maxWidth: bare ? nil : .infinity, alignment: .leading)
+        .background { if !bare { RoundedRectangle(cornerRadius: Soot.radius).fill(Soot.ground) } }
+        .overlay { if !bare { RoundedRectangle(cornerRadius: Soot.radius).strokeBorder(Soot.line) } }
         .padding(.top, bare ? 0 : 6)
-        .overlay(alignment: .leading) { if !bare { Rectangle().fill(Soot.line).frame(width: 2).padding(.top, 6) } }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Replies")
     }
