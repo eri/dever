@@ -13,8 +13,12 @@ enum AgentMCP {
     struct Tool {
         var name: String
         var description: String
-        /// The argument's description; every tool takes the one argument, `issue`.
+        /// The description of `issue`, the argument every tool takes.
         var argument: String
+        /// The other arguments, with whether each is required. All are strings.
+        var more: [(name: String, description: String, required: Bool)] = []
+        /// A tool that only reads.
+        var readOnly = true
     }
 
     static let tools: [Tool] = [
@@ -27,14 +31,24 @@ enum AgentMCP {
         .init(name: "get_pull_requests",
               description: "The pull requests of the issue as Dever last read them: number, state, branch, checks, review verdicts, and how old that reading is.",
               argument: "The issue's identifier, like ENG-123."),
+        .init(name: "propose_update",
+              description: "Tell the developer what you did on the issue, in Dever, when you have finished. It changes nothing: the developer reads your account and applies, edits or dismisses what you suggest (moving the issue, answering the Slack thread).",
+              argument: "The issue's identifier, like ENG-123.",
+              more: [("summary", "What you did, in one to three sentences.", true),
+                     ("not_verified", "What you did not or could not verify, if anything.", false),
+                     ("status", "The workflow state you suggest for the issue, by its name (for example \"In Review\"), if it should move.", false),
+                     ("reply", "A short reply to post in the issue's Slack thread, in the thread's language, if the people there should know.", false)],
+              readOnly: false),
     ]
 
-    static let instructions = "Dever is the developer's project dashboard on this Mac. These tools read what it knows about a Linear issue: the issue itself, the Slack thread it came from, its pull requests and checks. They change nothing."
+    static let instructions = "Dever is the developer's project dashboard on this Mac. These tools read what it knows about a Linear issue: the issue itself, the Slack thread it came from, its pull requests and checks. propose_update leaves your account of the work for the developer to act on. None of them changes anything in Linear, Slack or GitHub."
 
     /// The identifier asked for in a `tools/call`.
     struct Call: Equatable {
         var tool: String
-        var issue: String?
+        /// The arguments that are strings, by name.
+        var arguments: [String: String] = [:]
+        var issue: String? { arguments["issue"] }
     }
 
     /// What a request asks, read without doing anything.
@@ -59,8 +73,8 @@ enum AgentMCP {
         case "ping": return (.ping, id)
         case "tools/list": return (.list, id)
         case "tools/call":
-            let arguments = params["arguments"] as? [String: Any] ?? [:]
-            return (.call(.init(tool: params["name"] as? String ?? "", issue: arguments["issue"] as? String)), id)
+            let arguments = (params["arguments"] as? [String: Any] ?? [:]).compactMapValues { $0 as? String }
+            return (.call(.init(tool: params["name"] as? String ?? "", arguments: arguments)), id)
         default: return (.unknown(method), id)
         }
     }
@@ -80,10 +94,12 @@ enum AgentMCP {
 
     static func listing(allowed: Bool) -> [String: Any] {
         ["tools": allowed ? tools.map { tool in
-            ["name": tool.name, "description": tool.description,
-             "inputSchema": ["type": "object", "properties": ["issue": ["type": "string", "description": tool.argument]],
-                             "required": ["issue"]] as [String: Any],
-             "annotations": ["readOnlyHint": true]] as [String: Any]
+            var properties: [String: Any] = ["issue": ["type": "string", "description": tool.argument]]
+            for argument in tool.more { properties[argument.name] = ["type": "string", "description": argument.description] }
+            return ["name": tool.name, "description": tool.description,
+                    "inputSchema": ["type": "object", "properties": properties,
+                                    "required": ["issue"] + tool.more.filter(\.required).map(\.name)] as [String: Any],
+                    "annotations": ["readOnlyHint": tool.readOnly]] as [String: Any]
         } : []]
     }
 }

@@ -24,10 +24,13 @@ struct DeliveryPlan {
     /// Where an open issue stands, in the order it deserves a hand: unblock what is under way
     /// before starting something new.
     enum Situation: Int, CaseIterable {
+        case agentWaiting, agentFinished
         case ciFailed, changesRequested, reviewRequested, behind, readyToMerge, building, draft, waitingReview, todo, blocked
 
         var label: String {
             switch self {
+            case .agentWaiting: "Agent waiting for you"
+            case .agentFinished: "Agent finished · review its work"
             case .ciFailed: "CI failed"
             case .changesRequested: "Changes requested"
             case .reviewRequested: "Review requested"
@@ -130,8 +133,9 @@ struct DeliveryPlan {
     ///   - open: open pull requests by issue identifier.
     ///   - merged: merged pull requests by issue identifier.
     ///   - blockers: for an issue identifier, the unfinished issues that block it.
+    ///   - agents: for an issue identifier, what its coding agent on this Mac asks of the viewer.
     init(issues: [LinearIssue], open: [String: [Pull]], merged: [String: [MergedPull]],
-         blockers: [String: [String]], viewer: Viewer, now: Date = Date()) {
+         blockers: [String: [String]], viewer: Viewer, agents: [String: AgentAttention] = [:], now: Date = Date()) {
         var unblocks: [String: Int] = [:]
         for (_, list) in blockers { for id in list { unblocks[id, default: 0] += 1 } }
         var mine: [Item] = []
@@ -171,6 +175,16 @@ struct DeliveryPlan {
                 item.situation = .blocked
                 item.blockedBy = by
             }
+            // The viewer's own agent on this issue: it waits for an answer, or its work is to review.
+            // A broken pipeline or a review asking for changes says more than "finished", and stays.
+            if let attention = agents[issue.identifier] {
+                isMine = true
+                if attention == .waiting {
+                    item.situation = .agentWaiting
+                } else if item.situation != .ciFailed && item.situation != .changesRequested {
+                    item.situation = .agentFinished
+                }
+            }
             if let since = item.since {
                 let age = now.timeIntervalSince(since)
                 item.stale = (item.situation == .waitingReview && age > Self.staleReview)
@@ -208,6 +222,8 @@ struct DeliveryPlan {
     /// The situation's rank, moved up a notch by staleness or by issues waiting on this one.
     private static func rank(_ item: Item) -> Double {
         var rank: Double = switch item.situation {
+        case .agentWaiting: -2
+        case .agentFinished: -1
         case .ciFailed: 0
         case .changesRequested: 1
         case .reviewRequested: 2

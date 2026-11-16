@@ -8,6 +8,8 @@ struct SituationGlyph: View {
 
     static func look(_ situation: DeliveryPlan.Situation) -> (symbol: String, tint: Color) {
         switch situation {
+        case .agentWaiting: ("hand.raised.fill", Theme.chart3)
+        case .agentFinished: ("checkmark.seal.fill", Theme.positive)
         case .ciFailed: ("xmark.circle.fill", Theme.negative)
         case .changesRequested: ("arrow.uturn.backward.circle.fill", Theme.chart3)
         case .reviewRequested: ("eye.fill", Theme.chart2)
@@ -35,6 +37,7 @@ struct DeliveryBoard: View {
     @EnvironmentObject var app: AppState
     @ObservedObject private var store = IssueStore.shared
     @ObservedObject private var agents = AgentStore.shared
+    @ObservedObject private var proposals = ProposalStore.shared
     let plan: DeliveryPlan
     let project: Project
     /// Pull request chips name their repository once the project follows more than one.
@@ -192,7 +195,13 @@ struct DeliveryBoard: View {
     private func move(for item: DeliveryPlan.Item, grab: Bool) -> Move {
         if grab { return store.viewerID == nil ? .none : .take }
         let pull = item.pull.flatMap { URL(string: $0.url) }
+        let session = agents.session(branch: item.issue.branchName)
         switch item.situation {
+        case .agentWaiting:
+            return session?.link.map { .link("Answer", $0, "Open the session in \(session?.tool.label ?? "the agent")") } ?? .none
+        case .agentFinished:
+            if let pull { return .link("Open PR", pull, "Open the pull request on GitHub") }
+            return session?.link.map { .link("Open session", $0, "Open the session in \(session?.tool.label ?? "the agent")") } ?? .none
         case .ciFailed:
             guard let url = item.pull?.runURL.flatMap(URL.init(string:)) ?? pull else { return .none }
             return .link("Fix CI", url, "Open the failing run on GitHub")
@@ -222,6 +231,8 @@ struct DeliveryBoard: View {
     private func reason(_ item: DeliveryPlan.Item, grab: Bool) -> String {
         let number = item.pull.map { "#\($0.number)" } ?? ""
         switch item.situation {
+        case .agentWaiting: return "Your agent stopped for an answer"
+        case .agentFinished: return item.pull == nil ? "Your agent finished: review its work" : "Your agent finished: review \(number)"
         case .ciFailed: return "CI failed on \(number)"
         case .changesRequested: return "Changes requested on \(number)"
         case .reviewRequested: return "\(item.pull?.author ?? "Someone") asked for your review on \(number)"
@@ -256,8 +267,13 @@ struct DeliveryBoard: View {
                 .zIndex(1)
             // The agent on this issue's branch, when one of the connected tools has a session there.
             if let session = agents.session(branch: item.issue.branchName) {
-                AgentSessionLine(session: session, lift: Soot.surface)
+                AgentSessionLine(session: session, lift: Soot.surface, hasProposal: proposals.proposal(for: item.issue.identifier) != nil)
                     .padding(.horizontal, 16)
+                    .transition(.opacity)
+            }
+            // What the agent left for the developer: its account, and what it suggests.
+            if proposals.proposal(for: item.issue.identifier) != nil {
+                AgentProposalBlock(project: project, issue: item.issue, fill: Soot.ground)
                     .transition(.opacity)
             }
         }
@@ -339,7 +355,7 @@ struct DeliveryBoard: View {
             }
             .buttonStyle(PrimaryButton())
             .help(help)
-            .accessibilityHint("Opens on GitHub")
+            .accessibilityHint("Opens outside Dever")
         case .start(let state):
             HStack(spacing: 8) {
                 AgentStartMenu(project: project, issue: item.issue, open: menu,

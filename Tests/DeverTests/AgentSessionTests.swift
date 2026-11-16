@@ -183,7 +183,7 @@ final class AgentSessionTests: XCTestCase {
         XCTAssertEqual((answers[0]["result"] as? [String: Any])?["protocolVersion"] as? String, "2025-03-26")
         XCTAssertEqual(answers[1]["id"] as? String, "two")
         let listed = ((answers[1]["result"] as? [String: Any])?["tools"] as? [[String: Any]])?.compactMap { $0["name"] as? String }
-        XCTAssertEqual(listed, ["get_issue", "get_thread", "get_pull_requests"])
+        XCTAssertEqual(listed, ["get_issue", "get_thread", "get_pull_requests", "propose_update"])
         XCTAssertEqual((answers[2]["result"] as? [String: Any])?["isError"] as? Bool, true)
         // Without Dever the command answers for it, with the request's own id.
         let alone = try await ask([#"{"jsonrpc":"2.0","id":7,"method":"tools/list"}"#, #"{"jsonrpc":"2.0","method":"notifications/initialized"}"#],
@@ -256,12 +256,18 @@ final class AgentSessionTests: XCTestCase {
         XCTAssertEqual(read(#"{"jsonrpc":"2.0","id":1,"method":"tools/list"}"#), .list)
         XCTAssertEqual(read(#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#), .notification)
         XCTAssertEqual(read(#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"get_thread","arguments":{"issue":"ENG-12"}}}"#),
-                       .call(.init(tool: "get_thread", issue: "ENG-12")))
+                       .call(.init(tool: "get_thread", arguments: ["issue": "ENG-12"])))
         XCTAssertEqual(read(#"{"jsonrpc":"2.0","id":2,"method":"resources/list"}"#), .unknown("resources/list"))
         XCTAssertNil(read("not json"))
         // A switched-off agent is offered nothing.
         XCTAssertEqual((AgentMCP.listing(allowed: false)["tools"] as? [Any])?.count, 0)
-        XCTAssertEqual((AgentMCP.listing(allowed: true)["tools"] as? [Any])?.count, 3)
+        let offered = try XCTUnwrap(AgentMCP.listing(allowed: true)["tools"] as? [[String: Any]])
+        XCTAssertEqual(offered.count, 4)
+        // Only the proposal is not read-only, and it asks for a summary.
+        let propose = try XCTUnwrap(offered.first { $0["name"] as? String == "propose_update" })
+        XCTAssertEqual((propose["annotations"] as? [String: Bool])?["readOnlyHint"], false)
+        XCTAssertEqual((propose["inputSchema"] as? [String: Any])?["required"] as? [String], ["issue", "summary"])
+        XCTAssertEqual((offered[0]["annotations"] as? [String: Bool])?["readOnlyHint"], true)
         let answer = try XCTUnwrap(JSONSerialization.jsonObject(with: AgentMCP.text("hello", id: 5)) as? [String: Any])
         XCTAssertEqual(answer["id"] as? Int, 5)
         XCTAssertEqual(((answer["result"] as? [String: Any])?["content"] as? [[String: String]])?.first?["text"], "hello")
@@ -322,5 +328,89 @@ final class AgentSessionTests: XCTestCase {
         """
         XCTAssertEqual(AgentPlugin.installedVersion(.codex, list: codex), "1.1.0")
         XCTAssertNil(AgentPlugin.installedVersion(.codex, list: "dever@dever  available  1.1.0  /x"))
+    }
+
+    func testAProposalNeedsASummaryAndWritesNothingByItself() {
+        let now = Date(timeIntervalSince1970: 1_794_571_200)
+        XCTAssertNil(AgentProposal(tool: .codex, arguments: ["issue": "ENG-1"], at: now))
+        XCTAssertNil(AgentProposal(tool: .codex, arguments: ["summary": "done"], at: now))
+        var proposal = AgentProposal(tool: .codex, arguments: ["issue": " ENG-1 ", "summary": "Done.", "status": "review", "reply": "  ", "not_verified": "big files"], at: now)!
+        XCTAssertEqual(proposal.identifier, "ENG-1")
+        XCTAssertNil(proposal.reply)
+        XCTAssertEqual(proposal.notVerified, "big files")
+        XCTAssertTrue(proposal.pending)
+        // The state it names is found by its name, exact first, else contained.
+        func state(_ name: String) -> LinearTeamContext.WorkflowState { .init(id: name, name: name, type: "started", color: "", position: 0) }
+        let states = [state("In Progress"), state("Code review"), state("In Review"), state("Done")]
+        XCTAssertEqual(proposal.state(in: states)?.name, "Code review")
+        proposal.status = "in review"
+        XCTAssertEqual(proposal.state(in: states)?.name, "In Review")
+        proposal.status = "Shipped"
+        XCTAssertNil(proposal.state(in: states))
+        proposal.statusDismissed = true
+        XCTAssertFalse(proposal.pending)
+    }
+
+    func testWhatAnAgentAsksOfTheDeveloper() {
+        let now = Date(timeIntervalSince1970: 1_794_571_200)
+        func session(_ state: AgentSession.State) -> AgentSession {
+            AgentSession(id: "s", tool: .codex, cwd: nil, branch: "b", state: state, sentence: nil, since: now, heard: now)
+        }
+        let proposal = AgentProposal(tool: .codex, arguments: ["issue": "ENG-1", "summary": "Done."], at: now)
+        XCTAssertEqual(AgentAttention.of(session: session(.waiting), proposal: proposal, reviewed: false), .waiting)
+        XCTAssertEqual(AgentAttention.of(session: session(.working), proposal: proposal, reviewed: true), .finished)
+        XCTAssertEqual(AgentAttention.of(session: session(.finished), proposal: nil, reviewed: false), .finished)
+        XCTAssertNil(AgentAttention.of(session: session(.finished), proposal: nil, reviewed: true))
+        XCTAssertNil(AgentAttention.of(session: session(.working), proposal: nil, reviewed: false))
+        XCTAssertNil(AgentAttention.of(session: nil, proposal: nil, reviewed: false))
+    }
+
+    func testAcceptanceCriteriaAreReadFromTheDescription() {
+        let described = """
+        ## Why
+        - Because people ask.
+
+        ## Acceptance criteria
+        - [ ] Export respects the active filters
+        - [x] Dates in the workspace time zone
+        1. A file over 50k rows still opens
+
+        ## Notes
+        - Not a criterion
+        """
+        XCTAssertEqual(AcceptanceCriteria.parse(described),
+                       ["Export respects the active filters", "Dates in the workspace time zone", "A file over 50k rows still opens"])
+        XCTAssertEqual(AcceptanceCriteria.parse("**Critères d'acceptation**\n* Le bouton est visible\n* Le fichier se télécharge"),
+                       ["Le bouton est visible", "Le fichier se télécharge"])
+        // No heading names them: the task list.
+        XCTAssertEqual(AcceptanceCriteria.parse("Do this.\n- [ ] One\n- plain\n- [x] Two"), ["One", "Two"])
+        XCTAssertEqual(AcceptanceCriteria.parse("Just words.\n- a list\n- of things"), [])
+        XCTAssertEqual(AcceptanceCriteria.parse(nil), [])
+    }
+
+    func testAnAgentThatWaitsOrFinishedComesFirstInDelivery() {
+        let now = Date(timeIntervalSince1970: 1_794_571_200)
+        func issue(_ n: Int, _ type: String, mine: Bool = true) -> LinearIssue {
+            LinearIssue(id: "i\(n)", identifier: "ENG-\(n)", title: "T\(n)", url: "", updatedAt: "2026-11-01T00:00:00.000Z",
+                        state: .init(id: nil, name: type == "started" ? "In Progress" : "Todo", type: type, color: nil),
+                        assignee: mine ? .init(id: "me", name: "Me", avatarUrl: nil) : nil, branchName: "b\(n)", attachments: nil,
+                        priority: 3, dueDate: nil, labels: nil, archivedAt: nil)
+        }
+        let failing = DeliveryPlan.Pull(number: 9, title: "P", url: "", repository: "a/b", author: "me", pipeline: .failing)
+        let viewer = DeliveryPlan.Viewer(linearID: "me", linearName: "Me", githubLogin: "me")
+        let issues = [issue(1, "started"), issue(2, "unstarted"), issue(3, "started"), issue(4, "unstarted", mine: false)]
+        let plan = DeliveryPlan(issues: issues, open: ["ENG-1": [failing]], merged: [:], blockers: [:], viewer: viewer,
+                                agents: ["ENG-2": .finished, "ENG-3": .waiting, "ENG-4": .waiting], now: now)
+        // Waiting for an answer, then work to review, then the broken pipeline.
+        XCTAssertEqual(plan.start?.issue.identifier, "ENG-3")
+        XCTAssertEqual(plan.start?.situation, .agentWaiting)
+        // An agent of the viewer's on an unassigned issue makes it theirs.
+        XCTAssertEqual(plan.next.map(\.issue.identifier), ["ENG-4", "ENG-2", "ENG-1"])
+        XCTAssertEqual(plan.next.map(\.situation), [.agentWaiting, .agentFinished, .ciFailed])
+        // "Finished" does not hide a broken pipeline.
+        let broken = DeliveryPlan(issues: [issue(1, "started")], open: ["ENG-1": [failing]], merged: [:], blockers: [:], viewer: viewer,
+                                  agents: ["ENG-1": .finished], now: now)
+        XCTAssertEqual(broken.start?.situation, .ciFailed)
+        XCTAssertTrue(DeliveryPlan.Situation.agentFinished.actionable)
     }
 }

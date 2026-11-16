@@ -36,6 +36,13 @@ enum AgentContextServer {
             guard let identifier = call.issue?.trimmingCharacters(in: .whitespaces), !identifier.isEmpty else {
                 return AgentMCP.text("Give the issue's identifier, like ENG-123.", failed: true, id: id)
             }
+            if call.tool == "propose_update" {
+                guard let proposal = AgentProposal(tool: tool, arguments: call.arguments, at: Date()) else {
+                    return AgentMCP.text("Give a summary of what you did.", failed: true, id: id)
+                }
+                ProposalStore.shared.propose(proposal)
+                return AgentMCP.text("Left for the developer in Dever, on \(proposal.identifier). Nothing was changed in Linear or Slack: they will apply, edit or dismiss it.", id: id)
+            }
             do {
                 return AgentMCP.text(try await run(call.tool, identifier: identifier), id: id)
             } catch {

@@ -26,9 +26,12 @@ private struct AgentStateDot: View {
 /// session, and under it the agent's last sentence or what it waits for. A state is never drawn
 /// as current once it is old: "last heard 14 min ago".
 struct AgentSessionLine: View {
+    @ObservedObject private var proposals = ProposalStore.shared
     let session: AgentSession
     /// The tone of what the line sits on, for the link's hover.
     var lift: Color = Soot.ground
+    /// The agent's proposal is shown beside this line.
+    var hasProposal = false
 
     var body: some View {
         TimelineView(.periodic(from: .now, by: 30)) { context in
@@ -42,6 +45,12 @@ struct AgentSessionLine: View {
                         .foregroundStyle(session.state == .waiting ? Soot.ink : Soot.muted)
                         .lineLimit(1)
                     Spacer(minLength: 8)
+                    // A finished turn stays "to review" until the developer says it was looked at.
+                    if session.state == .finished, !proposals.reviewed.contains(session.id) {
+                        Button("Reviewed") { Motion.run(Motion.ui, fade: true) { proposals.markReviewed(session.id) } }
+                            .buttonStyle(TertiaryButton(tint: .muted, lift: lift, font: .system(size: 13, weight: .medium), height: 24))
+                            .help("Stop listing this issue as work to review")
+                    }
                     if let link = session.link {
                         Link(destination: link) {
                             HStack(spacing: 4) {
@@ -53,7 +62,8 @@ struct AgentSessionLine: View {
                         .accessibilityHint("Opens in \(session.tool.label)")
                     }
                 }
-                if let sentence = session.sentence, session.state == .waiting || session.state == .finished {
+                // With a proposal under the line, the agent's account says it better than its last sentence.
+                if let sentence = session.sentence, session.state == .waiting || (session.state == .finished && !hasProposal) {
                     Text("“\(sentence)”").font(.system(size: 13)).foregroundStyle(Soot.ink.opacity(0.85))
                         .lineLimit(2).fixedSize(horizontal: false, vertical: true)
                         .padding(.leading, 23)

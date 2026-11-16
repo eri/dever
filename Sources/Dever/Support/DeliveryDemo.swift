@@ -6,12 +6,13 @@ import Foundation
 /// (nothing of the viewer's left, one unassigned issue to take), `done` (everything merged),
 /// `agent` (the viewer's issue in progress with no pull request yet: "Continue with" an agent).
 extension DeliveryPlan {
-    static var snapshotDemo: DeliveryPlan? {
+    /// `agents` says, from the made-up issues, what their agents ask (made-up sessions and proposals).
+    static func snapshotDemo(agents: ([LinearIssue]) -> [String: AgentAttention] = { _ in [:] }) -> DeliveryPlan? {
         guard let scene = ProcessInfo.processInfo.environment["DEVER_SNAPSHOT_DELIVERY"] else { return nil }
-        return demo(scene)
+        return demo(scene, agents: agents)
     }
 
-    private static func demo(_ scene: String) -> DeliveryPlan {
+    private static func demo(_ scene: String, agents: ([LinearIssue]) -> [String: AgentAttention]) -> DeliveryPlan {
         let now = Date()
         let iso = ISO8601DateFormatter()
         let me = LinearIssue.Person(id: "me", name: "Sam Rivera", avatarUrl: nil)
@@ -70,7 +71,7 @@ extension DeliveryPlan {
             issues.append(issue(308, "Two-factor recovery codes", "Todo", "unstarted", me, priority: 2, due: 3))
             issues.append(issue(321, "Changelog feed in the help menu", "In Progress", "started", ana, idle: 2))
             return DeliveryPlan(issues: issues, open: open, merged: merged, blockers: blockers,
-                                viewer: .init(linearID: "me", linearName: me.name, githubLogin: "sam"), now: now)
+                                viewer: .init(linearID: "me", linearName: me.name, githubLogin: "sam"), agents: agents(issues), now: now)
         }
         issues.append(issue(301, "Search indexes drafts, filtered by permission", "In Progress", "started", me, priority: 2))
         open["APP-301"] = [pull(951, "Index drafts", pipeline: .failing)]

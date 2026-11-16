@@ -8,6 +8,8 @@ struct ProjectDetailView: View {
     let edit: () -> Void
 
     @ObservedObject private var issueStore = IssueStore.shared
+    @ObservedObject private var agentStore = AgentStore.shared
+    @ObservedObject private var proposalStore = ProposalStore.shared
     @ObservedObject private var github = GitHubStore.shared
     @ObservedObject private var slackStore = SlackStore.shared
     @ObservedObject private var intelligence = IntelligenceStore.shared
@@ -311,7 +313,7 @@ struct ProjectDetailView: View {
 
     /// The project's issues from the viewer's seat: what to pick up, what waits, what shipped.
     private var plan: DeliveryPlan {
-        if let demo = DeliveryPlan.snapshotDemo { return demo }
+        if let demo = DeliveryPlan.snapshotDemo(agents: agentAttention(of:)) { return demo }
         let open = Dictionary(grouping: pulls.filter { $0.issue != nil }, by: { $0.issue! }).mapValues { matches in
             matches.map { m in
                 DeliveryPlan.Pull(number: m.pull.number, title: m.pull.title, url: m.pull.html_url,
@@ -326,7 +328,19 @@ struct ProjectDetailView: View {
                             merged: Dictionary(grouping: merged.filter { $0.issue != nil }, by: { $0.issue! }),
                             blockers: project.linear.flatMap { issueStore.blockers[$0.id] } ?? [:],
                             viewer: .init(linearID: issueStore.viewerID, linearName: app.linear?.account.userName,
-                                          githubLogin: app.github?.login))
+                                          githubLogin: app.github?.login),
+                            agents: agentAttention(of: issues))
+    }
+
+    /// What each issue's agent on this Mac asks of the viewer: an answer, or a look at its work.
+    private func agentAttention(of issues: [LinearIssue]) -> [String: AgentAttention] {
+        var out: [String: AgentAttention] = [:]
+        for issue in issues {
+            let session = agentStore.session(branch: issue.branchName)
+            out[issue.identifier] = AgentAttention.of(session: session, proposal: proposalStore.proposal(for: issue.identifier),
+                                                      reviewed: session.map { proposalStore.reviewed.contains($0.id) } ?? false)
+        }
+        return out
     }
 
     /// Pull requests of the repository that no issue of the project cites (whole-repository

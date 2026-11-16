@@ -9,6 +9,7 @@ struct IssueDetailView: View {
     @EnvironmentObject var app: AppState
     @ObservedObject private var store = IssueStore.shared
     @ObservedObject private var agents = AgentStore.shared
+    @ObservedObject private var proposals = ProposalStore.shared
     @ObservedObject private var github = GitHubStore.shared
     @ObservedObject private var intelligence = IntelligenceStatus.shared
     @AppStorage(IntelligenceFeature.explainFailure.settingKey) private var explainsFailures = true
@@ -326,6 +327,10 @@ struct IssueDetailView: View {
 
     private func reading(_ d: LinearIssueDetail) -> some View {
         VStack(alignment: .leading, spacing: 16) {
+            // What the agent left when it finished: first, since it is what the developer came for.
+            if proposals.proposal(for: d.identifier) != nil, let project = app.projects.first(where: { $0.id == route.projectID }) {
+                AgentProposalBlock(project: project, issue: row ?? d.asRow, showsCriteria: true)
+            }
             card(symbol: "doc.text", title: "Description") {
                 description(d)
             }
