@@ -2,8 +2,8 @@
 
 An audit of how Dever could work with the two coding agents the team uses most, what form that takes,
 and in what order. Facts were read from the official documentation on 2026-11-13 and from one Mac
-(read-only, structure only); every claim carries its source and its status. Phases 0 to 4 of the
-[plan](#8-plan) are done; the board and the plugin system's client are not built.
+(read-only, structure only); every claim carries its source and its status. Phases 0 to 5 of the
+[plan](#8-plan) are done; what is left is the plugin system's MCP client (phase 6, in that system's plan).
 
 Contents: [the gap](#1-the-gap-today) · [facts](#2-facts) · [shapes compared](#3-shapes-compared) ·
 [decisions](#4-decisions) · [design](#5-design) · [core or plugin](#6-core-or-plugin-and-mcp-for-both) ·
@@ -380,7 +380,7 @@ Smallest useful step first. Days are rough, for one developer who knows the code
 | **2. Observe** (done; the ranking came with phase 4) | The two plugins (hooks only) and "Connect / Disconnect"; `AgentBridge`; `AgentStore`; the state line on the issue and its Delivery row; the ranking; "Open session" | yes: this is the phase that fills the blind stretch | 4–5 d |
 | **3. Context** (done) | MCP server with the read tools, the token, the skill; the brief shrinks to its short form | for the agent; invisible to the developer | 4–5 d |
 | **4. Propose and review** (done) | `propose_update`, `ProposalStore`, "Proposed by the agent", the "review its work" situation with the criteria checklist | yes: closes the loop with Linear and Slack | 5–6 d |
-| **5. Board** | The agents board across projects; worktree clean-up | once several agents run at once | 2–3 d |
+| **5. Board** (done) | The agents board across projects; worktree clean-up | once several agents run at once | 2–3 d |
 | **6. Plugins** | The MCP client on the same layer, first case the time-and-availability tool | belongs to the plugin system's plan | there |
 
 What phase 1 built: `Model/AgentLaunch.swift` (tools, where each opens, clone lookup by `origin`
@@ -477,6 +477,17 @@ to `ProposalStore` (memory only, one per issue, a new one replaces the last) and
 
 Not verified by a click: Apply and Send against Linear and Slack, and an agent calling `propose_update`
 in a real session. A proposal is lost when Dever quits.
+
+What phase 5 built: an **Agents** screen in the rail (shown once an agent is followed or a session
+is heard; an amber dot when one waits). `Model/AgentBoard.swift` groups the open sessions by project,
+tied to their issue by the branch, what waits first, then finished, working, open; sessions on no
+known issue's branch come last under "Other folders" with their folder and branch. A row opens the
+issue; its line opens the session. The board starts and steers nothing.
+
+Under the sessions, **the worktrees Dever made** (the folders beside each known clone, read with git).
+One can be removed when its pull request is merged (as GitHub was last read), nothing uncommitted is
+left in it and no session is open in it; otherwise the row says why not. Removing is `git worktree
+remove` without force, so git itself refuses a worktree that holds work; the branch stays.
 
 Phases 1 and 2 can swap: 2 first gives the clearer development phase sooner, with sessions tied to
 issues by branch alone; 1 first gives the launch record that makes the tie exact.

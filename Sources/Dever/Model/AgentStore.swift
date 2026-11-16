@@ -14,7 +14,7 @@ final class AgentStore: ObservableObject {
         // on the demo issue's branch.
         guard let scene = ProcessInfo.processInfo.environment["DEVER_SNAPSHOT_AGENT_SESSION"] else { return }
         let now = Date()
-        var session = AgentSession(id: "demo", tool: .claudeCode, cwd: nil, branch: "sam/app-306", state: .working, sentence: nil,
+        var session = AgentSession(id: "demo", tool: .claudeCode, cwd: "/Users/sam/code/app", branch: "sam/app-306", state: .working, sentence: nil,
                                    since: now.addingTimeInterval(-12 * 60), heard: now.addingTimeInterval(-20))
         switch scene {
         case "waiting":

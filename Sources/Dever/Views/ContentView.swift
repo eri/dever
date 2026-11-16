@@ -2,6 +2,8 @@ import SwiftUI
 
 enum SidebarItem: Hashable {
     case overview
+    /// The coding agents' sessions on this Mac, across projects.
+    case agents
     case settings
     case project(UUID)
 }
@@ -9,6 +11,7 @@ enum SidebarItem: Hashable {
 struct ContentView: View {
     @EnvironmentObject var app: AppState
     @EnvironmentObject var store: OverviewStore
+    @ObservedObject private var agents = AgentStore.shared
     @State private var selection: SidebarItem = .overview
     /// Pages pushed over the selected screen (an issue, then the issues it links to).
     @State private var path = NavigationPath()
@@ -83,6 +86,8 @@ struct ContentView: View {
                     }
                 case .settings:
                     SettingsView()
+                case .agents:
+                    AgentBoardView()
                 case .overview:
                     OverviewView(open: { selection = .project($0.id) },
                                  newProject: { showNew = true },
@@ -216,6 +221,20 @@ struct ContentView: View {
                 .sootTip("Dever", detail: scope)
                 .accessibilityLabel("Dever, \(scope)")
             railButton(symbol: "square.grid.2x2", label: "Overview", item: .overview)
+            // The agents' board, once Dever follows an agent or hears a session.
+            if !agents.sessions.isEmpty || AgentTool.allCases.contains(where: AgentPreferences.followed) || selection == .agents {
+                let waiting = AgentBoard.waiting(Array(agents.sessions.values))
+                railButton(symbol: "terminal", label: "Agents", item: .agents,
+                           detail: waiting > 0 ? "\(waiting) waiting for you" : nil)
+                    .overlay(alignment: .topTrailing) {
+                        if waiting > 0 {
+                            Circle().fill(Theme.chart3).frame(width: 8, height: 8)
+                                .overlay(Circle().strokeBorder(Theme.frame, lineWidth: 2).frame(width: 12, height: 12))
+                                .offset(x: -6, y: 6)
+                                .accessibilityHidden(true)
+                        }
+                    }
+            }
             Rectangle().fill(Theme.border).frame(width: 28, height: 1).padding(.vertical, 8)
             ScrollView(showsIndicators: false) {
                 VStack(spacing: 6) {
@@ -238,7 +257,7 @@ struct ContentView: View {
         app.linear?.account.orgName ?? app.slack?.teamName ?? "No workspace connected"
     }
 
-    private func railButton(symbol: String, label: String, item: SidebarItem) -> some View {
+    private func railButton(symbol: String, label: String, item: SidebarItem, detail: String? = nil) -> some View {
         let on = selection == item
         return Button { selection = item } label: {
             Image(systemName: symbol)
@@ -249,8 +268,8 @@ struct ContentView: View {
                 .motion(Motion.quick, fade: true, value: on)
         }
         .buttonStyle(IconButton(fill: nil, radius: 10))
-        .sootTip(label)
-        .accessibilityLabel(label)
+        .sootTip(label, detail: detail)
+        .accessibilityLabel(detail.map { "\(label), \($0)" } ?? label)
         .accessibilityAddTraits(on ? .isSelected : [])
     }
 

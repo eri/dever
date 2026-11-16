@@ -20,6 +20,8 @@ enum Snapshotter {
             screens.append(("project", .project(projects[index].id)))
         }
         screens.append(("settings", .settings))
+        // With a made-up agent session, the agents' board too.
+        if ProcessInfo.processInfo.environment["DEVER_SNAPSHOT_AGENT_SESSION"] != nil { screens.append(("agents", .agents)) }
 
         // Let the first refresh land before the first picture; DEVER_SNAPSHOT_WAIT=0 captures
         // the loading state instead.

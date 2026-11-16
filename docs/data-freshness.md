@@ -273,6 +273,7 @@ Refresh every. "Volatile" is the cadence while something is in flight.
 | What a coding agent is told when it asks (`get_issue`, `get_pull_requests`) | the stores' own: the issue's project is read again when older than 5 min, pull requests are said as last read, with their age | | the agent's call | no request of its own for pull requests; the issue detail as the issue page reads it |
 | The Slack thread of an issue, for an agent (`get_thread`) | read when asked, not kept | | the agent's call | one `conversations.replies`, at most 100 messages |
 | An agent's proposal for an issue (its account, a suggested state, a suggested reply), the criteria ticked, the sessions marked reviewed | none: left by the agent's call, never fetched | | the agent's call; Apply, Send, Dismiss | no request: local, memory only (`ProposalStore`), gone when Dever quits |
+| The worktrees Dever made for agents (branch, uncommitted work) | read on opening the agents' board and after a removal | | opening the board; Remove | no request: git, locally, two short commands per worktree. "Merged" is `GitHubStore`'s merged pull requests as last read |
 | A coding agent's session on an issue's branch (working, waiting for the user, finished; the agent's last sentence) | none: pushed by the agent's hooks, never fetched | | each hook call | no request: local, memory only (`AgentStore`), empty after a relaunch until the session speaks again. A "working" not heard for 10 min is drawn as old ("last heard 14 min ago"), never as current |
 | A coding agent's plan usage (what is left of its windows, as the tool reports it; Codex only: Claude Code has no outside read) | 5 min, while the "Start with" control, its menu or Settings › Agents is on screen; never in the background | | a start made from Dever (the next opening reads again); the menu opening | no request by Dever: the tool's own binary is run for one question (about 2 s, one child process) and makes its own call; memory only (`AgentUsageStore`). Past 5 min the value says its age; once its windows have reset it is no longer said |
 | Project lead, team, target date | 15 min | | | |
@@ -343,6 +344,15 @@ means the behaviour once sections 3.1 to 3.4 are in place.
 | Open with a coding agent (Details) | Later, the issue's branch and pull request, made in the agent | Not offered | Nothing is written and nothing marked dirty; the pull request arrives within its budget and on activation |
 | Open the card of a failed pull request chip, a check's log | The checks (a new run) | The chip reads `GitHubStore`'s copy with its age; the explanation is read on the click | Dropped when the copy says the checks no longer fail; "No failed check on the latest commit" marks the repository to be read again |
 | Back | | Project page reloads everything | Nothing to fetch |
+
+### Agents board
+
+| Exit or action | May have changed | Today | Target |
+| --- | --- | --- | --- |
+| Stay on the board | The sessions' states | Not offered | Pushed by the agents' hooks, in place; ages tick without a request |
+| Open an issue from a row and come back | That issue | Not offered | The issue page's own rules; the board is derived from the stores |
+| "Open session" | Nothing Dever displays from a service | Not offered | Nothing to mark dirty |
+| Remove a worktree | A local folder; nothing remote | Not offered | The list is read again from git after the removal; a refusal is said under the list |
 
 ### Slack room and thread
 
