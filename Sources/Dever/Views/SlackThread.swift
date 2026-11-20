@@ -488,7 +488,13 @@ struct SlackThreadView: View {
                     list(wide: false)
                     Color.clear.frame(height: 1).background(OverlayScrollers())
                 }
-                .onGeometryChange(for: CGFloat.self, of: { $0.size.height }) { railContentHeight = $0 }
+                // The panel follows its content in the content's own movement: a thread that
+                // closes takes its height away at once in layout while it is still unrolling on
+                // screen, and a panel that snapped to it showed the replies cut and scrolled.
+                .onGeometryChange(for: CGFloat.self, of: { $0.size.height }) { height in
+                    if railContentHeight <= 1 { railContentHeight = height; return }
+                    Motion.run(height < railContentHeight ? Motion.ui : Motion.move) { railContentHeight = height }
+                }
             }
             .defaultScrollAnchor(.bottom)
             .scrollBounceBehavior(.basedOnSize)
@@ -1414,6 +1420,7 @@ private struct MessageRow: View {
     @State private var expanded = false
     @State private var hovering = false
     @State private var threadOpen = false
+    @State private var triggerX: CGFloat = 60
     @State private var thread: [SlackMessage]?
     @State private var threadFailed = false
     @State private var replying = false
@@ -1492,8 +1499,9 @@ private struct MessageRow: View {
                         Button {
                             if let openThread { openThread(message); return }
                             // The block opens and the rows under it make room in one movement
-                            // (the room's spring); a fade only under Reduce Motion.
-                            Motion.run(Motion.move, fade: true) { threadOpen.toggle() }
+                            // (the room's spring); it closes faster and without the spring, so
+                            // nothing bounces on the way out. A fade only under Reduce Motion.
+                            Motion.run(threadOpen ? Motion.ui : Motion.move, fade: true) { threadOpen.toggle() }
                             if threadOpen, thread == nil { Task { await loadThread() } }
                         } label: {
                             HStack(spacing: 6) {
@@ -1506,7 +1514,8 @@ private struct MessageRow: View {
                                 } else {
                                     Image(systemName: threadOpen ? "chevron.down" : "bubble.left.and.bubble.right").font(.system(size: 11))
                                 }
-                                Text("^[\(r) reply](inflect: true)")
+                                // Never cut: "11 repli…" beside free room read as a bug.
+                                Text("^[\(r) reply](inflect: true)").fixedSize()
                                 if let last = message.latest_reply.flatMap(Double.init), wide {
                                     Text("Last reply \(Date(timeIntervalSince1970: last).formatted(.relative(presentation: .named)))")
                                         .font(.system(size: 12, weight: .regular)).foregroundStyle(Soot.muted)
@@ -1517,6 +1526,8 @@ private struct MessageRow: View {
                             }
                         }
                         .buttonStyle(TertiaryButton(lift: Soot.surface, font: .system(size: 12, weight: .semibold)))
+                        // Where the thread's tail points: a little inside the link's leading edge.
+                        .onGeometryChange(for: CGFloat.self) { $0.frame(in: .named("slack-row")).minX + 22 } action: { triggerX = $0 }
                         .padding(.leading, -8)
                         .accessibilityLabel(threadOpen ? "Hide replies" : "Show \(r) replies")
                     }
@@ -1524,28 +1535,20 @@ private struct MessageRow: View {
                 .padding(.top, 4)
             }
         }
-        // The thread's spine: a line from under the author's picture down to the replies, the
-        // way a thread is drawn everywhere. It says the block below belongs to this message.
-        .background(alignment: .topLeading) {
-            if threadShown {
-                RoundedRectangle(cornerRadius: 1).fill(Soot.edge).frame(width: 2)
-                    .padding(.top, grouped ? 22 : (wide ? 36 : 32) + 6)
-                    .padding(.bottom, -6)
-                    .padding(.leading, (wide ? 36 : 32) / 2 - 1)
-                    .transition(.opacity)
-            }
-        }
         if threadShown {
             // Under the row, at its full width: the replies are not squeezed into the text column.
-            // The block grows from the spine's end, where the reader's eye already is.
+            // A small tail on the block points at the link that opened it, and the block unrolls
+            // from there: its lower edge travels with the rows under it, opening and closing.
             ThreadReplies(replies: thread, failed: threadFailed, users: users, channels: channels, customEmoji: customEmoji, actions: actions)
-                .transition(Motion.reduced ? .opacity : .opacity.combined(with: .scale(scale: 0.97, anchor: .topLeading)))
+                .overlay(alignment: .topLeading) { ThreadTail().offset(x: max(14, triggerX - ThreadTail.width / 2), y: -1) }
+                .transition(Motion.reduced ? .opacity : .modifier(active: Unroll(progress: 0), identity: Unroll(progress: 1)))
         }
         if replying, openThread == nil {
             ReplyComposer(sending: sending, send: { await send($0) }, cancel: { replying = false })
                 .padding(.leading, (wide ? 36 : 32) + 10)
         }
         }
+        .coordinateSpace(.named("slack-row"))
         .opacity(!wide && read && !newReplies ? 0.55 : 1)
         .padding(.vertical, 4)
         .padding(.horizontal, 8)
@@ -2171,6 +2174,47 @@ private struct ReactionsBar: View {
         Task {
             do { try await actions.react(message, name, on) } catch { app.report(error); reactions = message.reactions ?? [] }
         }
+    }
+}
+
+/// The small tail on top of an open thread's block, pointing at the replies link: the block
+/// reads as what that link opened. Drawn over the block's top edge, in its tone.
+private struct ThreadTail: View {
+    static let width: CGFloat = 14
+    private static let height: CGFloat = 7
+
+    var body: some View {
+        ZStack {
+            Path { p in
+                p.move(to: CGPoint(x: 0, y: Self.height + 1))
+                p.addLine(to: CGPoint(x: Self.width / 2, y: 0))
+                p.addLine(to: CGPoint(x: Self.width, y: Self.height + 1))
+                p.closeSubpath()
+            }.fill(Soot.ground)
+            Path { p in
+                p.move(to: CGPoint(x: 0, y: Self.height))
+                p.addLine(to: CGPoint(x: Self.width / 2, y: 0.5))
+                p.addLine(to: CGPoint(x: Self.width, y: Self.height))
+            }.stroke(Soot.line, style: StrokeStyle(lineWidth: 1, lineJoin: .round))
+        }
+        .frame(width: Self.width, height: Self.height + 1)
+        .accessibilityHidden(true)
+    }
+}
+
+/// A block that unrolls from its top edge: clipped to `progress` of its height and fading with
+/// it. With the rows under it moving in the same transaction, its lower edge stays on them.
+private struct Unroll: ViewModifier, Animatable {
+    var progress: CGFloat
+    var animatableData: CGFloat {
+        get { progress }
+        set { progress = newValue }
+    }
+
+    func body(content: Content) -> some View {
+        content
+            .mask(Rectangle().scaleEffect(x: 1, y: max(0, progress), anchor: .top))
+            .opacity(min(1, max(0, progress) * 1.6))
     }
 }
 
