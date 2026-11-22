@@ -1,8 +1,8 @@
 # Local model benchmark
 
-Four language models that run on a Mac, put to the six jobs Dever has or wants, to decide what
-on-device intelligence is built on. First measured on 11 November 2026 on battery; the two Gemma models
-measured again on 20 November on mains power, and Gemma 4 E4B added. Background and the rules every
+Five language models that run on a Mac, put to the six jobs Dever has or wants, to decide what
+on-device intelligence is built on. First measured on 11 November 2026 on battery; measured again on
+mains power on 20 and 23 November, with Gemma 4 E4B and Gemma 4 E2B added. Background and the rules every
 generated text follows: [on-device-ai.md](on-device-ai.md). No code in the app comes with this document.
 
 Contents: [answer](#1-the-answer-in-short) · [candidates](#2-candidates) · [method](#3-method) ·
@@ -14,21 +14,24 @@ Contents: [answer](#1-the-answer-in-short) · [candidates](#2-candidates) · [me
 
 ## 1. The answer in short
 
-| | Apple system model | Qwen3.5-4B | Gemma 4 E4B | Gemma 4 12B |
-| --- | --- | --- | --- | --- |
-| Cases fully useful (of 31) | 4 | 13 | 22 | **25** |
-| Cases with a false statement in two runs of three (of 31) | 9 | 5 | 2 | **0** |
-| Median time for an answer, mains power | not measured | not measured | **1.5 s** | 5.5 s |
-| Median time for an answer, battery and Low Power Mode | 2.4 s | 3.5 s | not measured | 9.7 s |
-| Download | none | 3.0 GB | 5.1 GB | 6.6 GB |
-| Memory while loaded | not in the app | 2.8 to 3.9 GB | 4.4 to 4.8 GB | 6.8 to 7.9 GB |
+| | Apple system model | Qwen3.5-4B | Gemma 4 E2B | Gemma 4 E4B | Gemma 4 12B |
+| --- | --- | --- | --- | --- | --- |
+| Cases fully useful (of 31) | 4 | 13 | 10 | 22 | **25** |
+| Cases with a false statement in two runs of three (of 31) | 9 | 5 | 6 | 2 | **0** |
+| Median time for an answer, mains power | not measured | 1.8 s | **0.7 s** | 1.5 s | 5.5 s |
+| Median time for an answer, battery and Low Power Mode | 2.4 s | 3.5 s | not measured | not measured | 9.7 s |
+| Download | none | 3.0 GB | 3.6 GB | 5.1 GB | 6.6 GB |
+| Memory while loaded | not in the app | 2.7 to 3.9 GB | 2.9 to 3.4 GB | 4.4 to 4.8 GB | 6.8 to 7.9 GB |
 
 Gemma 4 E4B, the small Gemma, is the find of the second pass. It is right where Apple's model invents
 (pipeline failures, issue summaries, priorities), writes better one-message summaries than Apple's model,
 and answers faster than Apple's model did. Its one weak job is the channel catch-up: in a channel where
 nothing is asked of the reader it hands the reader someone else's task, as Apple's model does. Only the
 12-billion-parameter Gemma gets the catch-up right, at three to four times the time and one and a half
-times the memory. No model writes a useful reply under the "commit the user to nothing" rule.
+times the memory. One step down, Gemma 4 E2B, is twice as fast as E4B but falls to 10 useful cases of
+31: it gets priorities wrong, says a log shows a cause it does not, and swaps expected and actual values.
+E4B is the smallest model that holds. No model writes a useful reply under the "commit the user to
+nothing" rule.
 
 **Recommendation:** an opt-in "Local Intelligence" download of **Gemma 4 E4B** (5.1 GB), run through MLX,
 on Macs with 16 GB or more, for issue summaries, pipeline failures and issues from a message, and for
@@ -37,34 +40,35 @@ Intelligence is off or cannot run. The catch-up stays dropped unless it is worth
 
 ## 2. Candidates
 
-| | Apple system model | Qwen3.5-4B | Gemma 4 E4B | Gemma 4 12B |
-| --- | --- | --- | --- | --- |
-| Maker | Apple | Alibaba (Qwen team) | Google DeepMind | Google DeepMind |
-| Parameters | about 3 billion | 4 billion | 4.5 billion effective, 8 billion with embeddings | 12 billion |
-| Build measured | macOS 27.2, Foundation Models | `mlx-community/Qwen3.5-4B-MLX-4bit` | `mlx-community/gemma-4-e4b-it-4bit` | `lmstudio-community/gemma-4-12B-it-MLX-4bit` |
-| Quantisation | Apple's | 4-bit (5.3 bits per weight) | 4-bit | 4-bit |
-| Size on disk | system asset, not readable | 2.99 GB | 5.06 GB | 6.61 GB |
-| Context | 4,096 tokens | 262,144 tokens | 128,000 tokens | 256,000 tokens |
-| Languages claimed | 15, French and English among them | 201 | 140 in training, 35 supported | 140 in training, 35 supported |
-| Licence | none needed, part of macOS 26 and later | Apache 2.0 | Apache 2.0 | Apache 2.0 |
-| Released | with macOS 26 | March 2026 | April 2026 | about June 2026 |
+| | Apple system model | Qwen3.5-4B | Gemma 4 E2B | Gemma 4 E4B | Gemma 4 12B |
+| --- | --- | --- | --- | --- | --- |
+| Maker | Apple | Alibaba (Qwen team) | Google DeepMind | Google DeepMind | Google DeepMind |
+| Parameters | about 3 billion | 4 billion | 2 billion effective, about 5 with embeddings | 4.5 billion effective, 8 billion with embeddings | 12 billion |
+| Build measured | macOS 27.2, Foundation Models | `mlx-community/Qwen3.5-4B-MLX-4bit` | `mlx-community/gemma-4-e2b-it-4bit` | `mlx-community/gemma-4-e4b-it-4bit` | `lmstudio-community/gemma-4-12B-it-MLX-4bit` |
+| Quantisation | Apple's | 4-bit (5.3 bits per weight) | 4-bit | 4-bit | 4-bit |
+| Size on disk | system asset, not readable | 2.99 GB | 3.3 GB | 5.06 GB | 6.61 GB |
+| Context | 4,096 tokens | 262,144 tokens | 128,000 tokens | 128,000 tokens | 256,000 tokens |
+| Languages claimed | 15, French and English among them | 201 | 140 in training, 35 supported | 140 in training, 35 supported | 140 in training, 35 supported |
+| Licence | none needed, part of macOS 26 and later | Apache 2.0 | Apache 2.0 | Apache 2.0 | Apache 2.0 |
+| Released | with macOS 26 | March 2026 | April 2026 | April 2026 | about June 2026 |
 
 **Why these.** Looked up on the day, not from memory: among MLX builds on Hugging Face, the Qwen3.5 and
 Gemma 4 families lead the downloads of general-purpose models under 15 billion parameters. The first pass
 took Qwen3.5-4B and Gemma 4 12B, two families at two sizes. Gemma 4 E4B was passed over then because its
 MLX build weighs 5 GB, more than a 4-billion text model should: it carries audio and vision encoders that
 Dever does not use. After the first pass showed the Gemma family well ahead, it was added to see whether a
-smaller Gemma would do. The newer Qwen 3.6 and 3.8 start at 27 billion parameters, too large for an app
+smaller Gemma would do, and Gemma 4 E2B, the smallest of the family, to see how the answers degrade one
+step further down. The newer Qwen 3.6 and 3.8 start at 27 billion parameters, too large for an app
 that shares a 16 GB Mac. Mistral's current small models are 3 billion (Ministral 3) or 24 billion.
 
-**What the licences require.** Apache 2.0 for all three open models, with no extra use policy attached to
+**What the licences require.** Apache 2.0 for all four open models, with no extra use policy attached to
 the weights (Gemma 4 left the "Gemma Terms of Use" of Gemma 3). An app may download, run and redistribute
 them, for commercial use too. Redistribution, which is what hosting a copy for users would be, requires
 giving a copy of the licence, keeping the copyright and attribution notices, and stating changes if the
 files were changed (a quantised build is a changed file). There is no obligation to publish Dever's code
 and no trademark right: Dever may say "Gemma 4 by Google" as a fact, not as an endorsement. An
-acknowledgements entry in Settings with the licence covers it. One trap: the card of the E4B build
-measured says `license: gemma`, a leftover of Gemma 3, while Google's own model page says Apache 2.0. The
+acknowledgements entry in Settings with the licence covers it. One trap: the cards of the E2B and E4B
+builds measured say `license: gemma`, a leftover of Gemma 3, while Google's own model page says Apache 2.0. The
 build Dever ships should be one whose card carries Apache 2.0, or one Dever converts itself.
 
 **Runtime.** MLX, Apple's array framework for Apple Silicon, through its Swift package
@@ -87,10 +91,10 @@ applications open. **Two power states:**
 
 - *First pass, 11 November:* Apple, Qwen3.5-4B and Gemma 4 12B, **on battery,
   Low Power Mode on**.
-- *Second pass, 20 November:* **on mains power, Low Power Mode off**: Gemma 4 12B again, and Gemma 4 E4B.
-  Apple's model could not be run again: the system reported it not ready (`modelNotReady`), because
-  Siri's language had gone back to French while the Mac is in English, the cause already described in
-  on-device-ai.md section 2. Qwen3.5-4B was not run again.
+- *Second pass, 20 and 23 November:* **on mains power, Low Power Mode off**: Gemma 4 12B and Qwen3.5-4B
+  again, Gemma 4 E4B and Gemma 4 E2B for the first time. Apple's model could not be run again: the system
+  reported it not ready (`modelNotReady`), because Siri's language had gone back to French while the Mac
+  is in English, the cause already described in on-device-ai.md section 2.
 
 Times are only compared within one power state.
 
@@ -120,7 +124,7 @@ therefore a real measurement for them, and a lower bound on what `MLXGuidedGener
 Thinking is switched off for the open models. Sampling: Apple's default; temperature 0.4 and top-p 0.9
 for the open models; 400 tokens at most.
 
-**Runs.** Each case three times per model and pass, a fresh session each time: 465 generations in all.
+**Runs.** Each case three times per model and pass, a fresh session each time: 744 generations in all.
 
 **What was recorded:** the answer; time to the first token and total time; tokens per second; prompt
 size; load time; memory after load, at peak, after 30 s idle and after unload; disk size.
@@ -137,9 +141,9 @@ size; load time; memory after load, at peak, after 30 s idle and after unload; d
    **useful** 2 = could be shown as it is and saves the reading; 1 = acceptable but vague, too long, a
    copy of the input, bland or missing the main point; 0 = misleading, beside the point, refused or unusable.
    Graded by the author of this benchmark (an AI agent), one grader, not blind to the model. Apple,
-   Qwen3.5-4B and Gemma 4 12B are graded on the first pass; the 12B's second-pass answers were read and
-   match those grades (the one broken answer of the first pass did not recur). Gemma 4 E4B is graded on
-   the second pass. Every grade has its reason in `grades.json`, and every answer is in `outputs.md`.
+   Qwen3.5-4B and Gemma 4 12B are graded on the first pass; the second-pass answers of Qwen and the 12B
+   were read and match those grades (the 12B's one broken answer did not recur). Gemma 4 E4B and E2B are
+   graded on the second pass. Every grade has its reason in `grades.json`, and every answer is in `outputs.md`.
 
 Scripts, the test set, every raw answer and the grades are outside the repository, in the shared notes
 folder of the sessions that did this work, under `local-model-benchmark/` (first-pass answers in
@@ -148,51 +152,54 @@ folder of the sessions that did this work, under `local-model-benchmark/` (first
 ## 4. Results
 
 Columns: **shape** and **checks** are shares of the runs; **faithful** and **useful** count the cases
-graded 2; **false** counts the cases graded 0 for faithfulness. **Time** is the median total in seconds:
-on battery and Low Power Mode for Apple and Qwen, on mains power for the two Gemma (the 12B's battery
-figure in brackets).
+graded 2; **false** counts the cases graded 0 for faithfulness. **Time** is the median total in seconds,
+on mains power, the battery figure in brackets where there is one; Apple's only on battery.
 
 ### a. One long message (8 cases)
 
 | Model | Shape | Checks | Faithful | Useful | False | Time |
 | --- | --- | --- | --- | --- | --- | --- |
-| Apple | 100% | 42% | 5/8 | 1/8 | 0/8 | 2.0 (battery) |
-| Qwen3.5-4B | 100% | 58% | 7/8 | 4/8 | 1/8 | 3.4 (battery) |
-| Gemma 4 E4B | 100% | 62% | 7/8 | 6/8 | 0/8 | **1.3** |
+| Apple | 100% | 42% | 5/8 | 1/8 | 0/8 | (2.0) |
+| Qwen3.5-4B | 100% | 58% | 7/8 | 4/8 | 1/8 | 1.8 (3.4) |
+| Gemma 4 E2B | 100% | 88% | 8/8 | 3/8 | 0/8 | **0.6** |
+| Gemma 4 E4B | 100% | 62% | 7/8 | 6/8 | 0/8 | 1.3 |
 | Gemma 4 12B | 100% | 83% | 8/8 | 7/8 | 0/8 | 5.7 (9.6) |
 
 The job Dever runs on Apple's model today, and on these harder messages Apple's model is the weakest: it
 rarely says anything false, but it drops who is asked, files an incident that is over as a Problem, and
 gave three different readings of a question of opinion. Qwen wrote "21/21 criteria pass" of a report
 that says 21 of 24. Gemma E4B writes sentences as good as the 12B's but files a reported risk and a
-request for a decision as Update, so they would show muted.
+request for a decision as Update, so they would show muted. Gemma E2B gets the kinds right but answers
+in English two times in three where French was asked, and drops what the outcome was.
 
 ### b. Catch-up of 15 messages (4 cases)
 
 | Model | Shape | Checks | Faithful | Useful | False | Time |
 | --- | --- | --- | --- | --- | --- | --- |
-| Apple | 100% | 50% | 2/4 | 0/4 | 2/4 | 4.2 (battery) |
-| Qwen3.5-4B | 100% | 42% | 0/4 | 0/4 | 1/4 | 5.7 (battery) |
-| Gemma 4 E4B | 100% | 50% | 2/4 | 2/4 | 2/4 | **2.3** |
+| Apple | 100% | 50% | 2/4 | 0/4 | 2/4 | (4.2) |
+| Qwen3.5-4B | 100% | 42% | 0/4 | 0/4 | 1/4 | 3.3 (5.7) |
+| Gemma 4 E2B | 100% | 50% | 2/4 | 1/4 | 2/4 | **1.1** |
+| Gemma 4 E4B | 100% | 50% | 2/4 | 2/4 | 2/4 | 2.3 |
 | Gemma 4 12B | 100% | 100% | 4/4 | 4/4 | 0/4 | 7.9 (13.4) |
 
 The job dropped after four forms. Every model finds the request made to the reader in the third person,
 and the request made with an @. The difference is in the channels where nothing is asked of the reader:
 Apple's model and Gemma E4B give the reader a task asked of someone else ("Send the old plan school
-list", asked of Robin), Qwen invents open matters, and only Gemma 12B returns two empty lists, six runs
+list", asked of Robin), and so does Gemma E2B; Qwen invents open matters; only Gemma 12B returns two empty lists, six runs
 out of six, and never lists a fixed problem as open.
 
 ### c. Reply draft (4 cases with Dever's instructions, 2 with bolder ones)
 
 | Model | Shape | Checks | Faithful | Useful | False | Time |
 | --- | --- | --- | --- | --- | --- | --- |
-| Apple | 100% | 100% | 4/6 | 2/6 | 1/6 | 1.4 (battery) |
-| Qwen3.5-4B | 94% | 83% | 5/6 | 1/6 | 1/6 | 1.8 (battery) |
-| Gemma 4 E4B | 100% | 100% | 5/6 | 2/6 | 0/6 | **0.9** |
+| Apple | 100% | 100% | 4/6 | 2/6 | 1/6 | (1.4) |
+| Qwen3.5-4B | 94% | 83% | 5/6 | 1/6 | 1/6 | 1.0 (1.8) |
+| Gemma 4 E2B | 100% | 100% | 5/6 | 2/6 | 0/6 | **0.3** |
+| Gemma 4 E4B | 100% | 100% | 5/6 | 2/6 | 0/6 | 0.9 |
 | Gemma 4 12B | 100% | 100% | 5/6 | 2/6 | 0/6 | 2.8 (4.9) |
 
 With Dever's instructions the size of the model changes nothing: asked for an opinion, all four answer
-"I'll look into both options and get back to you". Both Gemma and Apple's model answer from the thread
+"I'll look into both options and get back to you". The three Gemma and Apple's model answer from the thread
 when the answer is in it ("Yes, it included the fix for the offline books"); Qwen says it will check.
 With the bolder instructions Gemma 12B takes the side the thread supports, with its reason, every run, and
 gives no date; Gemma E4B says "the thread suggests…" and gets the reason wrong twice; Apple's model
@@ -202,13 +209,15 @@ reverses the reasoning; Qwen promises Friday twice.
 
 | Model | Shape | Checks | Faithful | Useful | False | Time |
 | --- | --- | --- | --- | --- | --- | --- |
-| Apple | 80% | 60% | 2/5 | 0/5 | 1/5 | 2.7 (battery) |
-| Qwen3.5-4B | 100% | 73% | 3/5 | 3/5 | 2/5 | 3.5 (battery) |
-| Gemma 4 E4B | 100% | 100% | 5/5 | 5/5 | 0/5 | **1.9** |
+| Apple | 80% | 60% | 2/5 | 0/5 | 1/5 | (2.7) |
+| Qwen3.5-4B | 100% | 73% | 3/5 | 3/5 | 2/5 | 2.1 (3.5) |
+| Gemma 4 E2B | 100% | 60% | 1/5 | 0/5 | 2/5 | **0.9** |
+| Gemma 4 E4B | 100% | 100% | 5/5 | 5/5 | 0/5 | 1.9 |
 | Gemma 4 12B | 100% | 100% | 5/5 | 4/5 | 0/5 | 5.6 (10.3) |
 
 The message that sounds pressing without being urgent: Apple's model says urgent three times, Qwen high,
-high, urgent, both Gemma none every time. Apple's descriptions are the message copied, "I" included; the
+high, urgent, Gemma E2B high three times, and it gives medium to a plain bug report; E4B and 12B none
+every time. Apple's descriptions are the message copied, "I" included; the
 others rewrite it. Apple's guardrail refused one message three times out of three ("May contain unsafe
 content"): it mentions that a screenshot shows a child's full name. On the two-tasks message, E4B picks
 the one that holds the approval; the 12B names both under a vague title.
@@ -217,15 +226,17 @@ the one that holds the approval; the 12B names both under a vague title.
 
 | Model | Shape | Checks | Faithful | Useful | False | Time |
 | --- | --- | --- | --- | --- | --- | --- |
-| Apple | 100% | 60% | 1/5 | 1/5 | 4/5 | 2.7 (battery) |
-| Qwen3.5-4B | 100% | 100% | 4/5 | 3/5 | 0/5 | 3.4 (battery) |
-| Gemma 4 E4B | 100% | 93% | 4/5 | 4/5 | 0/5 | **1.5** |
+| Apple | 100% | 60% | 1/5 | 1/5 | 4/5 | (2.7) |
+| Qwen3.5-4B | 100% | 100% | 4/5 | 3/5 | 0/5 | 1.8 (3.4) |
+| Gemma 4 E2B | 100% | 80% | 3/5 | 3/5 | 2/5 | **0.7** |
+| Gemma 4 E4B | 100% | 93% | 4/5 | 4/5 | 0/5 | 1.5 |
 | Gemma 4 12B | 100% | 93% | 4/5 | 5/5 | 0/5 | 4.9 (8.5) |
 
 Not a job for Apple's model: given a log that only waits and exits, it says the log shows the cause and
 invents one, three different ways; it blames a test that passed for a job killed by its time limit; it
-invents command lines. The three open models say the log does not say why (E4B gave the exit code as the
-cause once in three), name the time limit, and see that the lint job failed on the network during
+invents command lines. Gemma E2B says the log shows the cause and gives the exit code, three runs of
+three, and states the test's expected and actual values the wrong way round. Qwen, E4B and the 12B say
+the log does not say why (E4B gave the exit code as the cause once in three), name the time limit, and see that the lint job failed on the network during
 `npm ci`. Since the first pass, Dever has built this feature on Apple's model with checks in code that make
 up for these faults (the mentions-and-ci work, `FailureExplanation.swift`); these results are for the
 model alone.
@@ -234,33 +245,42 @@ model alone.
 
 | Model | Shape | Checks | Faithful | Useful | False | Time |
 | --- | --- | --- | --- | --- | --- | --- |
-| Apple | 100% | 89% | 1/3 | 0/3 | 1/3 | 3.6 (battery) |
-| Qwen3.5-4B | 100% | 100% | 2/3 | 2/3 | 0/3 | 5.9 (battery) |
-| Gemma 4 E4B | 100% | 100% | 2/3 | 3/3 | 0/3 | **2.4** |
+| Apple | 100% | 89% | 1/3 | 0/3 | 1/3 | (3.6) |
+| Qwen3.5-4B | 100% | 100% | 2/3 | 2/3 | 0/3 | 3.0 (5.9) |
+| Gemma 4 E2B | 100% | 89% | 1/3 | 1/3 | 0/3 | **1.0** |
+| Gemma 4 E4B | 100% | 100% | 2/3 | 3/3 | 0/3 | 2.4 |
 | Gemma 4 12B | 100% | 100% | 3/3 | 3/3 | 0/3 | 9.0 (15.8) |
 
 Apple's model pastes the last comments instead of summing up, and on the issue with two approaches it
 states the reverse of where the comments end. Qwen writes "the team decided" of a choice still waiting for
-objections. Both Gemma write "leans toward" and who confirms by when; E4B once adds a detail that belongs
-to the other approach. The 50-comment issue (8,600 characters, about 2,500 tokens) took Gemma E4B 4.5 s
-and Gemma 12B 20.6 s on mains power, of which 3.4 s and 17.6 s before the first token.
+objections. E4B and the 12B write "leans toward" and who confirms by when; E4B once adds a detail that
+belongs to the other approach; E2B once gives, for the reversed decision, the option that was rejected.
+The 50-comment issue (8,600 characters, about 2,500 tokens) took, on mains power, Gemma E2B 1.4 s, Gemma
+E4B 4.5 s, Qwen 6.0 s and Gemma 12B 20.6 s.
 
 ### All jobs
 
 | Model | Shape | Checks | Faithful | Useful | Unusable | False | Time, median | 9 in 10 under |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| Apple | 97% | 65% | 15/31 | 4/31 | 11/31 | 9/31 | 2.4 s (battery) | 4.5 s (battery) |
-| Qwen3.5-4B | 99% | 74% | 21/31 | 13/31 | 5/31 | 5/31 | 3.5 s (battery) | 5.9 s (battery) |
-| Gemma 4 E4B | 100% | 83% | 25/31 | 22/31 | 3/31 | 2/31 | **1.5 s** | **2.6 s** |
+| Apple | 97% | 65% | 15/31 | 4/31 | 11/31 | 9/31 | (2.4 s) | (4.5 s) |
+| Qwen3.5-4B | 99% | 73% | 21/31 | 13/31 | 5/31 | 5/31 | 1.8 s (3.5 s) | 3.5 s (5.9 s) |
+| Gemma 4 E2B | 100% | 80% | 20/31 | 10/31 | 3/31 | 6/31 | **0.7 s** | **1.1 s** |
+| Gemma 4 E4B | 100% | 83% | 25/31 | 22/31 | 3/31 | 2/31 | 1.5 s | 2.6 s |
 | Gemma 4 12B | 100% | 95% | 29/31 | 25/31 | 1/31 | 0/31 | 5.5 s (9.7 s) | 9.3 s (15.9 s) |
 
 **Where E4B and 12B differ:** the two catch-ups where nothing is asked (b2, b4), the bolder reply (c5),
 the kind of a risk and of a request for a decision (a3, a7), and four single-run slips. Everywhere else
 they give the same answer.
 
-**Shape.** Apple's three malformed answers are the three guardrail refusals. Without any grammar, Qwen
-produced one answer in 93 that was not the asked object, Gemma 12B one in 186 over the two passes, Gemma
-E4B none. Both Gemma often wrap their JSON in a code fence, which a parser strips and guided generation
+**Where E2B falls from E4B:** priorities (medium for a plain bug, high for a message with no word on
+urgency), the CI log that does not say why, the expected and actual values of a test, the language of
+the answer (English for French messages in a6 and a8), and issue titles that read the wrong way ("Block
+school subscription renewal", "Reject screenshot number three"). It is no worse at the replies and is
+better than E4B at the kind of a message (a3, a7). The fall is not gradual: from E4B to E2B the useful
+cases halve, from 22 to 10, while from the 12B to E4B they go from 25 to 22.
+
+**Shape.** Apple's three malformed answers are the three guardrail refusals. without any grammar, Qwen
+produced two answers in 186 that were not the asked object, Gemma 12B one in 186, Gemma E4B and E2B none. Both Gemma often wrap their JSON in a code fence, which a parser strips and guided generation
 would prevent.
 
 **Repeating the instructions.** None of the models repeated an example or a phrase of the instructions as
@@ -269,7 +289,7 @@ if the input had said it; the instructions hold no example sentence, which is th
 **French and English.** No model is clearly worse in one language. Apple's weakest summaries are French
 (a4, a5, a8); Qwen answered one French case in English once; Gemma 12B misspelt one French word once.
 
-**Stability.** Both Gemma gave the same answer, nearly word for word, in the three runs of most cases;
+**Stability.** The three Gemma gave the same answer, nearly word for word, in the three runs of most cases;
 Apple's model and Qwen changed their reading of a message from one run to the next (a3, a8, e1, f1).
 
 ## 5. A few raw outputs, side by side
@@ -278,6 +298,7 @@ Apple's model and Qwen changed their reading of a message from one run to the ne
 
 - Apple: *Problem* — "APP-612: the streak counter is not refreshed after the device changes time zone; it should be fixed before the release."
 - Qwen: *Update* — "QA-41 report shows 21/21 criteria pass, with APP-612 fixed before release and APP-615, APP-618 following."
+- Gemma E2B: *Problem* — "The final QA report for QA-41 shows three failures related to reading streaks, and APP-612 should be fixed before the release."
 - Gemma E4B: *Update* — "QA-41 shows APP-612 needs fixing before release, while APP-615 and APP-618 can follow."
 - Gemma 12B: *Update* — "QA-41 report shows three failures, with APP-612 needing a fix before the release."
 
@@ -285,6 +306,7 @@ Apple's model and Qwen changed their reading of a message from one run to the ne
 
 - Apple: asked: "send [6]" · open: "The retry fix for the sync queue is not merged. [2]"; "The changelog with the three fixes of this week is not updated. [10]"
 - Qwen: asked: nothing · open: "Robin needs to send Priya the list of schools on the old plan. [6]"; "The team must confirm the sprint review schedule with the new time. [4]"
+- Gemma E2B: asked: "Send list of schools on the old plan [6]" · open: "The list of schools on the old plan is pending [7]"
 - Gemma E4B: asked: "Send the old plan school list [6]" · open: "The pilot schools confirmed the demo for Thursday at 11am. [12]"
 - Gemma 12B: asked: nothing · open: nothing
 
@@ -292,6 +314,7 @@ Apple's model and Qwen changed their reading of a message from one run to the ne
 
 - Apple: "Corriger le bouton exporter sur Résultats" — **urgent** — the message copied as the description
 - Qwen: "Corriger le bouton Exporter invisible sur l'écran Résultats" — **high** (urgent in one run)
+- Gemma E2B: "Corriger bouton Exporter gris clair" — **high**, three times
 - Gemma E4B: "Rendre bouton Exporter visible sur écran Résultats" — **none** — "Sur la console des enseignants, le bouton « Exporter » de l'écran Résultats est difficilement visible. Il est écrit en gris clair sur fond blanc. Trois enseignants en ont parlé pendant la démo."
 - Gemma 12B: "Modifier la couleur du bouton Exporter" — **none** — "Le bouton « Exporter » de l'écran Résultats sur la console des enseignants est écrit en gris clair sur fond blanc. Il est difficile à voir et a été signalé par trois enseignants."
 
@@ -299,6 +322,7 @@ Apple's model and Qwen changed their reading of a message from one run to the ne
 
 - Apple: log shows the cause — "The test `./scripts/deploy-preview.sh pr-2207` on file `pr-2207` failed with `upload` command: `Uploading 214 files to preview storage`"
 - Qwen: log does not show the cause — (no explanation)
+- Gemma E2B: log shows the cause, three times — "The job failed because the process completed with exit code 1 during the step "Waiting for environment to become ready"."
 - Gemma E4B: log does not show the cause, two runs of three; the third: "The job failed during the deployment process because the script exited with code 1."
 - Gemma 12B: log does not show the cause — "The log does not say why."
 
@@ -311,36 +335,38 @@ Apple's model and Qwen changed their reading of a message from one run to the ne
 
 **c2 and c5, "Sam, what do you think: faster sync before the release, or document the delay?" (the thread says the cache layer is not to be changed before 3.4).**
 
-- Dever's instructions, all four models: "I'll look into both options and get back to you."
+- Dever's instructions, all five models: "I'll look into both options and get back to you."
 - Bolder instructions, Apple: "Making the sync faster is less risky than documenting the delay, because the cache layer is involved."
 - Bolder instructions, Qwen: one run of three takes the side; another: "I'll look at both options."
+- Bolder instructions, Gemma E2B: "Documenting the delay is the current plan because changing the cache layer is not something we are changing before the 3.4 release."
 - Bolder instructions, Gemma E4B: "The thread suggests documenting the delay in the help page, as changing the sync speed requires touching the cache layer, which is reserved for the 3.4 release."
 - Bolder instructions, Gemma 12B: "We should document the delay since we agreed not to touch the cache layer before the 3.4 release."
 
 ## 6. What each model costs the machine
 
-Gemma figures on mains power; Apple and Qwen on battery and Low Power Mode.
+Open models on mains power, battery figures in brackets; Apple on battery and Low Power Mode.
 
-| | Apple system model | Qwen3.5-4B | Gemma 4 E4B | Gemma 4 12B |
-| --- | --- | --- | --- | --- |
-| Disk | system asset, shared with macOS | 2.99 GB | 5.06 GB | 6.61 GB |
-| Download (here) | none | 2 min 24 s (about 170 Mbit/s) | 69 s (a fast line) | 4 min 56 s (about 170 Mbit/s) |
-| Load into memory | none in the app | 1.6 to 2.6 s | 2.6 to 2.9 s | 3.7 to 3.9 s |
-| First answer after a load | 2.5 s | 3.0 s | 1.1 s | 4.8 s |
-| Memory after load (process footprint) | 11 to 23 MB in the calling process | 2.75 GB | 4.42 GB | 6.81 GB |
-| Peak while generating | not measurable | 3.3 GB typical, 3.9 GB longest | 4.7 GB typical, 4.8 GB longest | 7.1 GB typical, 7.9 GB longest |
-| Held when idle for 30 s | nothing in the app | 2.95 GB, all of it | 4.51 GB, all of it | 7.21 GB, all of it |
-| After unloading | — | 0.15 GB | 0.26 GB | 0.27 GB |
-| Load again, then answer | — | 1.7 s, then 3.1 s | 2.9 s, then 1.7 s | 3.9 s, then 6.9 s |
-| Reading the input | — | 270 tokens/s | 780 tokens/s | 146 tokens/s (91 on battery) |
-| Writing the answer | about 65 tokens/s (estimate) | 40 tokens/s | 61 tokens/s | 28 tokens/s (14 on battery) |
-| Context | 4,096 tokens | 262,144 | 128,000 | 256,000 |
+| | Apple system model | Qwen3.5-4B | Gemma 4 E2B | Gemma 4 E4B | Gemma 4 12B |
+| --- | --- | --- | --- | --- | --- |
+| Disk | system asset, shared with macOS | 2.99 GB | 3.3 GB | 5.06 GB | 6.61 GB |
+| Download (here, fast line) | none | 43 s | 50 s | 69 s | 77 s |
+| Load into memory | none in the app | 1.5 s | 2.2 to 2.5 s | 2.6 to 2.9 s | 3.7 to 3.9 s |
+| First answer after a load | (2.5 s) | 1.5 s | 0.9 s | 1.1 s | 4.8 s |
+| Memory after load (process footprint) | 11 to 23 MB in the calling process | 2.76 GB | 2.90 GB | 4.42 GB | 6.81 GB |
+| Peak while generating | not measurable | 3.3 GB typical, 3.9 GB longest | 3.1 GB typical, 3.4 GB longest | 4.7 GB typical, 4.8 GB longest | 7.1 GB typical, 7.9 GB longest |
+| Held when idle for 30 s | nothing in the app | 2.72 GB, all of it | 2.96 GB, all of it | 4.51 GB, all of it | 7.21 GB, all of it |
+| After unloading | — | 0.17 GB | 0.27 GB | 0.26 GB | 0.27 GB |
+| Load again, then answer | — | 1.7 s, then 1.9 s | 2.5 s, then 1.0 s | 2.9 s, then 1.7 s | 3.9 s, then 6.9 s |
+| Reading the input | — | 460 tokens/s (270) | 2,900 tokens/s | 780 tokens/s | 146 tokens/s (91) |
+| Writing the answer | (about 65 tokens/s, estimate) | 77 tokens/s (40) | 105 tokens/s | 61 tokens/s | 28 tokens/s (14) |
+| Context | 4,096 tokens | 262,144 | 128,000 | 128,000 | 256,000 |
 
-- **Mains power doubles the 12B's speed**: 28 tokens/s written and 146 tokens/s read, against 14 and 91
-  on battery in Low Power Mode. The same factor probably applies to Qwen, not measured again.
-- **Gemma E4B is fast for its size** because it computes with about 4.5 billion parameters while its
-  file holds 8 billion (per-layer embeddings looked up, not multiplied). Its memory follows the file:
-  4.4 to 4.8 GB, more than Qwen3.5-4B's 2.8 to 3.9 GB.
+- **Mains power doubles the speed** of the two models measured both ways: Qwen from 40 to 77 tokens/s
+  written, the 12B from 14 to 28. Apple's model probably gains too; not measured.
+- **Gemma E2B and E4B are fast for their size** because they compute with about 2 and 4.5 billion
+  parameters while their files hold about 5 and 8 billion (per-layer embeddings looked up, not
+  multiplied). Their memory follows the file: E4B takes 4.4 to 4.8 GB, more than Qwen3.5-4B; E2B about
+  as much as Qwen, 2.9 to 3.4 GB.
 - **Apple's model does not live in the app.** It runs in a system service
   (`TGOnDeviceInferenceProviderService`), which `top` showed at about 0.7 GB over two processes while
   generating and at 17 MB each a few minutes after the run: the system loads and unloads it itself.
@@ -349,8 +375,8 @@ Gemma figures on mains power; Apple and Qwen on battery and Low Power Mode.
   and gives the memory back at once; loading again costs 3 to 4 s once the file is in the system's file
   cache. The first load after a restart reads the whole file from disk and was not measured.
 - **Time before the first token is what the user waits for.** The fixed instructions are 250 to 350 tokens
-  of every prompt and were read again each time. Keeping them in a prompt cache would take about 0.4 s
-  (E4B) to 2 s (12B) off each answer; not measured.
+  of every prompt and were read again each time. Keeping them in a prompt cache would take about 0.1 s
+  (E2B) to 2 s (12B) off each answer; not measured.
 - **Context.** Apple's 4,096 tokens were enough for every case here, the 50-comment issue included
   (2,462 tokens by Apple's count). Past roughly 13,000 characters of issue they would not be. For the
   open models the limit is time, not room.
@@ -365,8 +391,10 @@ were kept and the rest came in 77 s on a good line. So the download must resume 
 the background, and never hold the onboarding: the question is asked, the app goes on, the features
 appear when the model is ready, as they do today when Apple's model becomes ready.
 
-**Memory on a Mac with 8 GB.** Neither Gemma should run: E4B's 4.4 to 4.8 GB is more than half the
-machine, the 12B is the whole of it. Apple's model is the only one that costs such a Mac nothing.
+**Memory on a Mac with 8 GB.** Neither E4B nor the 12B should run: E4B's 4.4 to 4.8 GB is more than half
+the machine, the 12B is the whole of it. E2B (about 3 GB) would fit if loaded only for an answer, but its
+answers are not good enough to justify it (section 4). Apple's model is the only one that costs such a Mac
+nothing.
 *Inferred from the memory measured here; no 8 GB Mac was tested.*
 
 **Memory on a Mac with 16 GB.** E4B is workable: 4.5 GB while loaded, released after an idle time. The
@@ -416,19 +444,22 @@ reworded: the promise that holds is "nothing leaves the Mac".
 - For: no download, no memory in the app, no new dependency, already built, runs on 8 GB Macs, Apple
   updates it.
 - Against: 4 cases of 31 fully useful and 9 with false statements; the long-message summaries it does
-  today are the weakest of the four models on hard messages; issue summary is out of its reach (0 of 3);
+  today are the weakest of the five models on hard messages; issue summary is out of its reach (0 of 3);
   pipeline failure needs checks in code to hide its inventions; a guardrail that refuses ordinary work
   messages; Apple Intelligence required, with states such as `modelNotReady` that come back by themselves
   (it did during this benchmark); a model that changes with system updates without notice.
 
-**B. Qwen3.5-4B.** Superseded by Gemma 4 E4B, which is faster, more faithful (2 false cases against 5)
-and more useful (22 against 13) for 2 GB more disk and 1 GB more memory. Not considered further.
+**B. Qwen3.5-4B or Gemma 4 E2B, the small open models.** Both take about 3 GB of memory and would fit an
+8 GB Mac loaded for one answer at a time. Both are superseded by Gemma 4 E4B: Qwen is slower (1.8 s
+against 1.5 s), less faithful (5 false cases against 2) and less useful (13 against 22); E2B is twice as
+fast as E4B but useful in 10 cases of 31 and false in 6, with priorities and CI explanations that cannot
+be trusted. For 2 GB more disk and 1.5 GB more memory, E4B is the better buy. Not considered further.
 
 **C. Gemma 4 E4B, opt-in, beside Apple's model (recommended).**
 
 - For: 22 of 31 fully useful, 2 with false statements, both in the catch-up; issue summary, pipeline
-  failure and issue from a message all work; better one-message summaries than Apple's model; the fastest
-  model measured (1.5 s median, 2.6 s for nine answers in ten, 4.5 s on a 50-comment issue); 4.5 GB of
+  failure and issue from a message all work; better one-message summaries than Apple's model; the smallest
+  model measured whose answers hold (one step down, E2B halves the useful cases); fast (1.5 s median, 2.6 s for nine answers in ten, 4.5 s on a 50-comment issue); 4.5 GB of
   memory, which a 16 GB Mac can spare; no guardrail; macOS 14, no Apple Intelligence needed.
 - Against: 5 GB to download, 4.5 GB of memory while loaded, so not for 8 GB Macs; the catch-up still
   fails on channels where nothing is asked; a second model to test prompts against; the build measured
@@ -442,7 +473,7 @@ and more useful (22 against 13) for 2 GB more disk and 1 GB more memory. Not con
   than E4B (5.5 s median, 21 s on the long issue on mains power; twice that on battery); for every job
   but the catch-up, the gain over E4B is a few single-run slips.
 
-**E. Both Gemma, the user choosing.** E4B by default, the 12B offered on Macs with 24 GB or more, for the
+**E. E4B and 12B, the user choosing.** E4B by default, the 12B offered on Macs with 24 GB or more, for the
 catch-up. It doubles the download paths, the tests and the wording in Settings for one feature that was
 dropped; worth it only if the catch-up becomes a priority again.
 
@@ -479,9 +510,8 @@ Swift package loads this model and gives what the Python one gave.
 
 ## 10. What was not measured
 
-- **Apple's model and Qwen on mains power.** Apple's model was not ready on the day of the second pass
-  (Siri's language); Qwen was not run again. Their times are from battery and Low Power Mode, where the
-  12B ran at half its mains speed.
+- **Apple's model on mains power.** It was not ready on the days of the second pass (Siri's language).
+  Its times are from battery and Low Power Mode, where the open models ran at half their mains speed.
 - **The Swift package.** Measured with `mlx-lm` (Python). Same framework and model files; the Swift
   package, its guided generation and its Foundation Models bridge were read about, not run. Open reports
   mention load errors for some Gemma 4 E4B builds in MLX; the build measured here loaded and ran in Python.
@@ -500,4 +530,4 @@ Swift package loads this model and gives what the Python one gave.
 - **One grader, 31 cases, three runs each.** The gaps between Apple, Qwen and the Gemma models are wide
   enough to survive a second grader; the gap between E4B and the 12B (22 against 25) is not, outside the
   catch-up.
-- **Other candidates.** Qwen3.5-9B, Gemma 4 E2B, and 6- or 8-bit builds were not run.
+- **Other candidates.** Qwen3.5-9B, and 6- or 8-bit builds (which might lift E2B), were not run.
