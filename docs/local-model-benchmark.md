@@ -100,7 +100,11 @@ Times are only compared within one power state. The four open models were run a 
 power on 23 November, with sleep blocked (`caffeinate`), after the Mac had gone to sleep during the day:
 the automatic checks moved by 4 points at most, and the times by 10% at most, all faster (median: E2B
 0.6 s, E4B 1.4 s, Qwen 1.8 s, 12B 4.8 s; the 50-comment issue in 1.4, 3.9, 5.4 and 17.2 s). The tables
-keep the first mains-power run; both are in the notes folder (`raw/` and `raw/mains-earlier/`).
+keep the first mains-power run; both are in the notes folder (`raw/` and `raw/mains-earlier/`). The
+answers of the repeat were not graded by hand again; the eleven cases whose automatic checks changed were
+read. One matters: on the log that does not say why (e3), Gemma E4B gave the exit code as the cause in
+two runs of three this time, against one before, so over six runs it is wrong half the time on that case
+(section 4e).
 
 **Test set.** 31 cases written for this benchmark, all invented (people, product, tickets, logs), 13 in
 French and 18 in English, the reader being "Sam":
@@ -239,8 +243,10 @@ the one that holds the approval; the 12B names both under a vague title.
 Not a job for Apple's model: given a log that only waits and exits, it says the log shows the cause and
 invents one, three different ways; it blames a test that passed for a job killed by its time limit; it
 invents command lines. Gemma E2B says the log shows the cause and gives the exit code, three runs of
-three, and states the test's expected and actual values the wrong way round. Qwen, E4B and the 12B say
-the log does not say why (E4B gave the exit code as the cause once in three), name the time limit, and see that the lint job failed on the network during
+three, and states the test's expected and actual values the wrong way round. Qwen and the 12B say the
+log does not say why every time; E4B gave the exit code as the cause in three runs of six over the two
+mains-power passes, so the check in code that Dever already makes ("the log does not say" decided by code,
+not by the model) has to stay with E4B. All name the time limit, and see that the lint job failed on the network during
 `npm ci`. Since the first pass, Dever has built this feature on Apple's model with checks in code that make
 up for these faults (the mentions-and-ci work, `FailureExplanation.swift`); these results are for the
 model alone.
