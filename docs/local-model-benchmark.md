@@ -96,7 +96,11 @@ applications open. **Two power states:**
   reported it not ready (`modelNotReady`), because Siri's language had gone back to French while the Mac
   is in English, the cause already described in on-device-ai.md section 2.
 
-Times are only compared within one power state.
+Times are only compared within one power state. The four open models were run a second time on mains
+power on 23 November, with sleep blocked (`caffeinate`), after the Mac had gone to sleep during the day:
+the automatic checks moved by 4 points at most, and the times by 10% at most, all faster (median: E2B
+0.6 s, E4B 1.4 s, Qwen 1.8 s, 12B 4.8 s; the 50-comment issue in 1.4, 3.9, 5.4 and 17.2 s). The tables
+keep the first mains-power run; both are in the notes folder (`raw/` and `raw/mains-earlier/`).
 
 **Test set.** 31 cases written for this benchmark, all invented (people, product, tickets, logs), 13 in
 French and 18 in English, the reader being "Sam":
