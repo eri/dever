@@ -14,6 +14,8 @@ struct AgentProposalBlock: View {
     var fill: Color = Soot.surface
     /// The acceptance criteria are listed where there is room for them: the issue page.
     var showsCriteria = false
+    /// Inside an agent's card, which already names the agent and its time: no head, no frame.
+    var embedded = false
 
     @State private var editing = false
     @State private var draft = ""
@@ -26,6 +28,7 @@ struct AgentProposalBlock: View {
     var body: some View {
         if let proposal = proposals.proposal(for: issue.identifier) {
             VStack(alignment: .leading, spacing: 12) {
+                if !embedded {
                 HStack(spacing: 8) {
                     AgentMark(tool: proposal.tool, size: 18)
                     Text("\(proposal.tool.label) finished").font(.system(size: 13, weight: .semibold)).foregroundStyle(Soot.ink)
@@ -35,8 +38,17 @@ struct AgentProposalBlock: View {
                         .buttonStyle(TertiaryButton(tint: .muted, lift: lift, font: .system(size: 12, weight: .medium), height: 24))
                         .help("Remove the agent's account and its suggestions")
                 }
-                Text(proposal.summary).font(.system(size: 14)).foregroundStyle(Soot.ink)
-                    .fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
+                }
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(proposal.summary).font(.system(size: 14)).foregroundStyle(Soot.ink)
+                        .fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
+                    if embedded {
+                        Spacer(minLength: 8)
+                        Button("Dismiss all") { Motion.run(Motion.ui, fade: true) { proposals.dismiss(issue.identifier) } }
+                            .buttonStyle(TertiaryButton(tint: .muted, lift: lift, font: .system(size: 12, weight: .medium), height: 24))
+                            .help("Remove the agent's account and its suggestions")
+                    }
+                }
                 if let missing = proposal.notVerified {
                     HStack(alignment: .firstTextBaseline, spacing: 6) {
                         Image(systemName: "exclamationmark.triangle.fill").font(.system(size: 11)).foregroundStyle(Theme.chart3)
@@ -55,10 +67,10 @@ struct AgentProposalBlock: View {
                     Text(problem).font(.system(size: 12)).foregroundStyle(Theme.negative).fixedSize(horizontal: false, vertical: true)
                 }
             }
-            .padding(16)
+            .padding(embedded ? 0 : 16)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(fill, in: RoundedRectangle(cornerRadius: 10))
-            .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Soot.edge.opacity(0.6)))
+            .background(embedded ? Color.clear : fill, in: RoundedRectangle(cornerRadius: 10))
+            .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Soot.edge.opacity(embedded ? 0 : 0.6)))
             .accessibilityElement(children: .contain)
             .accessibilityLabel("\(proposal.tool.label)'s account of its work on \(issue.identifier)")
             .task(id: issue.team?.id) {

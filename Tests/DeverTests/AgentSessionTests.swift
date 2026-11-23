@@ -401,12 +401,14 @@ final class AgentSessionTests: XCTestCase {
         let issues = [issue(1, "started"), issue(2, "unstarted"), issue(3, "started"), issue(4, "unstarted", mine: false)]
         let plan = DeliveryPlan(issues: issues, open: ["ENG-1": [failing]], merged: [:], blockers: [:], viewer: viewer,
                                 agents: ["ENG-2": .finished, "ENG-3": .waiting, "ENG-4": .waiting], now: now)
-        // Waiting for an answer, then work to review, then the broken pipeline.
-        XCTAssertEqual(plan.start?.issue.identifier, "ENG-3")
-        XCTAssertEqual(plan.start?.situation, .agentWaiting)
-        // An agent of the viewer's on an unassigned issue makes it theirs.
-        XCTAssertEqual(plan.next.map(\.issue.identifier), ["ENG-4", "ENG-2", "ENG-1"])
-        XCTAssertEqual(plan.next.map(\.situation), [.agentWaiting, .agentFinished, .ciFailed])
+        // The agents are apart, waiting first; an agent of the viewer's on an unassigned issue counts as theirs.
+        XCTAssertEqual(plan.agents.map(\.issue.identifier), ["ENG-3", "ENG-4", "ENG-2"])
+        XCTAssertEqual(plan.agents.map(\.situation), [.agentWaiting, .agentWaiting, .agentFinished])
+        XCTAssertEqual(plan.yours, 4)
+        // Start here stays the viewer's own next task.
+        XCTAssertEqual(plan.start?.issue.identifier, "ENG-1")
+        XCTAssertEqual(plan.start?.situation, .ciFailed)
+        XCTAssertTrue(plan.next.isEmpty)
         // "Finished" does not hide a broken pipeline.
         let broken = DeliveryPlan(issues: [issue(1, "started")], open: ["ENG-1": [failing]], merged: [:], blockers: [:], viewer: viewer,
                                   agents: ["ENG-1": .finished], now: now)

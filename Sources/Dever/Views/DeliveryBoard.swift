@@ -8,7 +8,7 @@ struct SituationGlyph: View {
 
     static func look(_ situation: DeliveryPlan.Situation) -> (symbol: String, tint: Color) {
         switch situation {
-        case .agentWaiting: ("hand.raised.fill", Theme.chart3)
+        case .agentWaiting: ("questionmark.bubble.fill", Theme.chart3)
         case .agentFinished: ("checkmark.seal.fill", Theme.positive)
         case .ciFailed: ("xmark.circle.fill", Theme.negative)
         case .changesRequested: ("arrow.uturn.backward.circle.fill", Theme.chart3)
@@ -82,6 +82,8 @@ struct DeliveryBoard: View {
                 whereLine
             }
             if let notice { noticeLine(notice).transition(.opacity) }
+            // The agents that wait for you or finished, apart: Start here stays your own next task.
+            if !plan.agents.isEmpty { agentsSection.transition(.opacity) }
             if let start = plan.start {
                 startTile(start, grab: plan.startIsGrab)
                     .id(start.id)
@@ -261,23 +263,28 @@ struct DeliveryBoard: View {
         let failure = failure(of: item)
         // A capture opens it on whichever pull request the demo starts with.
         let open = failure != nil && (why == failure || why?.number == 0)
+        return startLink(item, grab: grab, failure: failure, open: open)
+            // The card and the agent menu hang over the rows under the tile.
+            .zIndex(open || agentMenu ? 1 : 0)
+    }
+
+    /// "AGENTS · 1 waiting for you", then one card per issue whose agent waits or finished.
+    private var agentsSection: some View {
+        let waiting = plan.agents.filter { $0.situation == .agentWaiting }.count
+        let review = plan.agents.count - waiting
+        let words = [waiting > 0 ? "\(waiting) waiting for you" : nil, review > 0 ? "\(review) to review" : nil].compactMap { $0 }
         return VStack(alignment: .leading, spacing: 8) {
-            startLink(item, grab: grab, failure: failure, open: open)
-                // The card hangs over the rows under the tile.
-                .zIndex(1)
-            // The agent on this issue's branch, when one of the connected tools has a session there.
-            if let session = agents.session(branch: item.issue.branchName) {
-                AgentSessionLine(session: session, lift: Soot.surface, hasProposal: proposals.proposal(for: item.issue.identifier) != nil)
-                    .padding(.horizontal, 16)
-                    .transition(.opacity)
+            HStack(spacing: 6) {
+                Text("AGENTS").font(.system(size: 11, weight: .bold)).tracking(0.6).foregroundStyle(Soot.lime)
+                Text(words.joined(separator: " · ")).font(.system(size: 12)).foregroundStyle(Soot.muted)
             }
-            // What the agent left for the developer: its account, and what it suggests.
-            if proposals.proposal(for: item.issue.identifier) != nil {
-                AgentProposalBlock(project: project, issue: item.issue, fill: Soot.ground)
-                    .transition(.opacity)
+            .accessibilityElement(children: .combine)
+            .accessibilityAddTraits(.isHeader)
+            ForEach(plan.agents) { item in
+                AgentWorkCard(project: project, issue: item.issue, session: agents.session(branch: item.issue.branchName),
+                              pull: item.pull.flatMap { URL(string: $0.url) })
             }
         }
-        .zIndex(open || agentMenu ? 1 : 0)
     }
 
     private func startLink(_ item: DeliveryPlan.Item, grab: Bool, failure: FailureStore.Key?, open: Bool) -> some View {
@@ -311,6 +318,8 @@ struct DeliveryBoard: View {
                         } else {
                             Text(why).lineLimit(1)
                         }
+                        // An agent already working on it: said inside the tile, so it reads as the same issue.
+                        if let session = agents.session(branch: item.issue.branchName) { AgentSessionChip(session: session) }
                     }
                     .font(.system(size: 13)).foregroundStyle(Soot.muted)
                 }

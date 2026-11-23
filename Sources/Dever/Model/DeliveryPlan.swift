@@ -107,6 +107,9 @@ struct DeliveryPlan {
     /// The one issue to pick up now; `startIsGrab` when it is an unassigned one to take.
     private(set) var start: Item?
     private(set) var startIsGrab = false
+    /// The issues whose agent waits for the viewer or finished its work: shown apart, above the
+    /// start pick, which stays the viewer's own next task. Waiting first.
+    private(set) var agents: [Item] = []
     /// The viewer's other open issues, in order.
     private(set) var next: [Item] = []
     private(set) var others: [Item] = []
@@ -122,7 +125,7 @@ struct DeliveryPlan {
     var showsYours: Bool { yours > 0 && yours < left }
     var inQA: Int { shipped.filter(\.inQA).count }
     /// Open issues with work under way, for the bar's middle segment.
-    var moving: Int { ([start].compactMap { $0 } + next + others).filter { $0.situation != .todo && $0.situation != .blocked }.count }
+    var moving: Int { ([start].compactMap { $0 } + agents + next + others).filter { $0.situation != .todo && $0.situation != .blocked }.count }
 
     static let staleReview: TimeInterval = 3 * 86_400
     static let staleBuilding: TimeInterval = 7 * 86_400
@@ -190,11 +193,14 @@ struct DeliveryPlan {
                 item.stale = (item.situation == .waitingReview && age > Self.staleReview)
                     || ((item.situation == .building || item.situation == .draft) && age > Self.staleBuilding)
             }
-            if isMine { mine.append(item) } else { free.append(item) }
+            if item.situation == .agentWaiting || item.situation == .agentFinished {
+                self.agents.append(item)
+            } else if isMine { mine.append(item) } else { free.append(item) }
         }
+        self.agents.sort(by: Self.before)
         mine.sort(by: Self.before)
         free.sort(by: Self.before)
-        yours = mine.count
+        yours = mine.count + self.agents.count
         if let i = mine.firstIndex(where: { $0.situation.actionable }) {
             start = mine.remove(at: i)
         } else if let i = free.firstIndex(where: { $0.issue.assignee == nil && $0.situation == .todo }) {

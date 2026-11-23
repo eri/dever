@@ -12,7 +12,7 @@ private struct AgentStateDot: View {
             case .finished:
                 Image(systemName: "checkmark.circle.fill").font(.system(size: 11, weight: .semibold)).foregroundStyle(Theme.positive)
             case .waiting:
-                Image(systemName: "hand.raised.fill").font(.system(size: 10, weight: .semibold)).foregroundStyle(Theme.chart3)
+                Image(systemName: "questionmark.bubble.fill").font(.system(size: 11, weight: .semibold)).foregroundStyle(Theme.chart3)
             default:
                 Circle().fill(session.state == .working && !session.stale(at: now) ? Soot.lime : Soot.muted).frame(width: 7, height: 7)
             }
@@ -103,5 +103,123 @@ struct AgentSessionChip: View {
         case .finished: "finished"
         case .ended: "closed"
         }
+    }
+}
+
+/// An issue whose agent waits for the developer or finished its work, as one card: the agent and
+/// its state, the issue it works on, then what it asks or what it did, and the one action that
+/// answers it. Everything about the agent sits inside the card, so nothing reads as a separate line.
+struct AgentWorkCard: View {
+    @ObservedObject private var proposals = ProposalStore.shared
+    let project: Project
+    let issue: LinearIssue
+    let session: AgentSession?
+    /// The issue's open pull request, where the finished work is read.
+    var pull: URL?
+
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 30)) { context in
+            let now = context.date
+            let proposal = proposals.proposal(for: issue.identifier)
+            let waiting = session?.state == .waiting
+            let tool = session?.tool ?? proposal?.tool ?? .claudeCode
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(spacing: 10) {
+                    AgentMark(tool: tool, size: 22)
+                    Text(tool.label).font(.system(size: 14, weight: .semibold)).foregroundStyle(Soot.ink)
+                    state(waiting: waiting, proposal: proposal, now: now)
+                    Spacer(minLength: 8)
+                    actions(waiting: waiting, proposal: proposal)
+                }
+                NavigationLink(value: IssueRoute(project: project, issue: issue)) {
+                    HStack(spacing: 8) {
+                        IDPill(text: issue.identifier)
+                        Text(MarkdownTheme.inline(issue.title, size: 14)).font(.system(size: 14)).foregroundStyle(Soot.ink).lineLimit(1)
+                        Spacer(minLength: 8)
+                        Image(systemName: "chevron.right").font(.system(size: 10, weight: .bold)).foregroundStyle(Soot.muted)
+                            .accessibilityHidden(true)
+                    }
+                    .padding(.vertical, 6).padding(.horizontal, 8)
+                }
+                .buttonStyle(RowButton(lift: .surface, radius: 8))
+                .padding(.horizontal, -8)
+                .accessibilityHint("Opens the issue")
+                if waiting, let sentence = session?.sentence {
+                    quote(sentence, tint: Theme.chart3)
+                } else if proposal != nil {
+                    AgentProposalBlock(project: project, issue: issue, fill: Soot.ground, embedded: true)
+                } else if let sentence = session?.sentence {
+                    quote(sentence, tint: Soot.edge)
+                }
+            }
+            .padding(16)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Soot.ground, in: RoundedRectangle(cornerRadius: 10))
+            .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(waiting ? Theme.chart3.opacity(0.55) : Soot.edge.opacity(0.6)))
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel("\(tool.label) on \(issue.identifier)")
+        }
+    }
+
+    /// The state as a small capsule: an icon and its words, never the colour alone.
+    private func state(waiting: Bool, proposal: AgentProposal?, now: Date) -> some View {
+        let words: String = {
+            if let session, session.state == .waiting || session.state == .finished {
+                return session.words(at: now)
+            }
+            return "Finished \(proposal?.at.formatted(.relative(presentation: .named)) ?? "")"
+        }()
+        let tint = waiting ? Theme.chart3 : Theme.positive
+        return HStack(spacing: 5) {
+            Image(systemName: waiting ? "questionmark.bubble.fill" : "checkmark.circle.fill").font(.system(size: 11, weight: .semibold))
+                .accessibilityHidden(true)
+            Text(words).font(.system(size: 12, weight: .medium)).lineLimit(1)
+        }
+        .foregroundStyle(tint)
+        .padding(.horizontal, 8)
+        .frame(height: 22)
+        .background(tint.opacity(0.14), in: Capsule())
+    }
+
+    @ViewBuilder
+    private func actions(waiting: Bool, proposal: AgentProposal?) -> some View {
+        HStack(spacing: 8) {
+            if !waiting, proposal == nil, let session, !proposals.reviewed.contains(session.id) {
+                Button("Reviewed") { Motion.run(Motion.ui, fade: true) { proposals.markReviewed(session.id) } }
+                    .buttonStyle(TertiaryButton(tint: .muted, lift: Soot.ground, font: .system(size: 13, weight: .medium)))
+                    .help("Stop listing this issue as work to review")
+            }
+            if waiting, let link = session?.link {
+                external("Answer", link, primary: true).help("Open the session in \(session?.tool.label ?? "the agent") to answer")
+            } else if let pull {
+                if let link = session?.link { external("Open session", link, primary: false) }
+                external("Open PR", pull, primary: true).help("Open the pull request on GitHub")
+            } else if let link = session?.link {
+                external("Open session", link, primary: true)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func external(_ title: String, _ url: URL, primary: Bool) -> some View {
+        let label = HStack(spacing: 5) {
+            Text(title)
+            Image(systemName: "arrow.up.right").font(.system(size: 11, weight: .bold)).accessibilityHidden(true)
+        }
+        if primary {
+            Link(destination: url) { label }.buttonStyle(PrimaryButton()).accessibilityHint("Opens outside Dever")
+        } else {
+            Link(destination: url) { label }.buttonStyle(SecondaryButton()).accessibilityHint("Opens outside Dever")
+        }
+    }
+
+    /// What the agent said, set off by a thin bar in its state's colour.
+    private func quote(_ text: String, tint: Color) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            RoundedRectangle(cornerRadius: 1).fill(tint).frame(width: 2)
+            Text(text).font(.system(size: 13)).foregroundStyle(Soot.ink.opacity(0.9))
+                .fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
+        }
+        .fixedSize(horizontal: false, vertical: true)
     }
 }
