@@ -1154,6 +1154,7 @@ private struct AlertsSection: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var status: UNAuthorizationStatus = .notDetermined
     @AppStorage(AlertKind.pipelineFailing.settingKey) private var wanted = true
+    @AppStorage(AlertKind.doneMention.settingKey) private var mentionWanted = true
 
     /// The notification reaches the user: the switch is on and macOS allows it.
     private var on: Bool { wanted && status != .denied && status != .notDetermined }
@@ -1198,6 +1199,16 @@ private struct AlertsSection: View {
                     .padding(.vertical, 24)
                     .opacity(on ? 1 : 0.4)
                     .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: on)
+                // The one thing a done project is still watched for.
+                SettingRow(title: "When you are mentioned in a done project",
+                           detail: status == .denied ? "Blocked for Dever in System Settings"
+                                : mentionWanted ? "Its channel is checked every ten minutes" : "Off: shown on the Overview only",
+                           tap: status == .denied ? nil : { mentionWanted.toggle() }) {
+                    if status != .denied {
+                        Toggle("Notify me when I am mentioned in a done project", isOn: $mentionWanted)
+                            .labelsHidden().toggleStyle(.switch).tint(Soot.lime).controlSize(.small)
+                    }
+                }
             }
         }
         .task { await refresh() }

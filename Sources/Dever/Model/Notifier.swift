@@ -1,10 +1,12 @@
 import Foundation
 import UserNotifications
 
-/// Things that need someone to act, each with its own on/off setting. One for now:
-/// a failing pipeline. Past target dates and merged-but-open issues show in the app only.
+/// Things that need someone to act, each with its own on/off setting: a failing pipeline, and
+/// someone naming you in the channel of a project you marked as done (the one thing a done
+/// project is still watched for). Past target dates and merged-but-open issues show in the app only.
 enum AlertKind: String, CaseIterable, Identifiable {
     case pipelineFailing
+    case doneMention
 
     var id: String { rawValue }
     var settingKey: String { "notify.\(rawValue)" }
@@ -72,6 +74,13 @@ final class Notifier {
                 post(alert, project: project)
             }
         }
+    }
+
+    /// Someone named the user in a done project's channel: once per message.
+    func mentioned(in project: Project, by author: String, text: String, ts: String) {
+        guard AlertKind.doneMention.isEnabled else { return }
+        post(.init(kind: .doneMention, key: "mention:\(ts)", title: "\(project.name) (done): \(author) mentioned you",
+                   body: String(text.prefix(180))), project: project)
     }
 
     private func post(_ alert: ProjectAlert, project: Project) {

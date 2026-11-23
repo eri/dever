@@ -1212,6 +1212,7 @@ private struct ThreadPane: View {
     let permalink: URL?
     let actions: SlackMessageActions
     let close: () -> Void
+    @Environment(\.projectFrozen) private var frozen
     @State private var replies: [SlackMessage]?
     @State private var failed = false
     @State private var sending = false
@@ -1310,8 +1311,13 @@ private struct ThreadPane: View {
             .transition(.opacity)
             .motion(Motion.ui, fade: true, value: parent.ts)
             }
-            ReplyComposer(sending: sending, autofocus: false, fill: Soot.surface, send: { await send($0) }, cancel: {})
-                .id(parent.ts)
+            if frozen {
+                Text("This project is done. Reopen it to reply from Dever.")
+                    .font(.system(size: 12)).foregroundStyle(Soot.muted)
+            } else {
+                ReplyComposer(sending: sending, autofocus: false, fill: Soot.surface, send: { await send($0) }, cancel: {})
+                    .id(parent.ts)
+            }
         }
         .padding(18)
         .frame(maxHeight: .infinity, alignment: .top)
@@ -1428,7 +1434,9 @@ private struct MessageRow: View {
     @State private var reactions: [SlackReaction] = []
     @FocusState private var stripFocus: Int?
 
-    private var stripShown: Bool { hovering || stripFocus != nil || picking }
+    /// A done project's channel is read, not answered: no reaction, no reply from here.
+    @Environment(\.projectFrozen) private var frozen
+    private var stripShown: Bool { !frozen && (hovering || stripFocus != nil || picking) }
 
     private var author: String { user?.name ?? "App" }
     private var me: String? { app.slack?.userID }
@@ -2145,13 +2153,14 @@ private struct ReactionsBar: View {
     var users: [String: SlackUser] = [:]
     let actions: SlackMessageActions
     @State private var reactions: [SlackReaction] = []
+    @Environment(\.projectFrozen) private var frozen
 
     private var me: String? { app.slack?.userID }
 
     var body: some View {
         Group {
             if !reactions.isEmpty {
-                ReactionPills(reactions: reactions, me: me, customEmoji: customEmoji, users: users) { toggle($0) }
+                ReactionPills(reactions: reactions, me: me, customEmoji: customEmoji, users: users) { if !frozen { toggle($0) } }
             }
         }
         .onAppear { reactions = message.reactions ?? [] }

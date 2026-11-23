@@ -13,6 +13,8 @@ struct ProjectSnapshot {
         /// The Linear team the project belongs to (the first, when it spans several).
         var team: String?
         var targetDate: Date?
+        /// Where the project stands in Linear itself (In Progress, Completed…).
+        var status: LinearProjectStatus?
 
         var progress: Double { total == 0 ? 0 : Double(done) / Double(total) }
     }
@@ -132,6 +134,9 @@ struct ProjectSnapshot {
     /// The project shares the workspace repository and has no Linear issues to find its pull
     /// requests by: GitHub stays out of its row and its health.
     var githubNeedsLinear = false
+    /// Every issue has shipped, by the delivery rules (`ProjectCompletion.everyIssueShipped`):
+    /// one of the two things Dever proposes "Mark as done" from.
+    var everyIssueShipped = false
     /// Why a service has no data: never connected, rejected token, offline or a failure.
     var errors: [ServiceKind: ServiceState] = [:]
     var updatedAt = Date()
@@ -242,7 +247,7 @@ final class OverviewStore: ObservableObject {
     /// How old the rows may get while nobody looks: set by Dever, not by a setting
     /// (`RefreshCadence.background`).
     var staleAfter: TimeInterval {
-        RefreshCadence.background(projects: app?.projects.count ?? 0, lowPower: ProcessInfo.processInfo.isLowPowerModeEnabled)
+        RefreshCadence.background(projects: app?.activeProjects.count ?? 0, lowPower: ProcessInfo.processInfo.isLowPowerModeEnabled)
     }
 
     /// Due for a refresh. After a failed cycle the next try comes sooner than the setting:
@@ -271,7 +276,8 @@ final class OverviewStore: ObservableObject {
         // repository a project page read again. Changes that come together count once.
         following = IssueStore.shared.$projects.map { _ in () }
             .merge(with: GitHubStore.shared.$revision.map { _ in () })
-            .dropFirst(2)
+            .merge(with: IssueStore.shared.$statuses.map { _ in () })
+            .dropFirst(3)
             .debounce(for: .milliseconds(80), scheduler: RunLoop.main)
             .sink { [weak self] in self?.rederive() }
         // A project whose links changed (the editor saved, an import) is read again at once,
@@ -295,11 +301,14 @@ final class OverviewStore: ObservableObject {
     }
 
     /// The projects whose row must be read again: new ones, and those whose Slack channel,
-    /// Linear project or repositories are not what they were. A rename or a preview is not one.
+    /// Linear project or repositories are not what they were, and a done project reopened. A
+    /// rename or a preview is not one; a done project is not read at all.
     nonisolated static func relinked(from old: [Project], to new: [Project]) -> [UUID] {
         let before = Dictionary(old.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
         return new.filter { p in
+            guard !p.isDone else { return false }
             guard let o = before[p.id] else { return true }
+            if o.isDone { return true }
             return o.slack?.id != p.slack?.id || o.linear?.id != p.linear?.id || o.githubRepos != p.githubRepos
                 || o.usesWorkspaceRepository != p.usesWorkspaceRepository || o.githubWholeRepo != p.githubWholeRepo
         }.map(\.id)
@@ -310,7 +319,7 @@ final class OverviewStore: ObservableObject {
         guard OverviewDemo.scene == nil else { return }
         // A cycle in flight read the project as it was: let it finish, then read it as it is.
         while cycling { try? await Task.sleep(nanoseconds: 200_000_000) }
-        guard let p = app.projects.first(where: { $0.id == id }) else { return }
+        guard let p = app.projects.first(where: { $0.id == id }), !p.isDone else { return }
         let repos = Result { RepoCache(client: try app.githubClient()) }
         let early: @Sendable (UUID, ProjectSnapshot.SlackStats) async -> Void = { [weak self] id, slack in
             await self?.publish(slack, for: id)
@@ -326,11 +335,12 @@ final class OverviewStore: ObservableObject {
     func rederive() {
         guard let app, !cycling, OverviewDemo.scene == nil else { return }
         let login = app.github?.login
-        for p in app.projects {
+        for p in app.activeProjects {
             guard var s = snapshots[p.id], s.errors[.linear] == nil, s.errors[.github] == nil else { continue }
             let issues = p.linear.flatMap { IssueStore.shared.projects[$0.id]?.issues }
             if p.linear != nil, issues == nil { continue }
             if let issues { s.linear?.count(issues) }
+            if let linear = p.linear, let status = IssueStore.shared.statuses[linear.id] { s.linear?.status = status }
             let repositories = app.repositories(for: p)
             if s.github != nil, !repositories.isEmpty {
                 let held = repositories.compactMap { name in GitHubStore.shared.repository(name).map { (name: name, data: $0) } }
@@ -338,8 +348,23 @@ final class OverviewStore: ObservableObject {
                     s.github = .project(repositories: held, issues: issues, wholeRepository: app.showsWholeRepository(p), login: login)
                 }
             }
-            if let issues, s.linear != nil { s.delivery = Delivery(issues: issues, github: s.github) }
+            if let issues, s.linear != nil {
+                s.delivery = Delivery(issues: issues, github: s.github)
+                s.everyIssueShipped = ProjectCompletion.everyIssueShipped(issues: issues, github: s.github)
+            }
             snapshots[p.id] = s
+        }
+    }
+
+    /// A "Not yet" is forgotten once its project stops qualifying, so the next time everything
+    /// has shipped Dever proposes again.
+    private func forgetDeclines(_ app: AppState) {
+        for p in app.activeProjects where p.doneProposalDeclined == true {
+            guard let s = snapshots[p.id], s.linear != nil, s.errors[.linear] == nil else { continue }
+            if ProjectCompletion.forgetsDecline(p, everyIssueShipped: s.everyIssueShipped, issues: s.linear?.total ?? 0,
+                                                linearStatus: s.linear?.status) {
+                app.setDoneProposalDeclined(p.id, false)
+            }
         }
     }
 
@@ -355,6 +380,12 @@ final class OverviewStore: ObservableObject {
         snapshots[project]?.slack = s
     }
 
+    /// The same for any project, done ones included: their mention is read too.
+    func read(_ project: UUID, upTo ts: String) {
+        slackRead(project, upTo: ts)
+        CompletionStore.shared.slackRead(project, upTo: ts)
+    }
+
     /// - Parameter quiet: a cycle nobody asked for: the Refresh button and the header stay
     ///   still (the very first load always shows).
     func refresh(_ app: AppState, quiet: Bool = false) async {
@@ -363,6 +394,7 @@ final class OverviewStore: ObservableObject {
             if app.projects.map(\.id) != demo.projects.map(\.id) { app.projects = demo.projects }
             snapshots = demo.snapshots
             lastRefresh = Date()
+            CompletionStore.shared.setDemo(mentions: OverviewDemo.doneMentions, undo: OverviewDemo.undo)
             return
         }
         if !quiet || lastRefresh == nil { isRefreshing = true }
@@ -370,7 +402,8 @@ final class OverviewStore: ObservableObject {
         cycling = true
         defer { cycling = false; isRefreshing = false }
 
-        let projects = app.projects
+        // Done projects are not read: no row, no alert. Only their channel is watched, slowly.
+        let projects = ProjectCompletion.cycle(app.projects).read
         let repos = Result { RepoCache(client: try app.githubClient()) }
         let known = snapshots
         var reached = !projects.contains { $0.slack != nil || $0.linear != nil || !app.repositories(for: $0).isEmpty }
@@ -408,8 +441,10 @@ final class OverviewStore: ObservableObject {
         let ids = Set(projects.map(\.id))
         snapshots = snapshots.filter { ids.contains($0.key) }
         Notifier.shared.process(projects: projects, snapshots: snapshots)
+        forgetDeclines(app)
         // Previews ride the same cycle, after the snapshots so the rows fill in first.
         await PreviewStore.shared.refreshAll(projects, app: app)
+        await CompletionStore.shared.watch(app)
     }
 
     /// A refresh in flight got the project's Slack part: the row takes it without waiting for the rest.
@@ -467,8 +502,10 @@ final class OverviewStore: ObservableObject {
         }
         if let issues {
             s.delivery = Delivery(issues: issues, github: s.github)
+            s.everyIssueShipped = ProjectCompletion.everyIssueShipped(issues: issues, github: s.github)
         } else if s.errors[.linear]?.isTransient == true {
             s.delivery = previous?.delivery
+            s.everyIssueShipped = previous?.everyIssueShipped ?? false
         }
         return s
     }
@@ -482,7 +519,7 @@ final class OverviewStore: ObservableObject {
         do {
             async let facts = try? IssueStore.shared.facts(project: id, app: app)
             let issues = try await IssueStore.shared.load(project: id, maxAge: RepoCache.maxAge, app: app)
-            let known = await facts ?? previous.map { LinearProjectFacts(lead: $0.lead, team: $0.team, targetDate: $0.targetDate) }
+            let known = await facts ?? previous.map { LinearProjectFacts(lead: $0.lead, team: $0.team, targetDate: $0.targetDate, status: $0.status) }
             return .success((ProjectSnapshot.LinearStats(issues: issues, facts: known), issues))
         } catch {
             return .failure(error)

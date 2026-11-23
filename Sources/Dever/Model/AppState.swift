@@ -145,6 +145,14 @@ struct Project: Codable, Identifiable, Hashable {
     /// Pinned to the top of the Overview.
     var favorite: Bool?
     var createdAt = Date()
+    /// When the user marked the project as done; nil while it is active. A done project leaves
+    /// the rail and the Overview's list, is no longer refreshed, and stays readable.
+    var doneAt: Date?
+    /// The Linear project's status before Dever moved it to Completed, offered back on reopen.
+    var linearStatusBeforeDone: LinearProjectStatus?
+    /// The user answered "Not yet" to the proposal (or reopened the project) while it still
+    /// qualified: nothing is proposed until it stops qualifying (`ProjectCompletion`).
+    var doneProposalDeclined: Bool?
 
     init(id: UUID = UUID(), name: String, slack: SlackLink? = nil, linear: LinearLink? = nil,
          githubRepos: [String] = [], createdAt: Date = Date()) {
@@ -162,6 +170,26 @@ struct Project: Codable, Identifiable, Hashable {
     /// A project is trackable once both Slack and Linear are linked.
     var isComplete: Bool { slack != nil && linear != nil }
 
+    /// Marked as done: archived, still readable, reopened at will.
+    var isDone: Bool { doneAt != nil }
+
+    /// Marks the project as done, here only. Its links stay: it is archived, not forgotten.
+    /// - Parameter previousLinearStatus: the Linear status Dever is about to move it from.
+    mutating func markDone(at date: Date = Date(), previousLinearStatus: LinearProjectStatus? = nil) {
+        doneAt = date
+        linearStatusBeforeDone = previousLinearStatus
+        doneProposalDeclined = nil
+        favorite = nil
+    }
+
+    /// Puts a done project back as it was. Marked as declined, so a project that still
+    /// qualifies (its Linear project left Completed, say) is not proposed again at once.
+    mutating func reopen() {
+        doneAt = nil
+        linearStatusBeforeDone = nil
+        doneProposalDeclined = true
+    }
+
     /// The repositories the project follows under a mode and a workspace repository.
     func repositories(mode: RepositoryMode, workspace: String?) -> [String] {
         let shared = workspace.map { [$0] } ?? []
@@ -177,6 +205,7 @@ struct Project: Codable, Identifiable, Hashable {
     private enum CodingKeys: String, CodingKey {
         case id, name, slack, linear, githubRepos, usesWorkspaceRepository, githubWholeRepo
         case previewPullNumber, previewRepository, previewDismissed, favorite, createdAt
+        case doneAt, linearStatusBeforeDone, doneProposalDeclined
     }
     private enum LegacyKeys: String, CodingKey { case githubRepo }
 
@@ -199,7 +228,18 @@ struct Project: Codable, Identifiable, Hashable {
         previewDismissed = try c.decodeIfPresent(Bool.self, forKey: .previewDismissed)
         favorite = try c.decodeIfPresent(Bool.self, forKey: .favorite)
         createdAt = try c.decodeIfPresent(Date.self, forKey: .createdAt) ?? Date()
+        // Projects saved before they could be done have none of these.
+        doneAt = try c.decodeIfPresent(Date.self, forKey: .doneAt)
+        linearStatusBeforeDone = try c.decodeIfPresent(LinearProjectStatus.self, forKey: .linearStatusBeforeDone)
+        doneProposalDeclined = try c.decodeIfPresent(Bool.self, forKey: .doneProposalDeclined)
     }
+}
+
+extension Array where Element == Project {
+    /// The projects still being worked on.
+    var active: [Project] { filter { !$0.isDone } }
+    /// The done ones, the latest first.
+    var done: [Project] { filter(\.isDone).sorted { ($0.doneAt ?? .distantPast) > ($1.doneAt ?? .distantPast) } }
 }
 
 /// Slack channel naming convention: `<prefix><slug>`.
@@ -361,6 +401,18 @@ final class AppState: ObservableObject {
             projects[0].previewRepository = projects[0].githubRepos.first
         }
         expired = Set(Self.simulated("DEVER_SNAPSHOT_UNAUTHORIZED").keys.compactMap(ServiceKind.init(rawValue:)))
+        // DEVER_SNAPSHOT_DONE=page|page-mention: the captured project as a done one, nine days
+        // ago. Nothing is written back (a snapshot run never saves the projects).
+        if Snapshotter.directory != nil, CompletionStore.snapshotScene?.hasPrefix("page") == true, projects.indices.contains(captured) {
+            projects[captured].doneAt = Date().addingTimeInterval(-9 * 86_400)
+            projects[captured].linearStatusBeforeDone = LinearProjectStatus(id: "demo-started", name: "In Progress", type: "started")
+            if CompletionStore.snapshotScene == "page-mention" {
+                let at = Date().addingTimeInterval(-35 * 60)
+                CompletionStore.shared.setDemo(mentions: [projects[captured].id: [
+                    .init(ts: String(format: "%.6f", at.timeIntervalSince1970), author: "Ana",
+                          text: "the referral links 404 since this morning, can you look?", date: at)]], undo: nil)
+            }
+        }
     }
 
     /// Snapshot runs only: throws the failure the environment asks for.
@@ -561,6 +613,38 @@ final class AppState: ObservableObject {
 
     func delete(_ project: Project) {
         projects.removeAll { $0.id == project.id }
+    }
+
+    // MARK: Done
+
+    /// The projects still being worked on: the rail, the Overview's list, the refresh cycle.
+    var activeProjects: [Project] { projects.active }
+    /// The done ones, the latest first: the Overview's "Done" list.
+    var doneProjects: [Project] { projects.done }
+
+    /// Marks a project as done, here only: what happens in the tools is `CompletionStore`'s.
+    /// - Parameter previousLinearStatus: the Linear status Dever is about to move it from.
+    func markDone(_ project: Project, previousLinearStatus: LinearProjectStatus? = nil, at date: Date = Date()) {
+        guard let i = projects.firstIndex(where: { $0.id == project.id }) else { return }
+        projects[i].markDone(at: date, previousLinearStatus: previousLinearStatus)
+    }
+
+    /// Puts a done project back as it was (`Project.reopen`).
+    func reopen(_ project: Project) {
+        guard let i = projects.firstIndex(where: { $0.id == project.id }) else { return }
+        projects[i].reopen()
+    }
+
+    /// The Linear project was not moved after all: there is no status to offer back.
+    func forgetLinearStatusBeforeDone(_ project: UUID) {
+        guard let i = projects.firstIndex(where: { $0.id == project }), projects[i].linearStatusBeforeDone != nil else { return }
+        projects[i].linearStatusBeforeDone = nil
+    }
+
+    /// "Not yet" to the proposal, or its end once the project no longer qualifies.
+    func setDoneProposalDeclined(_ project: UUID, _ declined: Bool) {
+        guard let i = projects.firstIndex(where: { $0.id == project }), (projects[i].doneProposalDeclined == true) != declined else { return }
+        projects[i].doneProposalDeclined = declined ? true : nil
     }
 
     var linkedSlackIDs: Set<String> { Set(projects.compactMap { $0.slack?.id }) }

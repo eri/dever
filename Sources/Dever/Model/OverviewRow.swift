@@ -11,6 +11,8 @@ struct LinearProjectFacts: Equatable {
     /// The Linear team the project belongs to (the first, when it spans several).
     var team: String?
     var targetDate: Date?
+    /// Where the project stands in Linear (In Progress, Completed…); nil when it was not read.
+    var status: LinearProjectStatus? = nil
 }
 
 extension ProjectSnapshot.LinearStats {
@@ -20,6 +22,7 @@ extension ProjectSnapshot.LinearStats {
         lead = facts?.lead
         team = facts?.team
         targetDate = facts?.targetDate
+        status = facts?.status
     }
 
     /// Counts the issues again; canceled ones are left out. The project's own facts stay.
@@ -99,6 +102,13 @@ extension ProjectSnapshot.GitHubStats {
     }
 
     private static func iso(_ s: String) -> Date? { ISO8601DateFormatter().date(from: s) }
+}
+
+extension ProjectCompletion {
+    /// From the Overview's own join of issues and pull requests.
+    static func everyIssueShipped(issues: [LinearIssue], github: ProjectSnapshot.GitHubStats?) -> Bool {
+        everyIssueShipped(issues: issues, openPR: github?.openPRIssues ?? [], mergedPR: github?.mergedPRIssues ?? [])
+    }
 }
 
 extension Delivery {

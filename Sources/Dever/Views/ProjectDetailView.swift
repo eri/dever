@@ -14,6 +14,7 @@ struct ProjectDetailView: View {
     @ObservedObject private var slackStore = SlackStore.shared
     @ObservedObject private var intelligence = IntelligenceStore.shared
     @ObservedObject private var intelligenceStatus = IntelligenceStatus.shared
+    @ObservedObject private var completion = CompletionStore.shared
     @State private var shownMessages = 8
     @State private var loadingEarlier = false
     @State private var slackExpanded = false
@@ -111,6 +112,11 @@ struct ProjectDetailView: View {
             ScrollView(.vertical) {
                 VStack(alignment: .leading, spacing: 24) {
                     titleRow
+                    if project.isDone, let mention = completion.mentions[project.id]?.first {
+                        mentionNotice(mention).padding(.top, -8).transition(Motion.rise)
+                    } else if let reason = doneProposal {
+                        proposalNotice(reason).padding(.top, -8).transition(Motion.rise)
+                    }
                     if !agedData.isEmpty {
                         AgeNotice(items: agedData, refreshing: inFlight, retry: { Task { await load(quiet: true) } })
                             .padding(.top, -12)
@@ -186,7 +192,8 @@ struct ProjectDetailView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .lookAgain)) { _ in
             now = Date()
-            if LookAgain.shared.isDue(lastLoad) { Task { await load(quiet: true) } }
+            // A done project is read when its page opens and on Refresh, not behind it.
+            if !project.isDone, LookAgain.shared.isDue(lastLoad) { Task { await load(quiet: true) } }
         }
         .sheet(isPresented: $flow.githubSheet) { GitHubLoginSheet() }
         .onChange(of: summariesTrigger, initial: true) { _, _ in refreshMessageSummaries() }
@@ -205,7 +212,91 @@ struct ProjectDetailView: View {
         }
     }
 
-    private var workColumn: some View {
+    /// Why Dever proposes to mark the project as done, from the page's own plan: the rules are
+    /// the Delivery board's, so the proposal and the board cannot disagree.
+    private var doneProposal: ProjectCompletion.Reason? {
+        guard !project.isDone, let linear = project.linear, states[.linear] == nil, workLoaded,
+              DeliveryPlan.snapshotDemo() == nil else { return nil }
+        let plan = self.plan
+        return ProjectCompletion.proposal(project, everyIssueShipped: ProjectCompletion.everyIssueShipped(plan),
+                                          issues: plan.total, linearStatus: issueStore.statuses[linear.id])
+    }
+
+    /// Dever proposes, the user confirms: the reason, the action, and "Not yet".
+    private func proposalNotice(_ reason: ProjectCompletion.Reason) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: "checkmark.seal.fill").font(.system(size: 15, weight: .semibold)).foregroundStyle(Soot.lime)
+                .accessibilityHidden(true)
+            Text(reason.line).font(.system(size: 14, weight: .medium)).foregroundStyle(Soot.ink).lineLimit(1)
+            Spacer(minLength: 12)
+            Button("Not yet") { Motion.run(Motion.ui) { app.setDoneProposalDeclined(project.id, true) } }
+                .buttonStyle(TertiaryButton(tint: .muted, lift: Soot.ground))
+                .help("Dever proposes again the next time everything has shipped")
+            Button("Mark as done") { NotificationCenter.default.post(name: .markProjectDone, object: project.id) }
+                .buttonStyle(PrimaryButton(size: .panel))
+                .help("Dever shows what it will do before anything happens")
+        }
+        .padding(.leading, 16).padding(.trailing, 12)
+        .frame(height: 52)
+        .background(Soot.surface, in: RoundedRectangle(cornerRadius: 12))
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("\(reason.line). The project can be marked as done")
+    }
+
+    /// The one thing a done project is still watched for: someone named you in its channel.
+    private func mentionNotice(_ mention: CompletionStore.Mention) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: "at").font(.system(size: 13, weight: .bold)).foregroundStyle(Soot.lime).accessibilityHidden(true)
+            Text("\(mention.author) mentioned you \(mention.date.formatted(.relative(presentation: .named)))")
+                .font(.system(size: 14, weight: .medium)).foregroundStyle(Soot.ink).lineLimit(1)
+            Text(mention.text).font(.system(size: 13)).foregroundStyle(Soot.muted).lineLimit(1).truncationMode(.tail)
+            Spacer(minLength: 12)
+            Button("Reopen project") { NotificationCenter.default.post(name: .reopenProject, object: project.id) }
+                .buttonStyle(PrimaryButton(size: .panel))
+        }
+        .padding(.leading, 16).padding(.trailing, 12)
+        .frame(height: 52)
+        .background(Soot.surface, in: RoundedRectangle(cornerRadius: 12))
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("\(mention.author) mentioned you after the project was done: \(mention.text)")
+    }
+
+    /// A done project's work: what shipped and what was left, read only. No preview panel:
+    /// one that still runs is said in a line, with the way to its pull request.
+    private var doneColumn: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            PanelHeader(service: project.linear != nil ? .linear : .github, title: "Delivery",
+                        subtitle: "Read only, as last read",
+                        link: linearURL, linkHelp: "Open the project in Linear")
+            if project.linear == nil {
+                QuietEmpty(symbol: "tray", text: "No Linear project was linked")
+            } else if let state = states[.linear], state != .notConnected {
+                failure(.linear, state)
+            } else if !workLoaded {
+                workSkeleton
+            } else {
+                DoneWork(project: project, plan: plan)
+            }
+            if let number = project.previewPullNumber, let repo = app.previewRepository(for: project),
+               ProjectCompletion.previewRuns(PreviewStore.shared.state(for: project)?.status?.phase),
+               let url = URL(string: "https://github.com/\(repo)/pull/\(number)") {
+                HStack(spacing: 8) {
+                    Image(systemName: "globe").font(.system(size: 13, weight: .medium)).foregroundStyle(Theme.chart3).accessibilityHidden(true)
+                    Text("The preview of #\(number) still runs").font(.system(size: 13)).foregroundStyle(Soot.ink)
+                    ExternalLink("Pull request", destination: url)
+                }
+                .padding(.horizontal, 12)
+            }
+        }
+        .motion(Motion.ui, fade: true, value: workLoaded)
+        .sootPanel()
+    }
+
+    @ViewBuilder private var workColumn: some View {
+        if project.isDone { doneColumn } else { activeColumn }
+    }
+
+    private var activeColumn: some View {
         VStack(spacing: 16) {
             // Skeletons dissolve into the loaded panels; the panels resize in the same 200 ms.
             // Scoped to `loaded`, so nothing else on the page animates with it.
@@ -237,7 +328,8 @@ struct ProjectDetailView: View {
                         .lineLimit(1)
                         .help(project.name)
                         .accessibilityAddTraits(.isHeader)
-                    if status == .loading { Skeleton(width: 72, height: 20, radius: 4).transition(.opacity) }
+                    if let at = project.doneAt { DoneBadge(date: at).transition(.opacity) }
+                    else if status == .loading { Skeleton(width: 72, height: 20, radius: 4).transition(.opacity) }
                     else { StatusBadge(status: status).transition(.opacity) }
                 }
                 .motion(Motion.ui, fade: true, value: status == .loading)
@@ -254,13 +346,29 @@ struct ProjectDetailView: View {
                 .accessibilityLabel("Refresh this project")
                 .accessibilityValue(loading ? "Refreshing" : "")
                 .keyboardShortcut("r")
-                Button(action: edit) {
-                    Label("Edit project", systemImage: "slider.horizontal.3")
+                if project.isDone {
+                    // Frozen: nothing to edit. The one action is the way back.
+                    Button { NotificationCenter.default.post(name: .reopenProject, object: project.id) } label: {
+                        Label("Reopen project", systemImage: "arrow.uturn.backward")
+                    }
+                    .buttonStyle(ToolbarButton())
+                    .help("Back in the rail and the list, read again")
+                } else {
+                    if doneProposal == nil {
+                        Button { NotificationCenter.default.post(name: .markProjectDone, object: project.id) } label: {
+                            Label("Mark as done", systemImage: "checkmark.circle")
+                        }
+                        .buttonStyle(ToolbarButton())
+                        .help("Finished: keep it readable under Done. Dever shows what it will do first.")
+                    }
+                    Button(action: edit) {
+                        Label("Edit project", systemImage: "slider.horizontal.3")
+                    }
+                    .buttonStyle(ToolbarButton())
+                    .help("Change the name and linked tools (⌘E)")
+                    .accessibilityLabel("Edit project")
+                    .keyboardShortcut("e")
                 }
-                .buttonStyle(ToolbarButton())
-                .help("Change the name and linked tools (⌘E)")
-                .accessibilityLabel("Edit project")
-                .keyboardShortcut("e")
             }
             .fixedSize()
             .padding(.top, 4)
@@ -285,7 +393,7 @@ struct ProjectDetailView: View {
             ForEach(repos, id: \.self) { repo in
                 ToolChip(service: .github, text: repo, url: URL(string: "https://github.com/\(repo)"))
             }
-            if !project.isComplete {
+            if !project.isComplete, !project.isDone {
                 Button { link(project.slack == nil ? .slack : .linear) } label: {
                     HStack(spacing: 5) {
                         Image(systemName: "plus").font(.system(size: 11, weight: .semibold))
@@ -613,7 +721,7 @@ struct ProjectDetailView: View {
             } else if messages.isEmpty {
                 QuietEmpty(symbol: "bubble.left", text: "No messages yet")
             } else {
-                if !slackExpanded { IntelligenceInvitation() }
+                if !slackExpanded, !project.isDone { IntelligenceInvitation() }
                 SlackThreadView(messages: messages, users: users, domain: app.slack?.domain,
                                 channelID: project.slack?.id, channelName: project.slack?.name, otherChannels: linkedChannels,
                                 shown: shownMessages, railMessages: railPlan.messages, readUpTo: lastRead,
@@ -739,7 +847,8 @@ struct ProjectDetailView: View {
     /// pace, in place (`RefreshCadence`): new messages every 20 s, running checks and a moving
     /// preview every 15 s, the rest every minute. The tick also moves the age line.
     private func keepCurrent() async {
-        guard Snapshotter.directory == nil else { return }
+        // A done project is not kept current: no poll runs behind its page.
+        guard Snapshotter.directory == nil, !project.isDone else { return }
         var ticks = 0
         while !Task.isCancelled {
             try? await Task.sleep(nanoseconds: 5_000_000_000)
@@ -889,7 +998,8 @@ struct ProjectDetailView: View {
     /// Asks for the summary of each long message the rail shows, the newest first: what is seen
     /// first is written first. One at a time. No network request.
     private func refreshMessageSummaries() {
-        guard let channel = project.slack?.id, intelligenceStatus.offers(.messageSummary) else { return }
+        // No summary is written for a done project: nothing there waits to be read quickly.
+        guard !project.isDone, let channel = project.slack?.id, intelligenceStatus.offers(.messageSummary) else { return }
         // Summaries kept on disk for messages now read have served.
         if let lastRead { intelligence.read(channel: channel, upTo: lastRead) }
         for message in railPlan.messages {
@@ -932,7 +1042,7 @@ struct ProjectDetailView: View {
         do {
             try await app.withSlack { try await $0.markRead(id, ts: seen) }
             // The Overview's "for you" follows at once, without a refresh.
-            store.slackRead(project.id, upTo: seen)
+            store.read(project.id, upTo: seen)
         } catch { app.report(error) }
     }
 

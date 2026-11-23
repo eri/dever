@@ -38,6 +38,24 @@ Tokens are stored in the macOS Keychain (`io.github.eri.dever`), projects in `~/
   read back from the workflows' result comments and runs, refreshed with the overview (every two minutes in the background, every minute on screen) and every 30 s
   after a command until the workflow answers.
 
+## Done projects
+
+A project is marked as done by hand, never by Dever: the rail tile's menu, the editor's recap, the project page, or the
+"Mark as done" Dever proposes on the Overview row and the project page once every issue has shipped (by the Delivery
+board's own rules, `ProjectCompletion.everyIssueShipped`) or its Linear project is Completed. A project without a Linear
+project is never proposed. The confirmation lists what Dever will do in the tools, each line ticked and untickable: move
+the Linear project to Completed when it is not, delete a preview that still runs (the team's `/delete-preview`). Nothing
+in Slack, nothing else on GitHub. A line that fails is said and can be tried again; the project is done either way, and
+"Undo" stays ten seconds.
+
+A done project leaves the rail and the list and joins "Done", folded under the Overview's list. Its page is read only
+(what shipped, what was left, the channel; no "Start here", no status change, no reply, no agent start), reads once when
+opened, and offers "Reopen project", which puts it back as it was (the question offers to move Linear back to its previous
+status, off by default). It is not refreshed and sends no alert, except one thing: its channel is looked at every ten
+minutes for a message that names you, which shows under "Done", counts in "for you", notifies (Settings › Notifications)
+and offers to reopen. One word everywhere: "Done". "Remove from Dever" is the other thing: it forgets the project.
+The model is `Project.doneAt`; the rules are `Model/ProjectCompletion.swift` (pure, tested), the writes `Model/CompletionStore.swift`.
+
 ## Coding agents
 
 "Start with <agent>" on an issue opens the user's preferred coding agent (Claude Code or Codex, asked at the first start; Settings › Agents) in the user's own tool (desktop app or terminal, Settings › Agents)
@@ -98,6 +116,12 @@ that state and shows every feature's interface (Settings › Intelligence includ
 `summaries-{dark,light}-{waiting,landing-0…5,landed}.png`: a rail of made-up long messages whose summaries land one after the other.
 With `DEVER_SNAPSHOT_OVERVIEW_DEMO=busy` the Overview's long mention shows as its summary (as its start with
 `DEVER_SNAPSHOT_INTELLIGENCE=off`; without the variable the Mac's own model writes it).
+Done projects: `DEVER_SNAPSHOT_DONE=list|list-open|mention|undo|confirm|reopen` with `DEVER_SNAPSHOT_OVERVIEW_DEMO=busy` adds two
+done projects to the demo (one row there already proposes "Mark as done"): `list` the Done list folded, `list-open` unfolded,
+`mention` with a message that names you, `undo` the "Undo" bar, `confirm` and `reopen` the two questions as
+`done-{confirm,reopen}-{dark,light}.png` (add `DEVER_SNAPSHOT_SCROLL_END=1` when the list is below the fold). Without the
+Overview demo, `DEVER_SNAPSHOT_DONE=page` (or `page-mention`) shows the captured project as a done one, best with
+`DEVER_SNAPSHOT_DELIVERY=done` for made-up issues. `DEVER_SNAPSHOT_RAIL=1` shows the tile menu with "Mark as done…".
 `DEVER_SNAPSHOT_WHY=1` with `DEVER_SNAPSHOT_DELIVERY=busy` opens the failed checks' card on the "Start here" tile; `DEVER_SNAPSHOT_WHY=open` with
 `DEVER_SNAPSHOT_ISSUE=1` shows a made-up failed pull request on the issue page with its card open.
 `DEVER_SNAPSHOT_ONBOARDING=1 DEVER_SNAPSHOT_STAGE=intelligence` with each value of `DEVER_SNAPSHOT_INTELLIGENCE` captures the onboarding's

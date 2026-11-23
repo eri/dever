@@ -83,6 +83,15 @@ enum AgentContextServer {
         }
         let now = Date()
         let detail = try await IssueStore.shared.detail(found.issue.id, updatedAt: found.issue.updatedAt, app: app)
+        // An issue of a done project is still answered, with the fact said first: Dever no
+        // longer refreshes that project, and nobody is expected to work on it.
+        if let note = found.project.flatMap(ProjectCompletion.agentNote) {
+            return note + "\n\n" + (try await answer(tool, found: found, detail: detail, app: app, now: now))
+        }
+        return try await answer(tool, found: found, detail: detail, app: app, now: now)
+    }
+
+    private static func answer(_ tool: String, found: Found, detail: LinearIssueDetail, app: AppState, now: Date) async throws -> String {
         switch tool {
         case "get_issue":
             return AgentContextText.issue(detail, readAt: found.readAt, now: now)

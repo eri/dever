@@ -276,7 +276,9 @@ Refresh every. "Volatile" is the cadence while something is in flight.
 | The worktrees Dever made for agents (branch, uncommitted work) | read on opening the agents' board and after a removal | | opening the board; Remove | no request: git, locally, two short commands per worktree. "Merged" is `GitHubStore`'s merged pull requests as last read |
 | A coding agent's session on an issue's branch (working, waiting for the user, finished; the agent's last sentence) | none: pushed by the agent's hooks, never fetched | | each hook call | no request: local, memory only (`AgentStore`), empty after a relaunch until the session speaks again. A "working" not heard for 10 min is drawn as old ("last heard 14 min ago"), never as current |
 | A coding agent's plan usage (what is left of its windows, as the tool reports it; Codex only: Claude Code has no outside read) | 5 min, while the "Start with" control, its menu or Settings › Agents is on screen; never in the background | | a start made from Dever (the next opening reads again); the menu opening | no request by Dever: the tool's own binary is run for one question (about 2 s, one child process) and makes its own call; memory only (`AgentUsageStore`). Past 5 min the value says its age; once its windows have reset it is no longer said |
-| Project lead, team, target date | 15 min | | | |
+| Project lead, team, target date, and the Linear project's own status (In Progress, Completed…) | 15 min | | "Mark as done" and "Reopen" (the status, local, at once); the confirmation opening (read then, whatever its age) | one small query; the status rides on the facts query, no request more |
+| A done project (marked as done in Dever) | none: it is not read behind the scenes, has no Overview row and sends no alert | | its page opening, Refresh on it (read once, no poll); reopening (read at once, alone) | nothing |
+| Mentions of you in a done project's channel (the one thing a done project is watched for) | 10 min, 30 min in Low Power Mode, whether Dever is in front or not | | the watch only (`CompletionStore.watch`, after the Overview's cycle); reading the message in Dever (local, at once) | one `conversations.history` per done project with a channel, from the newest message seen: about 0.2 kB when nothing is new, 6 an hour per project. Only when a mention is found or held: one `conversations.info` for Slack's read cursor. Replies inside a thread are not seen, as on the rows of active projects |
 | Slack members · custom emoji | 15 min · 1 h | | | disk copy |
 | Linear members' emails (to show their Slack photo, `PeopleIndex`) | 1 h | | | one `users { id email }` query; Slack's side rides on the members list above |
 | Catalogues in pickers (channels, Linear projects, repositories, pull requests) | on opening the picker | | | |
@@ -307,6 +309,10 @@ means the behaviour once sections 3.1 to 3.4 are in place.
 | Stay on the page | Others' activity | Up to the setting + 1 min | Visible budgets for mentions, reviews, CI |
 | Notification click | The alerted state | Opens the project; data as old as the cycle | Refresh that project's alerted resource first |
 | Leave the app and return, wake | Anything | Nothing | Activation trigger |
+| "Mark as done" on a row Dever proposes it on, then the confirmation | The Linear project's status; the preview (its delete command) | Not offered | The project leaves the list and the rail at once (local). The Linear move is optimistic in `IssueStore.moveProject`, replaced by Linear's answer, put back on refusal; the preview goes through `PreviewStore.delete`, watched every 30 s until the workflow answers. One failing is said in the confirmation with "Try again" and undoes neither the other nor the mark. "Undo" (10 s) reopens and moves Linear back; a deleted preview stays deleted |
+| Open a done project from the "Done" list and come back | Nothing: its page writes nothing | Not offered | Its page reads once on opening; the list is local |
+| Click a mention under a done project | Slack's read cursor | Not offered | Opens the message in the project's page; read there, it leaves the list at once (`OverviewStore.read`) |
+| "Reopen" | The project is read again; Linear only when asked in the question | Not offered | Back in the list and the rail at once; read alone, at once (`OverviewStore.relinked`). The Linear move back is the same optimistic write |
 
 ### Project page
 
@@ -331,6 +337,9 @@ means the behaviour once sections 3.1 to 3.4 are in place.
 | Edit the project (sheet) | Links, preview pull request | Page now reloads (6.0); Overview row stale | Load the changed services only |
 | Refresh | Everything on the page | Whole reload, Linear in full | Revalidate the page's resources |
 | Go to Overview or another project | | Page state discarded; next visit starts from skeletons (F4) | State is in the stores: instant |
+| "Mark as done" (the toolbar, or the line Dever shows when everything has shipped), "Not yet" | As on the Overview row; "Not yet" is local | Not offered | As on the Overview row. The proposal is worked out from the page's own delivery plan, so it cannot disagree with the board |
+| Stay on a done project's page | Anything, by others | Not offered | Nothing is read behind it: no poll, no read on activation. Refresh reads it once. Its age is said by the tools' own rows, and "Read only, as last read" |
+| "Reopen project" on a done project's page | As on the Overview | Not offered | As on the Overview; the page becomes the active project's page and reads at its usual pace |
 
 ### Issue page
 
@@ -353,6 +362,7 @@ means the behaviour once sections 3.1 to 3.4 are in place.
 | Open an issue from a row and come back | That issue | Not offered | The issue page's own rules; the board is derived from the stores |
 | "Open session" | Nothing Dever displays from a service | Not offered | Nothing to mark dirty |
 | Remove a worktree | A local folder; nothing remote | Not offered | The list is read again from git after the removal; a refusal is said under the list |
+| Open the board with worktrees and done projects | Nothing | Not offered | The done projects' issues are read once (an hour apart at most), to know which branches were theirs: such a worktree, with nothing uncommitted, is a leftover that can go |
 
 ### Slack room and thread
 
@@ -366,6 +376,8 @@ already exists for this).
 | --- | --- | --- | --- |
 | Open a picker | Channels, Linear projects, repositories, open pull requests | Loaded on opening | Keep (budget: on opening) |
 | Create a channel or a Linear project on save | The catalogue | Created, project saved | Keep; add the created item to the catalogue |
+| Add a Linear project that is Completed or canceled | Nothing remote | Not suggested in the list; found by searching, and then added as done | Keep: the listing asks each project's status in the same query |
+| "Mark as done" in the editor | As on the Overview row | Not offered | The editor closes and the window asks the same confirmation |
 | Save | The project's links | The project page reloads; the Overview reads that project alone, at once, when its channel, Linear project or repositories changed (`OverviewStore.relinked`, `refresh(project:)`) | Done |
 
 ### Settings

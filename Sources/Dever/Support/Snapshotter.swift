@@ -147,6 +147,20 @@ enum Snapshotter {
                 try? await Task.sleep(nanoseconds: 500_000_000)
             }
         }
+        // DEVER_SNAPSHOT_DONE=confirm|reopen: the "Mark as done" confirmation with its lines, or
+        // the "Reopen" question, over the Overview, in both modes: done-{confirm,reopen}-{dark,light}.png.
+        if let scene = CompletionStore.snapshotScene, ["confirm", "reopen"].contains(scene) {
+            for (themeName, appearance) in [("dark", NSAppearance.Name.darkAqua), ("light", .aqua)] {
+                NSApp.appearance = NSAppearance(named: appearance)
+                NotificationCenter.default.post(name: .showScreen, object: SidebarItem.overview)
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                NotificationCenter.default.post(name: .showSheet, object: scene == "confirm" ? "mark-done" : "reopen")
+                try? await Task.sleep(nanoseconds: 3_000_000_000)
+                capture(to: dir.appendingPathComponent("done-\(scene)-\(themeName).png"))
+                NotificationCenter.default.post(name: .showSheet, object: "none")
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+            }
+        }
         if ProcessInfo.processInfo.environment["DEVER_SNAPSHOT_SHEETS"] == "1" {
             // Sheets are captured dark unless DEVER_SNAPSHOT_SHEET_THEME=light.
             let light = ProcessInfo.processInfo.environment["DEVER_SNAPSHOT_SHEET_THEME"] == "light"

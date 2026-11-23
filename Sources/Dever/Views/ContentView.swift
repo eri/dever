@@ -19,6 +19,9 @@ struct ContentView: View {
     @State private var importSource: ImportSheet.Source?
     @State private var editing: Project?
     @State private var removing: Project?
+    /// The project whose "Mark as done" confirmation, or "Reopen" question, is open.
+    @State private var markingDone: Project?
+    @State private var reopening: Project?
     @AppStorage("onboardingDone") private var onboardingDone = false
     @AppStorage("displayName") private var displayName = ""
     @AppStorage(GenerativeAvatar.seedKey) private var avatarSeedRaw = ""
@@ -49,7 +52,7 @@ struct ContentView: View {
             showOnboarding = !onboardingDone || ProcessInfo.processInfo.environment["DEVER_ONBOARDING"] == "1"
             // Settings › Open at launch: back on the project left open, when it still exists.
             if Preferences.landing == .lastProject, let id = Preferences.lastProjectID,
-               app.projects.contains(where: { $0.id == id }) {
+               app.activeProjects.contains(where: { $0.id == id }) {
                 selection = .project(id)
             }
         }
@@ -68,7 +71,30 @@ struct ContentView: View {
         }
     }
 
+    /// The window, with the questions a done project asks: mark as done, reopen.
     private var main: some View {
+        mainBase
+        .sheet(item: $markingDone) { MarkDoneSheet(project: $0) }
+        .sheet(item: $reopening) { ReopenSheet(project: $0) }
+        // Asked from a row, the page, the editor or the tile's menu: one confirmation, here.
+        .onReceive(NotificationCenter.default.publisher(for: .markProjectDone)) { note in
+            guard let id = note.object as? UUID, let p = app.projects.first(where: { $0.id == id }), !p.isDone else { return }
+            // The editor may be the one asking: let its sheet leave first.
+            let wait = editing == nil ? 0 : 0.35
+            editing = nil
+            DispatchQueue.main.asyncAfter(deadline: .now() + wait) { markingDone = p }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .reopenProject)) { note in
+            guard let id = note.object as? UUID, let p = app.projects.first(where: { $0.id == id }), p.isDone else { return }
+            reopening = p
+        }
+        // A project just marked as done leaves the screen with it: back to the Overview.
+        .onChange(of: app.projects.filter(\.isDone).map(\.id)) { old, new in
+            if case .project(let id) = selection, new.contains(id), !old.contains(id) { selection = .overview }
+        }
+    }
+
+    private var mainBase: some View {
         HStack(spacing: 0) {
             rail
             Rectangle().fill(Theme.border).frame(width: 1)
@@ -79,6 +105,7 @@ struct ContentView: View {
                 case .project(let id):
                     if let p = app.projects.first(where: { $0.id == id }) {
                         ProjectDetailView(project: p, edit: { editing = p }).id(p.id)
+                            .environment(\.projectFrozen, p.isDone)
                     } else {
                         ContentUnavailableView("Project not found", systemImage: "questionmark.folder",
                                                description: Text("It may have been removed. Pick another project in the sidebar."))
@@ -104,7 +131,10 @@ struct ContentView: View {
             .environment(\.openSettings, { selection = .settings })
             .background(Theme.frame)
             .toolbarBackgroundHiddenIfAvailable()
-            .navigationDestination(for: IssueRoute.self) { IssueDetailView(route: $0) }
+            .navigationDestination(for: IssueRoute.self) { route in
+                IssueDetailView(route: route)
+                    .environment(\.projectFrozen, app.projects.first { $0.id == route.projectID }?.isDone == true)
+            }
             }
         }
         .onChange(of: selection) { _, value in
@@ -115,14 +145,16 @@ struct ContentView: View {
         // The rail's tooltips and the tile menu are drawn here, over the whole window, so the
         // rail's own clip (its scroll view) never cuts them.
         .tipHost()
+        // "Undo", for a few seconds after a project was marked as done, over any screen.
+        .overlay(alignment: .bottom) { DoneUndoBar() }
         .overlayPreferenceValue(RailMenuKey.self) { railMenuOverlay($0) }
         .closesOnOutsideClick(menuProject != nil) { Motion.run(Motion.ui, fade: true) { menuProject = nil } }
         .onReceive(NotificationCenter.default.publisher(for: .showRailMenu)) { note in
             // Snapshots: opens the first project's menu (or closes it with "none").
-            menuProject = (note.object as? String) == "none" ? nil : app.projects.first
+            menuProject = (note.object as? String) == "none" ? nil : app.activeProjects.first
         }
         .onReceive(NotificationCenter.default.publisher(for: .showRailTip)) { note in
-            forcedTip = (note.object as? String) == "none" ? nil : app.projects.first?.id
+            forcedTip = (note.object as? String) == "none" ? nil : app.activeProjects.first?.id
         }
         .onReceive(NotificationCenter.default.publisher(for: .openIssue)) { note in
             if let route = note.object as? IssueRoute { path.append(route) }
@@ -153,8 +185,10 @@ struct ContentView: View {
             if let dir = Snapshotter.directory { await Snapshotter.run(in: dir, projects: app.projects, app: app) }
         }
         .onReceive(NotificationCenter.default.publisher(for: .showSheet)) { note in
-            importSource = nil; showNew = false; githubSheet = false; editing = nil
+            importSource = nil; showNew = false; githubSheet = false; editing = nil; markingDone = nil; reopening = nil
             switch note.object as? String {
+            case "mark-done": markingDone = app.activeProjects.first { $0.name == "Onboarding" } ?? app.activeProjects.first
+            case "reopen": reopening = app.doneProjects.first
             case "import-slack": importSource = .slack
             case "import-linear": importSource = .linear
             case "new-project": showNew = true
@@ -186,7 +220,7 @@ struct ContentView: View {
             }
             Button("Cancel", role: .cancel) {}
         } message: { _ in
-            Text("Dever stops tracking it. The Slack channel and the Linear project are not changed.")
+            Text("Dever forgets it. The Slack channel and the Linear project are not changed. To keep it readable, mark it as done instead.")
         }
     }
 
@@ -199,6 +233,7 @@ struct ContentView: View {
                 RailMenu(project: project,
                          unread: store.snapshots[project.id]?.slack?.unread,
                          edit: { menuProject = nil; editing = project },
+                         done: { menuProject = nil; markingDone = project },
                          remove: { menuProject = nil; removing = project },
                          close: { menuProject = nil })
                          .background(GeometryReader { m in Color.clear.onAppear { menuHeight = m.size.height } })
@@ -238,9 +273,11 @@ struct ContentView: View {
             Rectangle().fill(Theme.border).frame(width: 28, height: 1).padding(.vertical, 8)
             ScrollView(showsIndicators: false) {
                 VStack(spacing: 6) {
-                    ForEach(app.projects) { p in projectTile(p) }
+                    // Done projects leave the rail: they are under "Done" on the Overview.
+                    ForEach(app.activeProjects) { p in projectTile(p).transition(Motion.pop) }
                     addMenu.frame(width: 40, height: 40)
                 }
+                .motion(Motion.move, value: app.activeProjects.map(\.id))
             }
             Spacer(minLength: 0)
             userTile.padding(.bottom, 14)
@@ -294,6 +331,7 @@ struct ContentView: View {
             .accessibilityAddTraits(on ? .isSelected : [])
             .accessibilityAction(named: "Edit project") { editing = p }
             .accessibilityAction(named: p.favorite == true ? "Unpin from top" : "Pin to top") { app.setFavorite(p, p.favorite != true) }
+            .accessibilityAction(named: "Mark as done") { markingDone = p }
             .accessibilityAction(named: "Remove from Dever") { removing = p }
     }
 
@@ -433,14 +471,16 @@ private struct RailMenuKey: PreferenceKey {
     static func reduce(value: inout Anchor<CGRect>?, nextValue: () -> Anchor<CGRect>?) { value = nextValue() ?? value }
 }
 
-/// A project tile's menu, in the app's own panel: edit, pin, the tools it links, and last, in
-/// the negative tone, removing it from Dever (the confirmation stays the same). No "Open":
-/// a left click on the tile already does that.
+/// A project tile's menu, in the app's own panel: edit, pin, the tools it links, then the two
+/// ways a project leaves the rail, each with what it means: "Mark as done" keeps it readable,
+/// "Remove from Dever" (negative tone, its own confirmation) forgets it. No "Open": a left
+/// click on the tile already does that.
 private struct RailMenu: View {
     @EnvironmentObject var app: AppState
     let project: Project
     let unread: Int?
     let edit: () -> Void
+    let done: () -> Void
     let remove: () -> Void
     let close: () -> Void
 
@@ -475,7 +515,8 @@ private struct RailMenu: View {
                 if let url = githubURL { MenuPanelRow(service: .github, title: "Pull requests on GitHub", url: url) }
             }
             MenuPanelDivider()
-            MenuPanelRow(symbol: "trash", title: "Remove from Dever…", destructive: true, action: remove)
+            MenuPanelRow(symbol: "checkmark.circle", title: "Mark as done…", detail: "Kept, read only", action: done)
+            MenuPanelRow(symbol: "trash", title: "Remove from Dever…", detail: "Forgotten by Dever", destructive: true, action: remove)
         }
         .onExitCommand(perform: close)
     }

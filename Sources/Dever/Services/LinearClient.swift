@@ -31,6 +31,11 @@ struct LinearProject: Codable, Identifiable, Hashable {
     var name: String
     var url: String
     var teams: Teams?
+    /// Where the project stands in Linear, when the listing asked for it.
+    var status: LinearProjectStatus?
+
+    /// Completed or canceled in Linear: not something to start following.
+    var isOver: Bool { status?.isCompleted == true || status?.type == "canceled" }
 }
 
 struct LinearIssue: Codable, Identifiable, Hashable {
@@ -278,7 +283,7 @@ struct LinearClient {
         for _ in 0..<10 {
             let r = try await query("""
             query($after: String) { projects(first: 100, after: $after) {
-              nodes { id name url teams { nodes { id key name } } }
+              nodes { id name url status { id name type } teams { nodes { id key name } } }
               pageInfo { hasNextPage endCursor } } }
             """, variables: ["after": after], as: R.self).projects
             all += r.nodes
@@ -335,14 +340,35 @@ struct LinearClient {
         struct R: Decodable {
             struct Person: Decodable { var name: String }
             struct Teams: Decodable { var nodes: [Person] }
-            struct P: Decodable { var targetDate: String?; var lead: Person?; var teams: Teams? }
+            struct P: Decodable { var targetDate: String?; var lead: Person?; var teams: Teams?; var status: LinearProjectStatus? }
             var project: P
         }
         let p = try await query("""
-        query($id: String!) { project(id: $id) { targetDate lead { name } teams { nodes { name } } } }
+        query($id: String!) { project(id: $id) { targetDate lead { name } teams { nodes { name } } status { id name type } } }
         """, variables: ["id": id], as: R.self).project
         return LinearProjectFacts(lead: p.lead?.name, team: p.teams?.nodes.first?.name,
-                                  targetDate: p.targetDate.flatMap(Self.dayFormatter.date(from:)))
+                                  targetDate: p.targetDate.flatMap(Self.dayFormatter.date(from:)), status: p.status)
+    }
+
+    /// The workspace's project statuses (Backlog, Planned, In Progress, Completed…), in Linear's order.
+    func projectStatuses() async throws -> [LinearProjectStatus] {
+        struct R: Decodable { struct C: Decodable { var nodes: [LinearProjectStatus] }; var projectStatuses: C }
+        return try await query("{ projectStatuses(first: 50) { nodes { id name type } } }", as: R.self).projectStatuses.nodes
+    }
+
+    /// Moves a project to a status; the answer is the status Linear kept.
+    func updateProject(id: String, statusID: String) async throws -> LinearProjectStatus {
+        struct R: Decodable {
+            struct P: Decodable { var status: LinearProjectStatus? }
+            struct U: Decodable { var success: Bool; var project: P? }
+            var projectUpdate: U
+        }
+        let r = try await query("""
+        mutation($id: String!, $input: ProjectUpdateInput!) { projectUpdate(id: $id, input: $input) {
+          success project { status { id name type } } } }
+        """, variables: ["id": id, "input": ["statusId": statusID]], as: R.self).projectUpdate
+        guard r.success, let status = r.project?.status else { throw AppError.message("Linear did not accept the change.") }
+        return status
     }
 
     /// Linear's dates without a time: "2026-03-31".

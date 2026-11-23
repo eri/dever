@@ -25,6 +25,9 @@ struct OverviewView: View {
     /// The projects whose items are all listed ("Show all").
     @State private var expanded: Set<UUID> = []
     @ObservedObject private var intelligence = IntelligenceStatus.shared
+    @ObservedObject private var completion = CompletionStore.shared
+    /// The "Done" list under the projects is unfolded.
+    @State private var doneOpen = ["list-open", "mention"].contains(CompletionStore.snapshotScene ?? "")
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     /// One project as the page sees it.
@@ -34,6 +37,8 @@ struct OverviewView: View {
         let snapshot: ProjectSnapshot?
         let waiting: [WaitingItem]
         let last: (text: String, date: Date)?
+        /// Why Dever proposes to mark it as done; nil when it does not.
+        var proposal: ProjectCompletion.Reason? = nil
         var id: UUID { project.id }
 
         /// Every Linear issue is done: nothing left to ship.
@@ -53,16 +58,49 @@ struct OverviewView: View {
     private var settings: OverviewSettings { app.overview }
 
     private var entries: [Entry] {
-        app.projects.map { p in
+        app.activeProjects.map { p in
             let s = store.snapshots[p.id]
+            let proposal = s.flatMap { s in
+                s.linear == nil ? nil : ProjectCompletion.proposal(p, everyIssueShipped: s.everyIssueShipped,
+                                                                   issues: s.linear?.total ?? 0, linearStatus: s.linear?.status)
+            }
             return Entry(project: p, status: p.status(s), snapshot: s,
                          waiting: s?.waiting(channel: p.slack?.name, channelID: p.slack?.id) ?? [],
-                         last: s?.lastActivity(channel: p.slack?.name))
+                         last: s?.lastActivity(channel: p.slack?.name), proposal: proposal)
         }
     }
 
     private var finishedCount: Int { entries.filter(\.isFinished).count }
-    private var waitingCount: Int { entries.reduce(0) { $0 + $1.waiting.count } }
+    private var waitingCount: Int { entries.reduce(0) { $0 + $1.waiting.count } + doneMentionCount }
+
+    // MARK: Done projects
+
+    /// A done project and the messages that named you there since: the one thing still watched.
+    struct DoneEntry: Identifiable {
+        let project: Project
+        let waiting: [WaitingItem]
+        var id: UUID { project.id }
+    }
+
+    /// The done projects, the latest first; the search narrows them like the list above.
+    private var doneEntries: [DoneEntry] {
+        app.doneProjects
+            .filter { search.isEmpty || $0.name.localizedCaseInsensitiveContains(search) }
+            .map { p in
+                DoneEntry(project: p, waiting: (completion.mentions[p.id] ?? []).map { m in
+                    WaitingItem(kind: .mention, text: "\(m.author): \(m.text)", date: m.date, target: .slack(ts: m.ts), author: m.author)
+                })
+            }
+    }
+
+    private var doneMentionCount: Int { app.doneProjects.reduce(0) { $0 + (completion.mentions[$1.id]?.count ?? 0) } }
+    /// Folded, the list still shows the projects where someone named you; a search shows its matches.
+    private var doneShown: [DoneEntry] {
+        doneOpen || !search.isEmpty ? doneEntries : doneEntries.filter { !$0.waiting.isEmpty }
+    }
+    private var doneOrder: String {
+        "\(doneOpen)|" + doneShown.map { "\($0.id.uuidString):\($0.waiting.count)" }.joined(separator: ",")
+    }
 
     /// The rows after the settings and the search: hidden finished projects out, then the order.
     private var visible: [Entry] {
@@ -114,7 +152,7 @@ struct OverviewView: View {
 
     /// Changes whenever a row moves or its items change, so the move can animate.
     private var order: String {
-        sections.map { "\($0.id)=" + $0.entries.map { "\($0.id.uuidString):\($0.waiting.count)" }.joined(separator: ",") }
+        sections.map { "\($0.id)=" + $0.entries.map { "\($0.id.uuidString):\($0.waiting.count):\($0.proposal != nil)" }.joined(separator: ",") }
             .joined(separator: ";")
     }
 
@@ -155,6 +193,7 @@ struct OverviewView: View {
                     VStack(alignment: .leading, spacing: 20) {
                         head.zIndex(1)
                         table
+                        if !app.doneProjects.isEmpty { doneList }
                     }
                     .padding(.horizontal, 28)
                     .padding(.vertical, 24)
@@ -223,7 +262,7 @@ struct OverviewView: View {
     /// How many projects, how many things wait for you (when any), how fresh it is.
     private var summary: some View {
         HStack(spacing: 0) {
-            Count(n: app.projects.count, word: app.projects.count == 1 ? "project" : "projects")
+            Count(n: app.activeProjects.count, word: app.activeProjects.count == 1 ? "project" : "projects")
             if waitingCount > 0 {
                 Text(" · ").accessibilityHidden(true)
                 Count(n: waitingCount, word: "for you")
@@ -304,8 +343,12 @@ struct OverviewView: View {
     private var filteredEmpty: some View {
         HStack(spacing: 12) {
             if !search.isEmpty {
-                Text("No project matches \u{201C}\(search)\u{201D}").foregroundStyle(Soot.muted)
+                Text(doneEntries.isEmpty ? "No project matches \u{201C}\(search)\u{201D}" : "No active project matches \u{201C}\(search)\u{201D}")
+                    .foregroundStyle(Soot.muted)
                 Button("Clear search") { search = "" }.buttonStyle(SecondaryButton())
+            } else if app.activeProjects.isEmpty {
+                Text("Every project is done").foregroundStyle(Soot.muted)
+                Button("Add project", action: newProject).buttonStyle(SecondaryButton())
             } else {
                 Text("Every project is finished and hidden").foregroundStyle(Soot.muted)
                 Button("Show finished projects") { app.overview.hideFinished = false }.buttonStyle(SecondaryButton())
@@ -315,6 +358,47 @@ struct OverviewView: View {
         .font(.system(size: 14))
         .padding(.horizontal, 12)
         .frame(height: settings.density.rowHeight + 8)
+    }
+
+    /// The done projects, under the list: one folded row with their count. Unfolded, each is a
+    /// row that opens its page (read only) and says when it was finished. A project where
+    /// someone named you since shows even while folded, with the message and the way to reopen.
+    private var doneList: some View {
+        VStack(spacing: 0) {
+            Button { Motion.run(Motion.move) { doneOpen.toggle() } } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "chevron.right").font(.system(size: 10, weight: .bold)).foregroundStyle(Soot.muted)
+                        .rotationEffect(.degrees(doneOpen ? 90 : 0))
+                        .frame(width: 28)
+                        .accessibilityHidden(true)
+                    Text("Done").font(.system(size: 13, weight: .semibold)).foregroundStyle(Soot.ink)
+                    Text(app.doneProjects.count, format: .number).font(.system(size: 13)).foregroundStyle(Soot.muted).monospacedDigit()
+                        .contentTransition(.numericText(value: Double(app.doneProjects.count)))
+                    if doneMentionCount > 0 { ForYouChip(count: doneMentionCount).transition(Motion.pop) }
+                    Spacer()
+                }
+                .padding(.horizontal, 12)
+                .frame(height: 40)
+            }
+            .buttonStyle(RowButton(lift: .ground))
+            .accessibilityLabel("Done, \(app.doneProjects.count) projects" + (doneMentionCount > 0 ? ", \(doneMentionCount) for you" : ""))
+            .accessibilityValue(doneOpen ? "Expanded" : "Collapsed")
+            .accessibilityHint("Shows the projects marked as done")
+            ForEach(doneShown) { entry in
+                DoneBlock(entry: entry, density: settings.density,
+                          open: { open(entry.project) },
+                          openItem: { item in
+                              ProjectFocus.set(item.target, for: entry.project.id)
+                              open(entry.project)
+                          })
+                    .transition(Motion.rise)
+            }
+        }
+        .padding(8)
+        .background(Soot.surface, in: RoundedRectangle(cornerRadius: 12))
+        .animation(reduceMotion ? nil : Motion.move, value: doneOrder)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Done projects")
     }
 
     /// No project at all: what a project is, in one line, and the way to add one.
@@ -600,6 +684,71 @@ private struct ProjectBlock: View {
     }
 }
 
+/// A done project in the "Done" list: dimmed mark, name, when it was finished. Its row opens
+/// the page, read only. With a message that names you: the message under it, and "Reopen".
+private struct DoneBlock: View {
+    let entry: OverviewView.DoneEntry
+    let density: OverviewSettings.Density
+    let open: () -> Void
+    let openItem: (WaitingItem) -> Void
+
+    private var project: Project { entry.project }
+    private var label: String { project.doneAt.map { ProjectCompletion.doneLabel($0) } ?? "Done" }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Button(action: open) {
+                HStack(spacing: 10) {
+                    ProjectMark(name: project.name, size: density == .compact ? 24 : 28).opacity(0.55)
+                    Text(project.name).font(.system(size: 14, weight: .medium)).foregroundStyle(Soot.ink)
+                        .lineLimit(1).truncationMode(.tail)
+                    if !entry.waiting.isEmpty { ForYouChip(count: entry.waiting.count) }
+                    Spacer(minLength: 12)
+                    HStack(spacing: 6) {
+                        Image(systemName: "checkmark.circle.fill").font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(Soot.muted).accessibilityHidden(true)
+                        Text(label).font(.system(size: 13)).foregroundStyle(Soot.muted).monospacedDigit()
+                    }
+                    // Room for "Reopen", drawn over the row so it takes its own click.
+                    Color.clear.frame(width: 96)
+                }
+                .padding(.horizontal, 12)
+                .frame(height: density.rowHeight)
+            }
+            .buttonStyle(RowButton(lift: .ground))
+            .overlay(alignment: .trailing) {
+                Button("Reopen") { NotificationCenter.default.post(name: .reopenProject, object: project.id) }
+                    .buttonStyle(entry.waiting.isEmpty ? AnyButtonStyle(TertiaryButton(tint: .muted, lift: Soot.ground))
+                                                       : AnyButtonStyle(SecondaryButton(size: .panel)))
+                    .fixedSize()
+                    .help("Reopen \(project.name): back in the rail and the list")
+                    .accessibilityLabel("Reopen \(project.name)")
+                    .padding(.trailing, 12)
+            }
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel("\(project.name), \(label)" + (entry.waiting.isEmpty ? "" : ", \(entry.waiting.count) for you"))
+            .accessibilityHint("Opens the project, read only")
+            if !entry.waiting.isEmpty {
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(entry.waiting.prefix(WaitingItem.listed)) { item in
+                        ItemRow(item: item, density: density, trailing: 0) { openItem(item) }
+                    }
+                }
+                .padding(.bottom, 6)
+                .accessibilityElement(children: .contain)
+                .accessibilityLabel("Waiting for you in \(project.name)")
+            }
+        }
+    }
+}
+
+/// One of two button roles, chosen at run time.
+private struct AnyButtonStyle: ButtonStyle {
+    private let make: (Configuration) -> AnyView
+    init<S: ButtonStyle>(_ style: S) { make = { AnyView(style.makeBody(configuration: $0)) } }
+    func makeBody(configuration: Configuration) -> some View { make(configuration) }
+}
+
 /// One thing waiting for you: its icon, one sentence, how long ago. Opens it inside Dever.
 /// A long Slack message is its summary once the Mac's model has written it (the page asks, the
 /// row only reads): the sparkle, the kind, the sentence, on the same line at the same height.
@@ -707,7 +856,7 @@ private struct ProjectRow: View {
                         .allowsHitTesting(false)
                 }
                 status.frame(width: Grid.status, alignment: .leading)
-                    .allowsHitTesting({ if case .link = current { true } else { false } }())
+                    .allowsHitTesting({ switch current { case .link, .propose: true; default: false } }())
                 pin
             }
             .padding(.trailing, 12)
@@ -716,6 +865,7 @@ private struct ProjectRow: View {
         .contextMenu {
             Button("Open \(project.name)", action: open)
             Button(favorite ? "Unpin from top" : "Pin to top") { favorite.toggle() }
+            Button("Mark as done…") { NotificationCenter.default.post(name: .markProjectDone, object: project.id) }
         }
         .animation(reduceMotion ? nil : .easeOut(duration: 0.25), value: loaded)
         .accessibilityElement(children: .combine)
@@ -777,6 +927,8 @@ private struct ProjectRow: View {
     private enum Status {
         case loading
         case link(ProjectEditorSheet.Step, String)
+        /// Everything has shipped, or Linear says Completed: Dever proposes, the user confirms.
+        case propose(ProjectCompletion.Reason)
         case blocked(symbol: String, tint: Color, text: String, help: String)
         case quiet(String)
         case clear
@@ -794,6 +946,7 @@ private struct ProjectRow: View {
         if project.slack == nil { return .link(.slack, "Link Slack") }
         guard let s = snapshot else { return .loading }
         if let state = s.errors[.linear], state.needsConnecting { return .link(.linear, "Reconnect Linear") }
+        if let reason = entry.proposal { return .propose(reason) }
         if s.github?.pipeline == .failing {
             let repos = s.github?.failingRepositories ?? []
             return .blocked(symbol: "xmark.circle.fill", tint: Theme.negative, text: "CI failing",
@@ -823,6 +976,7 @@ private struct ProjectRow: View {
         switch current {
         case .loading: "loading"
         case .link(_, let title): "missing a link: \(title)"
+        case .propose(let reason): "\(reason.line), can be marked as done"
         case .blocked(_, _, let text, _): text
         case .quiet(let text): text == "—" ? "" : text
         case .clear: "On track"
@@ -835,6 +989,15 @@ private struct ProjectRow: View {
             HStack(spacing: 8) { Skeleton(width: 40, height: 6, radius: 3); Skeleton(width: 64, height: 12) }
         case .link(let step, let title):
             linkButton(step, title)
+        case .propose(let reason):
+            Button { NotificationCenter.default.post(name: .markProjectDone, object: project.id) } label: {
+                Label("Mark as done", systemImage: "checkmark.circle").labelStyle(.titleAndIcon)
+            }
+            .buttonStyle(SecondaryButton(size: .panel))
+            .fixedSize()
+            .help("\(reason.line). Dever shows what it will do before anything happens.")
+            .accessibilityLabel("Mark \(project.name) as done")
+            .transition(.opacity)
         case .blocked(let symbol, let tint, let text, let help):
             HStack(spacing: 6) {
                 Image(systemName: symbol).font(.system(size: 12, weight: .semibold)).foregroundStyle(tint)

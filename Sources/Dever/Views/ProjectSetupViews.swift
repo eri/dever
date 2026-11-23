@@ -167,7 +167,7 @@ struct ProjectEditorSheet: View {
             Button("Remove project", role: .destructive) { remove() }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("Dever stops tracking it. The Slack channel and the Linear project are not changed.")
+            Text("Dever forgets it. The Slack channel and the Linear project are not changed. To keep it readable, mark it as done instead.")
         }
     }
 
@@ -260,7 +260,8 @@ struct ProjectEditorSheet: View {
 
     private var foundLinear: LinearProject? {
         guard nameOK else { return nil }
-        return Naming.closest(to: project.name, in: availableLinear) { $0.name }
+        // A Linear project that is over is not offered for a new project; the picker still lists it.
+        return Naming.closest(to: project.name, in: availableLinear.filter { !$0.isOver }) { $0.name }
     }
 
     private var linearAsk: some View {
@@ -617,6 +618,16 @@ struct ProjectEditorSheet: View {
                         .disabled(saving || !nameOK)
                     if !isNew {
                         Spacer(minLength: 0)
+                        // Finished rather than unwanted: kept and readable. The window asks, once this sheet has left.
+                        Button {
+                            NotificationCenter.default.post(name: .markProjectDone, object: project.id)
+                        } label: {
+                            Label("Mark as done", systemImage: "checkmark.circle")
+                        }
+                        .buttonStyle(TertiaryButton(tint: .muted, lift: Soot.surface, font: .system(size: 14, weight: .medium)))
+                        .disabled(saving)
+                        .help("Keeps the project, read only, under Done")
+                        .accessibilityHint("Asks before marking the project as done")
                         // The same question as the rail's "Remove from Dever", asked from the sheet.
                         Button { confirmingRemove = true } label: {
                             Label("Remove project", systemImage: "trash")
@@ -907,6 +918,8 @@ struct ImportSheet: View {
         var match: String?
         /// A repository named like the project, where the mode lets a project have its own.
         var repo: String?
+        /// Completed or canceled in Linear: listed only when searched for, and added as done.
+        var over = false
     }
 
     private var isNarrowed: Bool { source == .slack && narrowed && search.isEmpty }
@@ -931,13 +944,14 @@ struct ImportSheet: View {
                 .filter { !app.linkedLinearIDs.contains($0.id) }
                 .map { lp in
                     Candidate(id: lp.id, title: lp.name, projectName: lp.name,
-                              match: slackMatch(for: lp.name).map { "#\($0.name)" }, repo: repoMatch(for: lp.name))
+                              match: slackMatch(for: lp.name).map { "#\($0.name)" }, repo: repoMatch(for: lp.name), over: lp.isOver)
                 }
         }
     }
 
+    /// A Linear project that is over is not suggested; a search for it still finds it.
     private var candidates: [Candidate] {
-        guard !search.isEmpty else { return rows }
+        guard !search.isEmpty else { return rows.filter { !$0.over } }
         return rows.filter { $0.title.localizedCaseInsensitiveContains(search) }
     }
 
@@ -1065,6 +1079,8 @@ struct ImportSheet: View {
                 var p = Project(name: lp.name, linear: .init(id: lp.id, name: lp.name, url: lp.url))
                 if let ch = slackMatch(for: lp.name) { p.slack = .init(id: ch.id, name: ch.name) }
                 if let repo = repoMatch(for: lp.name) { p.githubRepos = [repo]; p.usesWorkspaceRepository = false }
+                // Already over in Linear: it joins the Done list, readable, not the rail.
+                if lp.isOver { p.doneAt = Date() }
                 app.upsert(p)
             }
         }
@@ -1088,6 +1104,8 @@ private struct ImportRow: View {
                     Text(c.title).font(.system(size: 14, weight: .medium)).foregroundStyle(Soot.ink).lineLimit(1)
                     if c.projectName != c.title {
                         Text(c.projectName).font(.system(size: 12)).foregroundStyle(Soot.muted).lineLimit(1)
+                    } else if c.over {
+                        Text("Over in Linear · added as done").font(.system(size: 12)).foregroundStyle(Soot.muted).lineLimit(1)
                     }
                 }
                 Spacer(minLength: 12)

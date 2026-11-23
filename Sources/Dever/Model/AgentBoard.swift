@@ -75,15 +75,20 @@ struct AgentWorktreeEntry: Identifiable, Equatable {
         case notMerged
         /// Its pull request is merged and nothing is left in it: it can be removed.
         case removable
+        /// Its issue belongs to a project marked as done and nothing uncommitted is left in
+        /// it: a leftover that can go, merged or not (the branch stays).
+        case leftover
     }
 
-    func standing(sessions: [AgentSession], mergedBranches: Set<String>) -> Standing {
+    /// - Parameter doneBranches: the branches of the issues of projects marked as done.
+    func standing(sessions: [AgentSession], mergedBranches: Set<String>, doneBranches: Set<String> = []) -> Standing {
         if let session = sessions.first(where: { $0.state != .ended && $0.cwd.map { URL(fileURLWithPath: $0).standardizedFileURL.path } == path.standardizedFileURL.path }) {
             return .inUse(session.tool)
         }
         if dirty { return .uncommitted }
-        guard let branch, mergedBranches.contains(branch.lowercased()) else { return .notMerged }
-        return .removable
+        guard let branch else { return .notMerged }
+        if mergedBranches.contains(branch.lowercased()) { return .removable }
+        return doneBranches.contains(branch.lowercased()) ? .leftover : .notMerged
     }
 }
 

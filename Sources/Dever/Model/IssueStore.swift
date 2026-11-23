@@ -44,6 +44,11 @@ final class IssueStore: ObservableObject {
     @Published private(set) var blockers: [String: [String: [String]]] = [:]
     /// Rendered descriptions and comment bodies, keyed by text hash: rendering is the slow part.
     @Published private(set) var rendered: [Int: [MarkdownBlock]] = [:]
+    /// Each Linear project's own status as last read or written here: what "Mark as done"
+    /// moves, and one of the two things Dever proposes it from.
+    @Published private(set) var statuses: [String: LinearProjectStatus] = [:]
+    /// The workspace's project statuses, asked once: where "Completed" is found.
+    private var projectStatuses: [LinearProjectStatus]?
     private var teams: [String: (context: LinearTeamContext, at: Date)] = [:]
     private var facts: [String: (facts: LinearProjectFacts, at: Date)] = [:]
     private var listLoads: [String: Task<[LinearIssue], Error>] = [:]
@@ -96,7 +101,43 @@ final class IssueStore: ObservableObject {
         if let hit = facts[id], Date().timeIntervalSince(hit.at) < teamTTL { return hit.facts }
         let found = try await app.withLinear { try await $0.projectFacts(id: id) }
         facts[id] = (found, Date())
+        if let status = found.status, statuses[id] != status { statuses[id] = status }
         return found
+    }
+
+    /// The project's status in Linear, read now: what the confirmation of "Mark as done" shows.
+    func status(project id: String, app: AppState) async throws -> LinearProjectStatus? {
+        facts[id] = nil
+        return try await facts(project: id, app: app).status
+    }
+
+    /// Moves the Linear project to a status: shown at once, replaced by Linear's answer, put
+    /// back when Linear refuses. Invalidates nothing else: the project's issues do not change.
+    /// - Parameter target: the status itself, or nil for the workspace's first "completed" one.
+    /// - Returns: the status the project was in before.
+    @discardableResult
+    func moveProject(_ id: String, to target: LinearProjectStatus? = nil, app: AppState) async throws -> LinearProjectStatus? {
+        let previous = statuses[id]
+        var goal = target
+        if goal == nil {
+            if projectStatuses == nil { projectStatuses = try await app.withLinear { try await $0.projectStatuses() } }
+            goal = projectStatuses?.first(where: \.isCompleted)
+        }
+        guard let goal else { throw AppError.message("Linear has no Completed status for projects.") }
+        setStatus(goal, project: id)
+        do {
+            let confirmed = try await app.withLinear { try await $0.updateProject(id: id, statusID: goal.id) }
+            setStatus(confirmed, project: id)
+        } catch {
+            setStatus(previous, project: id)
+            throw error
+        }
+        return previous
+    }
+
+    private func setStatus(_ status: LinearProjectStatus?, project id: String) {
+        statuses[id] = status
+        if var hit = facts[id] { hit.facts.status = status; facts[id] = hit }
     }
 
     /// What the delivery plan needs beyond the rows: who is looking, and what blocks what.

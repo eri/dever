@@ -36,6 +36,9 @@ struct IssueDetailView: View {
     /// The description opens on its first lines: Dever is for triage, Linear for reading.
     @State private var descriptionExpanded = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// The issue of a done project: read, with nothing that writes (status, priority, assignee,
+    /// an agent's proposal, starting an agent).
+    @Environment(\.projectFrozen) private var frozen
 
     private let measure: CGFloat = 680   // about 70 characters at 15pt, padding included
     private let aside: CGFloat = 312
@@ -182,9 +185,9 @@ struct IssueDetailView: View {
         let explains = explainsFailures && intelligence.offers(.explainFailure)
         return VStack(alignment: .leading, spacing: 10) {
           FlowRow(spacing: 8) {
-            statusMenu(current)
-            priorityMenu(current)
-            assigneeMenu(current)
+            statusMenu(current).disabled(frozen)
+            priorityMenu(current).disabled(frozen)
+            assigneeMenu(current).disabled(frozen)
             if let due = current.dueDate, let text = LinearDate.short(due) {
                 let late = LinearDate.isPast(due)
                 signal(symbol: late ? "calendar.badge.exclamationmark" : "calendar", text: late ? "Due \(text) · late" : "Due \(text)",
@@ -328,7 +331,7 @@ struct IssueDetailView: View {
     private func reading(_ d: LinearIssueDetail) -> some View {
         VStack(alignment: .leading, spacing: 16) {
             // What the agent left when it finished: first, since it is what the developer came for.
-            if proposals.proposal(for: d.identifier) != nil, let project = app.projects.first(where: { $0.id == route.projectID }) {
+            if !frozen, proposals.proposal(for: d.identifier) != nil, let project = app.projects.first(where: { $0.id == route.projectID }) {
                 AgentProposalBlock(project: project, issue: row ?? d.asRow, showsCriteria: true)
             }
             card(symbol: "doc.text", title: "Description") {
@@ -399,7 +402,7 @@ struct IssueDetailView: View {
                             caption("Agent") { AgentSessionLine(session: session) }
                         }
                         // To do or in progress (not in review or QA): an agent can pick it up from here.
-                        if ["unstarted", "backlog", "started"].contains(current.state.type), !Delivery.isReviewState(current.state.name),
+                        if !frozen, ["unstarted", "backlog", "started"].contains(current.state.type), !Delivery.isReviewState(current.state.name),
                            let project = app.projects.first(where: { $0.id == route.projectID }) {
                             AgentStartMenu(project: project, issue: current, title: "Open with", fill: Soot.ground,
                                            edge: .topLeading, open: $agentMenu,

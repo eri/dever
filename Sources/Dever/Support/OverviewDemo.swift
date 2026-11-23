@@ -21,7 +21,7 @@ enum OverviewDemo {
         return .init(SlackMessage(ts: ts, user: "U1", text: text), users: users, languageCode: { _ in "en" })
     }
 
-    private static func make(busy: Bool) -> (projects: [Project], snapshots: [UUID: ProjectSnapshot]) {
+    @MainActor private static func make(busy: Bool) -> (projects: [Project], snapshots: [UUID: ProjectSnapshot]) {
         let now = Date()
         func ago(_ minutes: Double) -> Date { now.addingTimeInterval(-minutes * 60) }
         func ts(_ minutes: Double) -> String { String(format: "%.6f", ago(minutes).timeIntervalSince1970) }
@@ -81,6 +81,8 @@ enum OverviewDemo {
         s = ProjectSnapshot()
         s.linear = linear(done: 8, total: 8)
         s.delivery = delivery(done: 8, total: 8)
+        // Everything has shipped: Dever proposes "Mark as done" on this row.
+        s.everyIssueShipped = true
         s.slack = .init(messagesThisWeek: 0, lastActivity: ago(6 * 24 * 60), lastAuthor: "Marco", unread: 0)
         g = ProjectSnapshot.GitHubStats(openPRs: 0, pipeline: .passing)
         g.lastMerged = (212, "sam", ago(3 * 24 * 60))
@@ -101,7 +103,31 @@ enum OverviewDemo {
                         firstUnreadTS: busy ? ts(23 * 60) : nil, lastUnreadAt: busy ? ago(23 * 60) : nil)
         snapshots[leaderboard.id] = s
 
-        return ([checkout, billing, onboarding, search, leaderboard], snapshots)
+        // DEVER_SNAPSHOT_DONE: two projects already done, under the list.
+        var done: [Project] = []
+        if CompletionStore.snapshotScene != nil {
+            var referral = project(6, "Referral")
+            referral.doneAt = now.addingTimeInterval(-9 * 86_400)
+            referral.linearStatusBeforeDone = LinearProjectStatus(id: "demo-started", name: "In Progress", type: "started")
+            var invoices = project(7, "Invoices")
+            invoices.doneAt = now.addingTimeInterval(-47 * 86_400)
+            done = [referral, invoices]
+        }
+        return ([checkout, billing, onboarding, search, leaderboard] + done, snapshots)
+    }
+
+    /// `DEVER_SNAPSHOT_DONE=mention`: someone named you in a done project's channel.
+    @MainActor static var doneMentions: [UUID: [CompletionStore.Mention]] {
+        guard CompletionStore.snapshotScene == "mention" else { return [:] }
+        let at = Date().addingTimeInterval(-35 * 60)
+        return [id(6): [.init(ts: String(format: "%.6f", at.timeIntervalSince1970), author: "Ana",
+                              text: "@Sam the referral links 404 since this morning, can you look?", date: at)]]
+    }
+
+    /// `DEVER_SNAPSHOT_DONE=undo`: a project was just marked as done.
+    @MainActor static var undo: CompletionStore.Undo? {
+        guard CompletionStore.snapshotScene == "undo" else { return nil }
+        return .init(project: id(6), name: "Referral", movedLinear: true, deletedPreview: true)
     }
 
     /// The release line of the demo: production five days ago, staging an hour ago with its

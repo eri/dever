@@ -15,7 +15,8 @@ struct AgentBoardView: View {
     @State private var problem: String?
 
     private var groups: [AgentBoard.Group] {
-        AgentBoard.groups(sessions: Array(agents.sessions.values), projects: app.projects) { project in
+        // Active projects first; the sessions left on a done project come after them.
+        AgentBoard.groups(sessions: Array(agents.sessions.values), projects: app.activeProjects + app.doneProjects) { project in
             project.linear.map { issues.issues(project: $0.id) } ?? []
         }
     }
@@ -71,8 +72,16 @@ struct AgentBoardView: View {
 
     private func section(_ group: AgentBoard.Group) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text(group.project?.name ?? "Other folders").font(.system(size: 13, weight: .semibold)).foregroundStyle(Soot.ink)
-                .accessibilityAddTraits(.isHeader)
+            HStack(spacing: 8) {
+                Text(group.project?.name ?? "Other folders").font(.system(size: 13, weight: .semibold)).foregroundStyle(Soot.ink)
+                    .accessibilityAddTraits(.isHeader)
+                // A session left open on a project marked as done: nothing waits there any more.
+                if group.project?.isDone == true {
+                    Pill(text: "Done", tone: .neutral)
+                    Text("Left over: close the session when you no longer need it")
+                        .font(.system(size: 12)).foregroundStyle(Soot.muted).lineLimit(1)
+                }
+            }
             VStack(spacing: 0) {
                 ForEach(Array(group.rows.enumerated()), id: \.element.id) { index, row in
                     VStack(alignment: .leading, spacing: 6) {
@@ -128,6 +137,12 @@ struct AgentBoardView: View {
         return Set((known?.merged ?? []).map { $0.head.ref.lowercased() })
     }
 
+    /// The branches of the issues of done projects, as far as their issues are held.
+    private var doneBranches: Set<String> {
+        Set(app.doneProjects.flatMap { p in p.linear.map { issues.issues(project: $0.id) } ?? [] }
+            .compactMap { $0.branchName?.lowercased() }.filter { !$0.isEmpty })
+    }
+
     @ViewBuilder private var worktreeSection: some View {
         if let worktrees, !worktrees.isEmpty {
             VStack(alignment: .leading, spacing: 10) {
@@ -136,7 +151,8 @@ struct AgentBoardView: View {
                     .accessibilityAddTraits(.isHeader)
                 VStack(spacing: 0) {
                     ForEach(Array(worktrees.enumerated()), id: \.element.id) { index, entry in
-                        let standing = entry.standing(sessions: Array(agents.sessions.values), mergedBranches: merged(entry.repository))
+                        let standing = entry.standing(sessions: Array(agents.sessions.values), mergedBranches: merged(entry.repository),
+                                                      doneBranches: doneBranches)
                         HStack(spacing: 12) {
                             Image(systemName: "arrow.triangle.branch").font(.system(size: 13, weight: .medium))
                                 .foregroundStyle(Soot.muted).frame(width: 18).accessibilityHidden(true)
@@ -154,6 +170,13 @@ struct AgentBoardView: View {
                                     .disabled(removing != nil)
                                     .help("Its pull request is merged and nothing is left in it. The branch stays.")
                                     .accessibilityLabel("Remove the worktree of \(entry.branch ?? entry.path.lastPathComponent)")
+                            case .leftover:
+                                Text("Project done").font(.system(size: 13)).foregroundStyle(Soot.muted)
+                                Button(removing == entry.id ? "Removing…" : "Remove") { remove(entry) }
+                                    .buttonStyle(DestructiveButton())
+                                    .disabled(removing != nil)
+                                    .help("Its project is marked as done and nothing uncommitted is left in it. The branch stays.")
+                                    .accessibilityLabel("Remove the worktree of \(entry.branch ?? entry.path.lastPathComponent), left from a done project")
                             case .inUse(let tool):
                                 Text("\(tool.label) is in it").font(.system(size: 13)).foregroundStyle(Soot.muted)
                             case .uncommitted:
@@ -179,6 +202,12 @@ struct AgentBoardView: View {
     private func scan() async {
         let clones = AgentPreferences.clones
         worktrees = await Task.detached(priority: .utility) { AgentWorktrees.scan(clones: clones) }.value
+        // Done projects are no longer read behind the scenes: with worktrees to judge, their
+        // issues are read once here (an hour at most apart), to know which branches were theirs.
+        guard worktrees?.isEmpty == false, Snapshotter.directory == nil else { return }
+        for project in app.doneProjects {
+            if let linear = project.linear?.id { _ = try? await issues.load(project: linear, maxAge: 3600, app: app) }
+        }
     }
 
     private func remove(_ entry: AgentWorktreeEntry) {
