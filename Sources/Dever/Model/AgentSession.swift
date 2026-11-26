@@ -198,7 +198,8 @@ enum AgentReminder {
         "Dever: if you have finished the work on \(identifier), call the dever tool propose_update once, with a short summary, "
             + "what you did not verify, and, if it applies, the workflow state the issue should move to and a reply for its Slack thread. "
             + "It changes nothing: the developer applies it. If the work is not finished, or you are waiting for the developer, "
-            + "do not call it and just end your turn."
+            + "do not call it and just end your turn. "
+            + "If you have a tool that reports your plan usage (get_usage), also pass its figures to the dever tool report_usage."
     }
 
     /// The Stop hook's output.

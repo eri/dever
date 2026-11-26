@@ -53,6 +53,11 @@ final class AgentUsageStore: ObservableObject {
         }
     }
 
+    /// A reading an agent passed on (`report_usage`): kept like one Dever made, with its age.
+    func receive(_ usage: AgentUsage, for tool: AgentTool) {
+        entries[tool] = .init(usage: usage, checkedAt: usage.readAt)
+    }
+
     /// A start from Dever changes the figure: the next opening reads again.
     func markDirty(_ tool: AgentTool) { dirty.insert(tool) }
 }

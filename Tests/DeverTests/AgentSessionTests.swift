@@ -183,7 +183,7 @@ final class AgentSessionTests: XCTestCase {
         XCTAssertEqual((answers[0]["result"] as? [String: Any])?["protocolVersion"] as? String, "2025-03-26")
         XCTAssertEqual(answers[1]["id"] as? String, "two")
         let listed = ((answers[1]["result"] as? [String: Any])?["tools"] as? [[String: Any]])?.compactMap { $0["name"] as? String }
-        XCTAssertEqual(listed, ["get_issue", "get_thread", "get_pull_requests", "propose_update"])
+        XCTAssertEqual(listed, ["get_issue", "get_thread", "get_pull_requests", "propose_update", "report_usage"])
         XCTAssertEqual((answers[2]["result"] as? [String: Any])?["isError"] as? Bool, true)
         // Without Dever the command answers for it, with the request's own id.
         let alone = try await ask([#"{"jsonrpc":"2.0","id":7,"method":"tools/list"}"#, #"{"jsonrpc":"2.0","method":"notifications/initialized"}"#],
@@ -278,7 +278,7 @@ final class AgentSessionTests: XCTestCase {
         // A switched-off agent is offered nothing.
         XCTAssertEqual((AgentMCP.listing(allowed: false)["tools"] as? [Any])?.count, 0)
         let offered = try XCTUnwrap(AgentMCP.listing(allowed: true)["tools"] as? [[String: Any]])
-        XCTAssertEqual(offered.count, 4)
+        XCTAssertEqual(offered.count, 5)
         // Only the proposal is not read-only, and it asks for a summary.
         let propose = try XCTUnwrap(offered.first { $0["name"] as? String == "propose_update" })
         XCTAssertEqual((propose["annotations"] as? [String: Bool])?["readOnlyHint"], false)
@@ -456,5 +456,27 @@ final class AgentSessionTests: XCTestCase {
         XCTAssertTrue(output["reason"]?.contains("propose_update") == true)
         XCTAssertTrue(output["reason"]?.contains("ENG-1") == true)
         XCTAssertTrue(AgentPlugin.hookScript.contains("printf"))
+    }
+
+    func testAnAgentsUsageReportIsReadOnlyFromItsFigures() throws {
+        let now = Date(timeIntervalSince1970: 1_794_571_200)
+        // Numbers may come as numbers: they are read as their text.
+        let request = #"{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"report_usage","arguments":{"issue":"","five_hour_used":38,"five_hour_resets":"2026-11-13T14:10:00Z","week_used":"20%","plan":"Team","flag":true}}}"#
+        guard case .call(let call)? = AgentMCP.read(Data(request.utf8))?.request else { return XCTFail("not a call") }
+        XCTAssertEqual(call.arguments["five_hour_used"], "38")
+        XCTAssertNil(call.arguments["flag"])
+        let usage = try XCTUnwrap(AgentUsage.reported(call.arguments, at: now))
+        XCTAssertEqual(usage.windows.map(\.minutes), [300, 10_080])
+        XCTAssertEqual(usage.windows.map(\.leftPercent), [62, 80])
+        XCTAssertEqual(usage.windows[0].resetsAt, Date(timeIntervalSince1970: 1_794_579_000))
+        XCTAssertNil(usage.windows[1].resetsAt)
+        XCTAssertEqual(usage.plan, "Team")
+        XCTAssertFalse(usage.limitReached)
+        XCTAssertTrue(try XCTUnwrap(AgentUsage.reported(["five_hour_used": "100"], at: now)).limitReached)
+        XCTAssertEqual(try XCTUnwrap(AgentUsage.reported(["week_used": "140"], at: now)).windows[0].leftPercent, 0)
+        // No figure, no reading.
+        XCTAssertNil(AgentUsage.reported(["plan": "Team", "five_hour_used": "soon"], at: now))
+        XCTAssertTrue(AgentPlugin.skill.contains("report_usage"))
+        XCTAssertTrue(AgentReminder.reason(identifier: "ENG-1").contains("report_usage"))
     }
 }

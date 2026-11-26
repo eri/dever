@@ -1760,7 +1760,7 @@ private struct AgentCard: View {
                 }
             }
             .help(usage.map { "\($0.line(at: now))\nUpdated \($0.readAt.formatted(date: .omitted, time: .shortened))" }
-                  ?? (tool.usageIsReadable ? "\(tool.label) is asked when this page opens" : "\(tool.label) does not let another app read its usage yet"))
+                  ?? (tool.usageIsReadable ? "\(tool.label) is asked when this page opens" : "\(tool.label) passes its usage to Dever from a session on an issue (Project context on)"))
             .accessibilityElement(children: .ignore)
             .accessibilityLabel("Left: \(usage.map { $0.line(at: now) } ?? quiet(usage, now: now))")
         }
@@ -1770,7 +1770,7 @@ private struct AgentCard: View {
         if let usage { return usage.short(at: now) }
         if let problem = entry?.problem { return problem }
         if entry?.loading == true { return "Asking…" }
-        return tool.usageIsReadable ? "Not read yet" : "Not readable yet"
+        return tool.usageIsReadable ? "Not read yet" : "Not reported yet"
     }
 
     private func change(connect: Bool) {

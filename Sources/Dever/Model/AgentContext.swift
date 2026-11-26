@@ -39,6 +39,15 @@ enum AgentMCP {
                      ("status", "The workflow state you suggest for the issue, by its name (for example \"In Review\"), if it should move.", false),
                      ("reply", "A short reply to post in the issue's Slack thread, in the thread's language, if the people there should know.", false)],
               readOnly: false),
+        .init(name: "report_usage",
+              description: "Pass Dever what is left of your plan, as your own usage tool reports it (in the Claude desktop app's Code sessions, get_usage). Dever shows it to the developer with its age and uses it to suggest the agent with the most room. Call it once, at the start of a session on an issue.",
+              argument: "The issue you work on, like ENG-123 (or an empty string).",
+              more: [("five_hour_used", "Percent of the 5-hour window used, a number like 38.", false),
+                     ("five_hour_resets", "When the 5-hour window resets, ISO 8601 like 2026-11-26T14:10:00Z.", false),
+                     ("week_used", "Percent of the weekly limit (all models) used, a number like 20.", false),
+                     ("week_resets", "When the weekly limit resets, ISO 8601.", false),
+                     ("plan", "The plan's name, as the tool says it.", false)],
+              readOnly: false),
     ]
 
     static let instructions = "Dever is the developer's project dashboard on this Mac. These tools read what it knows about a Linear issue: the issue itself, the Slack thread it came from, its pull requests and checks. propose_update leaves your account of the work for the developer to act on. None of them changes anything in Linear, Slack or GitHub."
@@ -73,7 +82,12 @@ enum AgentMCP {
         case "ping": return (.ping, id)
         case "tools/list": return (.list, id)
         case "tools/call":
-            let arguments = (params["arguments"] as? [String: Any] ?? [:]).compactMapValues { $0 as? String }
+            // Strings, and numbers as their text (a percent may come as either).
+            let arguments = (params["arguments"] as? [String: Any] ?? [:]).compactMapValues { value -> String? in
+                if let text = value as? String { return text }
+                if let number = value as? NSNumber, CFGetTypeID(number) != CFBooleanGetTypeID() { return number.stringValue }
+                return nil
+            }
             return (.call(.init(tool: params["name"] as? String ?? "", arguments: arguments)), id)
         default: return (.unknown(method), id)
         }

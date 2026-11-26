@@ -33,6 +33,15 @@ enum AgentContextServer {
             guard AgentMCP.tools.contains(where: { $0.name == call.tool }) else {
                 return AgentMCP.failure(code: -32602, "Dever has no tool named \(call.tool)", id: id)
             }
+            if call.tool == "report_usage" {
+                // Codex's usage Dever reads itself, from Codex; an agent's report is for the tools it cannot read.
+                guard !tool.usageIsReadable else { return AgentMCP.text("Dever reads \(tool.label)'s usage itself: nothing to pass.", id: id) }
+                guard let usage = AgentUsage.reported(call.arguments, at: Date()) else {
+                    return AgentMCP.text("Give at least five_hour_used or week_used, as numbers.", failed: true, id: id)
+                }
+                AgentUsageStore.shared.receive(usage, for: tool)
+                return AgentMCP.text("Thanks: Dever shows it to the developer.", id: id)
+            }
             guard let identifier = call.issue?.trimmingCharacters(in: .whitespaces), !identifier.isEmpty else {
                 return AgentMCP.text("Give the issue's identifier, like ENG-123.", failed: true, id: id)
             }

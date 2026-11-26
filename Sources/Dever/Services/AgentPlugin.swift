@@ -19,7 +19,7 @@ enum AgentPluginError: LocalizedError, Equatable {
 /// tools' configuration files. "Disconnect" has the tool remove it.
 enum AgentPlugin {
     static let name = "dever"
-    static let version = "1.3.0"
+    static let version = "1.4.0"
     static let summary = "Tells Dever, on this Mac, when a session starts, works, waits for you and finishes, and lets the agent read the issue it works on."
 
     /// The command every hook runs.
@@ -102,6 +102,8 @@ enum AgentPlugin {
     - `get_issue`: the issue as Linear has it, with its comments, its parent, what blocks it and its links. Call it first: the brief you were given is short on purpose.
     - `get_thread`: the Slack thread the issue came from, when there is one. Decisions and constraints are often there and not in the issue.
     - `get_pull_requests`: the issue's pull requests, their checks and reviews, and how old that reading is.
+
+    If you have a tool that reports your plan usage (in the Claude desktop app's Code sessions, `get_usage`), call it once at the start of a session on an issue and pass the figures to `report_usage`: percent used and reset time of the 5-hour window and of the weekly limit, and the plan's name. Skip it if you have no such tool.
 
     When you have finished the work on an issue, call `propose_update` once with a short account of what you did, what you did not verify, and, if it applies, the state the issue should move to and a reply for its Slack thread. It changes nothing: the developer sees it in Dever and applies, edits or dismisses it. Do not move the issue or post in Slack yourself unless the developer asked you to.
 

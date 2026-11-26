@@ -207,3 +207,24 @@ enum AgentRecommendation {
         return Pick(tool: best.tool, reason: best.left == 0 ? "limit reached everywhere" : "\(best.left)% left")
     }
 }
+
+extension AgentUsage {
+    /// What an agent passes to `report_usage`, read from its own usage tool. Nil when no window
+    /// came with a figure: nothing is drawn from a guess.
+    static func reported(_ arguments: [String: String], at now: Date) -> AgentUsage? {
+        let iso = ISO8601DateFormatter()
+        let fractional = ISO8601DateFormatter()
+        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        func percent(_ key: String) -> Double? {
+            arguments[key].flatMap { Double($0.replacingOccurrences(of: "%", with: "").trimmingCharacters(in: .whitespaces)) }
+                .map { min(max($0, 0), 100) }
+        }
+        func date(_ key: String) -> Date? { arguments[key].flatMap { iso.date(from: $0) ?? fractional.date(from: $0) } }
+        var windows: [Window] = []
+        if let used = percent("five_hour_used") { windows.append(.init(usedPercent: used, minutes: 300, resetsAt: date("five_hour_resets"))) }
+        if let used = percent("week_used") { windows.append(.init(usedPercent: used, minutes: 10_080, resetsAt: date("week_resets"))) }
+        guard !windows.isEmpty else { return nil }
+        let plan = arguments["plan"].flatMap { $0.isEmpty ? nil : $0 }
+        return AgentUsage(windows: windows, plan: plan, limitReached: windows.contains { $0.usedPercent >= 100 }, readAt: now)
+    }
+}

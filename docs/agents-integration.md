@@ -487,6 +487,16 @@ read that as "continue, with this as the next instruction" ([Claude Code](https:
 finished, and to just end its turn otherwise. `stop_hook_active` keeps it to one reminder. Not verified in a
 real session: that each agent follows it.
 
+**Claude Code's usage, relayed by the agent** (section 2.6's third channel, built after phase 5): Dever's
+server offers a fifth tool, `report_usage` (percent used and reset of the 5-hour window and of the week,
+the plan). The skill asks the agent to call it once at the start of a session on an issue with what its
+own usage tool says (in the desktop app's Code sessions, `get_usage`, internal), and the end-of-turn
+reminder asks again. The reading goes to `AgentUsageStore` for that agent and shows like Codex's, with its
+age; it also lets "Most usage left" compare the two. Codex's report is declined: Dever reads Codex itself.
+Weaknesses: it depends on the agent following the instruction and on a tool the app may rename, and it is
+only as fresh as the last session that reported. Not verified: an agent in a real session reading
+`get_usage` and passing it on.
+
 What phase 5 built: an **Agents** screen in the rail (shown once an agent is followed or a session
 is heard; an amber dot when one waits). `Model/AgentBoard.swift` groups the open sessions by project,
 tied to their issue by the branch, what waits first, then finished, working, open; sessions on no
