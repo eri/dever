@@ -237,7 +237,7 @@ struct DeliveryBoard: View {
         case .agentFinished: return item.pull == nil ? "Your agent finished: review its work" : "Your agent finished: review \(number)"
         case .ciFailed: return "CI failed on \(number)"
         case .changesRequested: return "Changes requested on \(number)"
-        case .reviewRequested: return "\(item.pull?.author ?? "Someone") asked for your review on \(number)"
+        case .reviewRequested: return "Waiting for your review · \(number) by \(item.pull?.author ?? "someone")"
         case .behind: return "\(item.merged.first.map { "#\($0.number)" } ?? "Its pull request") is merged, the ticket still says \(item.issue.state.name)"
         case .readyToMerge: return "Approved, \(number) is ready to merge"
         case .draft: return "\(number) is still a draft"
@@ -280,10 +280,18 @@ struct DeliveryBoard: View {
             }
             .accessibilityElement(children: .combine)
             .accessibilityAddTraits(.isHeader)
-            ForEach(plan.agents) { item in
-                AgentWorkCard(project: project, issue: item.issue, session: agents.session(branch: item.issue.branchName),
-                              pull: item.pull.flatMap { URL(string: $0.url) })
+            VStack(spacing: 0) {
+                ForEach(Array(plan.agents.enumerated()), id: \.element.id) { index, item in
+                    AgentWorkRow(project: project, issue: item.issue, session: agents.session(branch: item.issue.branchName),
+                                 pull: item.pull.flatMap { URL(string: $0.url) })
+                    if index < plan.agents.count - 1 { Rectangle().fill(Soot.line).frame(height: 1) }
+                }
             }
+            .padding(.horizontal, 16)
+            .background(Soot.ground, in: RoundedRectangle(cornerRadius: 10))
+            // An agent waiting for an answer edges the block in its colour.
+            .overlay(RoundedRectangle(cornerRadius: 10)
+                .strokeBorder(waiting > 0 ? Theme.chart3.opacity(0.5) : Soot.edge.opacity(0.6)))
         }
     }
 
@@ -616,8 +624,30 @@ struct DeliveryBoard: View {
     // MARK: Folded groups
 
     /// A group's head: a chevron, its name and count, and what it holds at a glance.
-    private func fold<Accessory: View>(_ title: String, count: Int, open: Binding<Bool>, symbol: String? = nil,
+    /// `folds: false` draws the same head without a chevron and without a click: nothing to reveal.
+    @ViewBuilder
+    private func fold<Accessory: View>(_ title: String, count: Int, open: Binding<Bool>, symbol: String? = nil, folds: Bool = true,
                                        @ViewBuilder accessory: () -> Accessory) -> some View {
+        if folds {
+            foldButton(title, count: count, open: open, symbol: symbol, accessory: accessory)
+        } else {
+            HStack(spacing: 8) {
+                Color.clear.frame(width: 18, height: 1)
+                Text(title).foregroundStyle(Soot.ink)
+                Text("\(count)").foregroundStyle(Soot.muted).monospacedDigit()
+                accessory()
+                Spacer(minLength: 0)
+            }
+            .font(.system(size: 13, weight: .semibold))
+            .padding(.horizontal, 12)
+            .frame(minHeight: 40)
+            .accessibilityElement(children: .combine)
+            .accessibilityAddTraits(.isHeader)
+        }
+    }
+
+    private func foldButton<Accessory: View>(_ title: String, count: Int, open: Binding<Bool>, symbol: String?,
+                                             @ViewBuilder accessory: () -> Accessory) -> some View {
         // The rows it reveals grow in the same transaction as the chevron's turn.
         Button { Motion.run(Motion.ui) { open.wrappedValue.toggle() } } label: {
             HStack(spacing: 8) {
@@ -649,7 +679,9 @@ struct DeliveryBoard: View {
         let people = plan.others.reduce(into: [LinearIssue.Person]()) { list, item in
             if let p = item.issue.assignee, !list.contains(where: { $0.name == p.name }) { list.append(p) }
         }
-        fold("Others", count: plan.others.count, open: $showsOthers) {
+        // When every other issue is in trouble, they all show folded: a fold would open onto nothing more.
+        let folds = plan.others.contains { !$0.inTrouble }
+        fold("Others", count: plan.others.count, open: folds ? $showsOthers : .constant(true), folds: folds) {
             HStack(spacing: -5) {
                 ForEach(people.prefix(4), id: \.name) { p in
                     LinearAvatar(name: p.name, avatarURL: p.avatarUrl, size: 18, personID: p.id)

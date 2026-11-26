@@ -106,16 +106,27 @@ struct AgentSessionChip: View {
     }
 }
 
-/// An issue whose agent waits for the developer or finished its work, as one card: the agent and
-/// its state, the issue it works on, then what it asks or what it did, and the one action that
-/// answers it. Everything about the agent sits inside the card, so nothing reads as a separate line.
-struct AgentWorkCard: View {
+/// An issue whose agent waits for the developer or finished its work, as one compact row: the
+/// agent's mark, the issue's title (a link to the issue, without a button of its own), its state,
+/// and the one action that answers it. A finished agent's suggestions follow as explicit choices,
+/// "Codex suggests", ticked by default and applied with one button: nothing is done without it.
+struct AgentWorkRow: View {
+    @EnvironmentObject var app: AppState
     @ObservedObject private var proposals = ProposalStore.shared
+    @ObservedObject private var store = IssueStore.shared
     let project: Project
     let issue: LinearIssue
     let session: AgentSession?
     /// The issue's open pull request, where the finished work is read.
     var pull: URL?
+
+    @State private var moveOn = true
+    @State private var replyOn = true
+    @State private var editing = false
+    @State private var draft: String?
+    @State private var busy = false
+    @State private var problem: String?
+    @State private var states: [LinearTeamContext.WorkflowState] = []
 
     var body: some View {
         TimelineView(.periodic(from: .now, by: 30)) { context in
@@ -124,61 +135,49 @@ struct AgentWorkCard: View {
             let waiting = session?.state == .waiting
             let tool = session?.tool ?? proposal?.tool ?? .claudeCode
             VStack(alignment: .leading, spacing: 12) {
-                HStack(spacing: 10) {
-                    AgentMark(tool: tool, size: 22)
-                    Text(tool.label).font(.system(size: 14, weight: .semibold)).foregroundStyle(Soot.ink)
-                    state(waiting: waiting, proposal: proposal, now: now)
-                    Spacer(minLength: 8)
+                HStack(alignment: .center, spacing: 12) {
+                    AgentMark(tool: tool, size: 28)
+                    VStack(alignment: .leading, spacing: 3) {
+                        NavigationLink(value: IssueRoute(project: project, issue: issue)) {
+                            Text(MarkdownTheme.inline(issue.title, size: 14)).font(.system(size: 14, weight: .semibold))
+                                .foregroundStyle(Soot.ink).lineLimit(1)
+                        }
+                        .buttonStyle(TertiaryButton(tint: .ink, lift: Soot.ground, font: .system(size: 14, weight: .semibold), height: 22))
+                        .padding(.horizontal, -6)
+                        .accessibilityHint("Opens the issue")
+                        subline(tool: tool, waiting: waiting, proposal: proposal, now: now)
+                    }
+                    Spacer(minLength: 12)
                     actions(waiting: waiting, proposal: proposal)
                 }
-                NavigationLink(value: IssueRoute(project: project, issue: issue)) {
-                    HStack(spacing: 8) {
-                        IDPill(text: issue.identifier)
-                        Text(MarkdownTheme.inline(issue.title, size: 14)).font(.system(size: 14)).foregroundStyle(Soot.ink).lineLimit(1)
-                        Spacer(minLength: 8)
-                        Image(systemName: "chevron.right").font(.system(size: 10, weight: .bold)).foregroundStyle(Soot.muted)
-                            .accessibilityHidden(true)
-                    }
-                    .padding(.vertical, 6).padding(.horizontal, 8)
-                }
-                .buttonStyle(RowButton(lift: .surface, radius: 8))
-                .padding(.horizontal, -8)
-                .accessibilityHint("Opens the issue")
-                if waiting, let sentence = session?.sentence {
-                    quote(sentence, tint: Theme.chart3)
-                } else if proposal != nil {
-                    AgentProposalBlock(project: project, issue: issue, fill: Soot.ground, embedded: true)
-                } else if let sentence = session?.sentence {
-                    quote(sentence, tint: Soot.edge)
+                if let proposal, proposal.status != nil || proposal.reply != nil {
+                    suggestions(proposal, tool: tool)
+                        .padding(.leading, 40)
                 }
             }
-            .padding(16)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Soot.ground, in: RoundedRectangle(cornerRadius: 10))
-            .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(waiting ? Theme.chart3.opacity(0.55) : Soot.edge.opacity(0.6)))
+            .padding(.vertical, 14)
             .accessibilityElement(children: .contain)
             .accessibilityLabel("\(tool.label) on \(issue.identifier)")
         }
+        .task(id: issue.team?.id) { await loadStates() }
     }
 
-    /// The state as a small capsule: an icon and its words, never the colour alone.
-    private func state(waiting: Bool, proposal: AgentProposal?, now: Date) -> some View {
+    /// "APP-306 · Waiting for you · 35 min", the state with its icon, never the colour alone.
+    private func subline(tool: AgentTool, waiting: Bool, proposal: AgentProposal?, now: Date) -> some View {
         let words: String = {
-            if let session, session.state == .waiting || session.state == .finished {
-                return session.words(at: now)
-            }
+            if let session, session.state == .waiting || session.state == .finished { return session.words(at: now) }
             return "Finished \(proposal?.at.formatted(.relative(presentation: .named)) ?? "")"
         }()
-        let tint = waiting ? Theme.chart3 : Theme.positive
-        return HStack(spacing: 5) {
+        return HStack(spacing: 6) {
+            Text(verbatim: issue.identifier).font(.system(size: 12, weight: .medium, design: .monospaced)).foregroundStyle(Soot.muted)
+            Text("·").foregroundStyle(Soot.muted)
             Image(systemName: waiting ? "questionmark.bubble.fill" : "checkmark.circle.fill").font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(waiting ? Theme.chart3 : Theme.positive)
                 .accessibilityHidden(true)
-            Text(words).font(.system(size: 12, weight: .medium)).lineLimit(1)
+            Text("\(tool.label) · \(words)").font(.system(size: 12, weight: waiting ? .semibold : .regular))
+                .foregroundStyle(waiting ? Soot.ink : Soot.muted)
         }
-        .foregroundStyle(tint)
-        .padding(.horizontal, 8)
-        .frame(height: 22)
-        .background(tint.opacity(0.14), in: Capsule())
+        .lineLimit(1)
     }
 
     @ViewBuilder
@@ -186,40 +185,178 @@ struct AgentWorkCard: View {
         HStack(spacing: 8) {
             if !waiting, proposal == nil, let session, !proposals.reviewed.contains(session.id) {
                 Button("Reviewed") { Motion.run(Motion.ui, fade: true) { proposals.markReviewed(session.id) } }
-                    .buttonStyle(TertiaryButton(tint: .muted, lift: Soot.ground, font: .system(size: 13, weight: .medium)))
+                    .buttonStyle(TertiaryButton(tint: .muted, lift: Soot.surface, font: .system(size: 13, weight: .medium)))
                     .help("Stop listing this issue as work to review")
             }
+            // With suggestions to apply, "Apply" below is the primary action; the pull request is a peer.
+            let pending = proposal?.pending == true
             if waiting, let link = session?.link {
-                external("Answer", link, primary: true).help("Open the session in \(session?.tool.label ?? "the agent") to answer")
+                external("Answer", link, primary: true).help("Open the session in \(session?.tool.label ?? "the agent") to answer it")
             } else if let pull {
-                if let link = session?.link { external("Open session", link, primary: false) }
-                external("Open PR", pull, primary: true).help("Open the pull request on GitHub")
+                external("Open PR", pull, primary: !pending).help("Open the pull request on GitHub")
             } else if let link = session?.link {
-                external("Open session", link, primary: true)
+                external("Open session", link, primary: !pending)
             }
         }
     }
 
+    // MARK: Suggestions
+
     @ViewBuilder
+    private func suggestions(_ proposal: AgentProposal, tool: AgentTool) -> some View {
+        let target = proposal.state(in: states)
+        let canMove = proposal.status != nil && proposal.movedTo == nil && !proposal.statusDismissed && target != nil
+        let canReply = proposal.reply != nil && !proposal.replied && !proposal.replyDismissed
+        let chosen = (canMove && moveOn ? 1 : 0) + (canReply && replyOn ? 1 : 0)
+        VStack(alignment: .leading, spacing: 8) {
+            Text("\(tool.label) suggests").font(.system(size: 12, weight: .medium)).foregroundStyle(Soot.muted)
+            if proposal.status != nil {
+                if let moved = proposal.movedTo {
+                    done("Moved to \(moved) in Linear")
+                } else if !proposal.statusDismissed {
+                    choice(on: $moveOn, enabled: target != nil,
+                           text: target.map { "Move the issue to \($0.name)" } ?? "Move the issue to \(proposal.status ?? "")",
+                           detail: target == nil ? "Linear has no state by that name" : "Linear", service: .linear)
+                }
+            }
+            if proposal.reply != nil {
+                if proposal.replied {
+                    done("Posted in the Slack thread")
+                } else if !proposal.replyDismissed {
+                    HStack(alignment: .center, spacing: 8) {
+                        choice(on: $replyOn, enabled: true, text: "Post in the issue's Slack thread", detail: "as you", service: .slack)
+                        Button(editing ? "Hide" : "Edit…") { Motion.run(Motion.ui, fade: true) { editing.toggle() } }
+                            .buttonStyle(TertiaryButton(tint: .lime, lift: Soot.surface, font: .system(size: 13, weight: .medium), height: 24))
+                            .help("Read and change the message before it is posted")
+                    }
+                    if editing {
+                        TextEditor(text: Binding(get: { draft ?? proposal.reply ?? "" }, set: { draft = $0 }))
+                            .font(.system(size: 13)).foregroundStyle(Soot.ink)
+                            .scrollContentBackground(.hidden)
+                            .padding(8)
+                            .frame(minHeight: 64, maxHeight: 120)
+                            .background(Soot.ground, in: RoundedRectangle(cornerRadius: Soot.radius))
+                            .overlay(RoundedRectangle(cornerRadius: Soot.radius).strokeBorder(Soot.edge))
+                            .accessibilityLabel("Message to post in the Slack thread")
+                            .padding(.leading, 26)
+                    }
+                }
+            }
+            if let problem {
+                Text(problem).font(.system(size: 12)).foregroundStyle(Theme.negative).fixedSize(horizontal: false, vertical: true)
+            }
+            HStack(spacing: 8) {
+                Spacer(minLength: 0)
+                if canMove || canReply {
+                    Button("Dismiss") { Motion.run(Motion.ui, fade: true) { proposals.update(issue.identifier) { $0.statusDismissed = true; $0.replyDismissed = true } } }
+                        .buttonStyle(TertiaryButton(tint: .muted, lift: Soot.surface, font: .system(size: 13, weight: .medium)))
+                        .help("Do none of it")
+                    Button(busy ? "Applying…" : chosen > 1 ? "Apply \(chosen)" : "Apply") { apply(proposal, target: canMove && moveOn ? target : nil, reply: canReply && replyOn) }
+                        .buttonStyle(PrimaryButton())
+                        .disabled(chosen == 0 || busy)
+                } else {
+                    Button("Done") {
+                        Motion.run(Motion.ui, fade: true) {
+                            proposals.dismiss(issue.identifier)
+                            if let session { proposals.markReviewed(session.id) }
+                        }
+                    }
+                    .buttonStyle(SecondaryButton())
+                    .help("Stop listing this issue as work to review")
+                }
+            }
+        }
+    }
+
+    /// One suggestion: a checkbox, what it does in plain words, and where.
+    private func choice(on: Binding<Bool>, enabled: Bool, text: String, detail: String, service: ServiceKind) -> some View {
+        Button { on.wrappedValue.toggle() } label: {
+            HStack(spacing: 8) {
+                Image(systemName: on.wrappedValue && enabled ? "checkmark.square.fill" : "square").font(.system(size: 14))
+                    .foregroundStyle(on.wrappedValue && enabled ? Soot.lime : Soot.muted)
+                    .accessibilityHidden(true)
+                Text(text).font(.system(size: 13, weight: .medium)).foregroundStyle(enabled ? Soot.ink : Soot.muted)
+                BrandLogo(service: service, size: 12).foregroundStyle(Soot.muted).accessibilityHidden(true)
+                Text(detail).font(.system(size: 12)).foregroundStyle(Soot.muted)
+            }
+            .padding(.vertical, 3).padding(.horizontal, 4)
+        }
+        .buttonStyle(RowButton(lift: .surface, radius: 6))
+        .padding(.horizontal, -4)
+        .disabled(!enabled)
+        .accessibilityLabel("\(text), \(detail)")
+        .accessibilityAddTraits(on.wrappedValue && enabled ? .isSelected : [])
+    }
+
+    private func done(_ text: String) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: "checkmark").font(.system(size: 12, weight: .bold)).foregroundStyle(Theme.positive).accessibilityHidden(true)
+            Text(text).font(.system(size: 13)).foregroundStyle(Soot.muted)
+        }
+        .padding(.leading, 2)
+    }
+
     private func external(_ title: String, _ url: URL, primary: Bool) -> some View {
         let label = HStack(spacing: 5) {
             Text(title)
             Image(systemName: "arrow.up.right").font(.system(size: 11, weight: .bold)).accessibilityHidden(true)
         }
-        if primary {
-            Link(destination: url) { label }.buttonStyle(PrimaryButton()).accessibilityHint("Opens outside Dever")
-        } else {
-            Link(destination: url) { label }.buttonStyle(SecondaryButton()).accessibilityHint("Opens outside Dever")
+        return Group {
+            if primary {
+                Link(destination: url) { label }.buttonStyle(PrimaryButton())
+            } else {
+                Link(destination: url) { label }.buttonStyle(SecondaryButton())
+            }
         }
+        .accessibilityHint("Opens outside Dever")
     }
 
-    /// What the agent said, set off by a thin bar in its state's colour.
-    private func quote(_ text: String, tint: Color) -> some View {
-        HStack(alignment: .top, spacing: 10) {
-            RoundedRectangle(cornerRadius: 1).fill(tint).frame(width: 2)
-            Text(text).font(.system(size: 13)).foregroundStyle(Soot.ink.opacity(0.9))
-                .fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
+    // MARK: Applying
+
+    private func loadStates() async {
+        if DeliveryPlan.snapshotDemo() != nil { states = DeliveryPlan.demoTeam.states; return }
+        guard let team = issue.team?.id else { return }
+        states = (try? await store.team(team, app: app))?.states ?? []
+    }
+
+    /// What is ticked, in order: the move (the existing optimistic write), then the message, as
+    /// edited. Canary does both on screen only.
+    private func apply(_ proposal: AgentProposal, target: LinearTeamContext.WorkflowState?, reply: Bool) {
+        busy = true
+        problem = nil
+        let text = (draft ?? proposal.reply ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        Task {
+            defer { busy = false }
+            if let target {
+                do {
+                    if !Canary.isOn {
+                        let current = store.row(issue.id) ?? issue
+                        var optimistic = current
+                        optimistic.state = .init(id: target.id, name: target.name, type: target.type, color: target.color)
+                        try await store.update(current.id, change: .init(stateID: target.id), optimistic: optimistic, previous: current, app: app)
+                    }
+                    proposals.update(issue.identifier) { $0.movedTo = target.name }
+                } catch {
+                    problem = "Not moved: \(error.localizedDescription)"
+                    return
+                }
+            }
+            if reply, !text.isEmpty {
+                do {
+                    if !Canary.isOn {
+                        let detail = try await store.detail(issue.id, updatedAt: issue.updatedAt, app: app)
+                        guard let link = (detail.attachments?.nodes ?? []).compactMap({ AgentContextText.slackLocation($0.url) }).first else {
+                            problem = "Not posted: Linear links no Slack thread to \(issue.identifier)"
+                            return
+                        }
+                        try await app.withSlack { try await $0.reply(link.channel, threadTS: link.thread ?? link.ts, text: text) }
+                    }
+                    proposals.update(issue.identifier) { $0.replied = true }
+                    editing = false
+                } catch {
+                    problem = "Not posted: \(error.localizedDescription)"
+                }
+            }
         }
-        .fixedSize(horizontal: false, vertical: true)
     }
 }
