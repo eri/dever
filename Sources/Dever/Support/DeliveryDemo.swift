@@ -15,6 +15,29 @@ extension DeliveryPlan {
                                           state("In Review", "started", 3), state("Done", "completed", 4)], members: [])
     }
 
+    /// A made-up issue's full record, for its page in Canary.
+    static func canaryDetail(_ id: String) -> LinearIssueDetail? {
+        guard let issue = canaryIssues.first(where: { $0.id == id }) else { return nil }
+        let description = issue.identifier == "APP-311" ? """
+        Export the current report as a CSV file from the report's toolbar.
+
+        ## Acceptance criteria
+        - [ ] The export respects the active filters
+        - [ ] Dates are in the workspace's time zone
+        - [ ] A report over 50,000 rows still exports
+        """ : "Made-up issue of Dever Canary."
+        var record: [String: Any] = [
+            "id": issue.id, "identifier": issue.identifier, "title": issue.title, "description": description, "url": issue.url,
+            "createdAt": issue.updatedAt, "updatedAt": issue.updatedAt, "priority": issue.priority ?? 0,
+            "priorityLabel": LinearPriority.label(issue.priority), "branchName": issue.branchName ?? "",
+            "state": ["name": issue.state.name, "type": issue.state.type],
+        ]
+        if let due = issue.dueDate { record["dueDate"] = due }
+        if let person = issue.assignee { record["assignee"] = ["id": person.id ?? "", "name": person.name] }
+        guard let data = try? JSONSerialization.data(withJSONObject: record) else { return nil }
+        return try? JSONDecoder().decode(LinearIssueDetail.self, from: data)
+    }
+
     /// The made-up issues of Canary's project, for the screens that list issues by project (the agents' board).
     static var canaryIssues: [LinearIssue] {
         guard let plan = snapshotDemo() else { return [] }

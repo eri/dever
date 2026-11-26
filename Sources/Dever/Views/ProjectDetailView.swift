@@ -206,7 +206,10 @@ struct ProjectDetailView: View {
         .onReceive(NotificationCenter.default.publisher(for: .toggleSlackWide)) { _ in toggleSlackWide() }
         .onReceive(NotificationCenter.default.publisher(for: .openFirstIssue)) { _ in
             let plan = self.plan
-            if let first = plan.start?.issue ?? plan.next.first?.issue ?? plan.others.first?.issue ?? plan.shipped.first?.issue {
+            // DEVER_SNAPSHOT_ISSUE=<identifier> opens that issue; otherwise the first in the board's order.
+            let all = plan.agents.map(\.issue) + [plan.start?.issue].compactMap { $0 } + plan.next.map(\.issue) + plan.others.map(\.issue) + plan.shipped.map(\.issue)
+            let named = ProcessInfo.processInfo.environment["DEVER_SNAPSHOT_ISSUE"].flatMap { id in all.first { $0.identifier == id } }
+            if let first = named ?? all.first {
                 NotificationCenter.default.post(name: .openIssue, object: IssueRoute(project: project, issue: first))
             }
         }

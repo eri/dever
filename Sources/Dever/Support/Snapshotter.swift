@@ -115,7 +115,7 @@ enum Snapshotter {
                 try? await Task.sleep(nanoseconds: 1_000_000_000)
             }
         }
-        if ProcessInfo.processInfo.environment["DEVER_SNAPSHOT_ISSUE"] == "1", let first = projects.first {
+        if ProcessInfo.processInfo.environment["DEVER_SNAPSHOT_ISSUE"] != nil, let first = projects.first {
             // The first project's first listed issue, in both modes.
             for (themeName, appearance) in [("dark", NSAppearance.Name.darkAqua), ("light", .aqua)] {
                 NSApp.appearance = NSAppearance(named: appearance)

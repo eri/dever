@@ -119,6 +119,8 @@ struct AgentWorkRow: View {
     let session: AgentSession?
     /// The issue's open pull request, where the finished work is read.
     var pull: URL?
+    /// The title opens the issue; on the issue's own page it is plain text.
+    var linksIssue = true
 
     @State private var moveOn = true
     @State private var replyOn = true
@@ -138,13 +140,17 @@ struct AgentWorkRow: View {
                 HStack(alignment: .center, spacing: 12) {
                     AgentMark(tool: tool, size: 28)
                     VStack(alignment: .leading, spacing: 3) {
-                        NavigationLink(value: IssueRoute(project: project, issue: issue)) {
-                            Text(MarkdownTheme.inline(issue.title, size: 14)).font(.system(size: 14, weight: .semibold))
-                                .foregroundStyle(Soot.ink).lineLimit(1)
+                        if linksIssue {
+                            NavigationLink(value: IssueRoute(project: project, issue: issue)) {
+                                Text(MarkdownTheme.inline(issue.title, size: 14)).font(.system(size: 14, weight: .semibold))
+                                    .foregroundStyle(Soot.ink).lineLimit(1)
+                            }
+                            .buttonStyle(TertiaryButton(tint: .ink, lift: Soot.ground, font: .system(size: 14, weight: .semibold), height: 22))
+                            .padding(.horizontal, -6)
+                            .accessibilityHint("Opens the issue")
+                        } else {
+                            Text(tool.label).font(.system(size: 14, weight: .semibold)).foregroundStyle(Soot.ink)
                         }
-                        .buttonStyle(TertiaryButton(tint: .ink, lift: Soot.ground, font: .system(size: 14, weight: .semibold), height: 22))
-                        .padding(.horizontal, -6)
-                        .accessibilityHint("Opens the issue")
                         subline(tool: tool, waiting: waiting, proposal: proposal, now: now)
                     }
                     Spacer(minLength: 12)
@@ -168,13 +174,16 @@ struct AgentWorkRow: View {
             if let session, session.state == .waiting || session.state == .finished { return session.words(at: now) }
             return "Finished \(proposal?.at.formatted(.relative(presentation: .named)) ?? "")"
         }()
+        // On the issue's own page the agent is the head and the issue is the page: only the state.
         return HStack(spacing: 6) {
-            Text(verbatim: issue.identifier).font(.system(size: 12, weight: .medium, design: .monospaced)).foregroundStyle(Soot.muted)
-            Text("·").foregroundStyle(Soot.muted)
+            if linksIssue {
+                Text(verbatim: issue.identifier).font(.system(size: 12, weight: .medium, design: .monospaced)).foregroundStyle(Soot.muted)
+                Text("·").foregroundStyle(Soot.muted)
+            }
             Image(systemName: waiting ? "questionmark.bubble.fill" : "checkmark.circle.fill").font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(waiting ? Theme.chart3 : Theme.positive)
                 .accessibilityHidden(true)
-            Text("\(tool.label) · \(words)").font(.system(size: 12, weight: waiting ? .semibold : .regular))
+            Text(linksIssue ? "\(tool.label) · \(words)" : words).font(.system(size: 12, weight: waiting ? .semibold : .regular))
                 .foregroundStyle(waiting ? Soot.ink : Soot.muted)
         }
         .lineLimit(1)

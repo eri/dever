@@ -152,6 +152,8 @@ final class IssueStore: ObservableObject {
     /// The issue's full record. `updatedAt` is the list's; a cached detail with the same value
     /// is returned at once, a stale one is replaced.
     func detail(_ id: String, updatedAt: String?, app: AppState) async throws -> LinearIssueDetail {
+        // Canary: the made-up issue, written out as Linear would return it.
+        if Canary.isOn, let made = DeliveryPlan.canaryDetail(id) { details[id] = made; return made }
         if let cached = details[id], updatedAt == nil || cached.updatedAt == updatedAt { return cached }
         if let running = detailLoads[id] { return try await running.value }
         let task = Task { try await app.withLinear { try await $0.issueDetail(id: id) } }

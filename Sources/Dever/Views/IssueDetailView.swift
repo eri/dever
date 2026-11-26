@@ -330,9 +330,24 @@ struct IssueDetailView: View {
 
     private func reading(_ d: LinearIssueDetail) -> some View {
         VStack(alignment: .leading, spacing: 16) {
-            // What the agent left when it finished: first, since it is what the developer came for.
-            if !frozen, proposals.proposal(for: d.identifier) != nil, let project = app.projects.first(where: { $0.id == route.projectID }) {
-                AgentProposalBlock(project: project, issue: row ?? d.asRow, showsCriteria: true)
+            // The agent that waits for an answer or finished: first, since it is what the developer came for.
+            if !frozen, let project = app.projects.first(where: { $0.id == route.projectID }) {
+                let issue = row ?? d.asRow
+                let session = agents.session(branch: d.branchName ?? issue.branchName)
+                if AgentAttention.of(session: session, proposal: proposals.proposal(for: d.identifier),
+                                     reviewed: session.map { proposals.reviewed.contains($0.id) } ?? false) != nil {
+                    VStack(alignment: .leading, spacing: 0) {
+                        AgentWorkRow(project: project, issue: issue, session: session, linksIssue: false)
+                        if proposals.proposal(for: d.identifier) != nil {
+                            AcceptanceChecklist(identifier: d.identifier, description: d.description)
+                                .padding(.leading, 40).padding(.bottom, 14)
+                        }
+                    }
+                    .padding(.horizontal, 16)
+                    .background(Soot.ground, in: RoundedRectangle(cornerRadius: 12))
+                    .overlay(RoundedRectangle(cornerRadius: 12)
+                        .strokeBorder(session?.state == .waiting ? Theme.chart3.opacity(0.5) : Soot.edge.opacity(0.6)))
+                }
             }
             card(symbol: "doc.text", title: "Description") {
                 description(d)
@@ -398,11 +413,13 @@ struct IssueDetailView: View {
                             CopyChip(value: branch, what: "branch name", maxWidth: 200)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                         }
-                        if let session = agents.session(branch: branch) {
+                        // A working agent; one that waits or finished is at the top of the page.
+                        if let session = agents.session(branch: branch), session.state == .working || session.state == .ready {
                             caption("Agent") { AgentSessionLine(session: session) }
                         }
                         // To do or in progress (not in review or QA): an agent can pick it up from here.
-                        if !frozen, ["unstarted", "backlog", "started"].contains(current.state.type), !Delivery.isReviewState(current.state.name),
+                        // Not while an agent is already on it.
+                        if !frozen, agents.session(branch: branch) == nil, ["unstarted", "backlog", "started"].contains(current.state.type), !Delivery.isReviewState(current.state.name),
                            let project = app.projects.first(where: { $0.id == route.projectID }) {
                             AgentStartMenu(project: project, issue: current, title: "Open with", fill: Soot.ground,
                                            edge: .topLeading, open: $agentMenu,
