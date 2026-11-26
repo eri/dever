@@ -933,6 +933,8 @@ struct ProjectDetailView: View {
     /// A failed refresh keeps what the panel shows and says so under the title; only a panel
     /// with nothing to show, or a rejected token, becomes the failure row.
     private func failed(_ service: ServiceKind, _ error: Error) {
+        // Canary's background refreshes have nothing to fetch: what it draws stays.
+        if Canary.isOn { return }
         guard let state = app.failure(error, service) else { return }
         pollFailures[service, default: 0] += 1
         if lastLoaded[service] != nil, state.isTransient {
