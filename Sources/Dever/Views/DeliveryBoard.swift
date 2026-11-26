@@ -673,15 +673,14 @@ struct DeliveryBoard: View {
         .accessibilityHint(open.wrappedValue ? "Collapses the list" : "Expands the list")
     }
 
-    /// The others' issues, folded: the ones in trouble (red pipeline, overdue) stay in sight.
+    /// The others' issues, folded, all of them.
     @ViewBuilder
     private var othersGroup: some View {
         let people = plan.others.reduce(into: [LinearIssue.Person]()) { list, item in
             if let p = item.issue.assignee, !list.contains(where: { $0.name == p.name }) { list.append(p) }
         }
-        // When every other issue is in trouble, they all show folded: a fold would open onto nothing more.
-        let folds = plan.others.contains { !$0.inTrouble }
-        fold("Others", count: plan.others.count, open: folds ? $showsOthers : .constant(true), folds: folds) {
+        // Folded, whole: another person's issue, even with a failing pipeline, is not the viewer's to act on.
+        fold("Others", count: plan.others.count, open: $showsOthers) {
             HStack(spacing: -5) {
                 ForEach(people.prefix(4), id: \.name) { p in
                     LinearAvatar(name: p.name, avatarURL: p.avatarUrl, size: 18, personID: p.id)
@@ -691,7 +690,7 @@ struct DeliveryBoard: View {
             .padding(.leading, 4)
             .accessibilityHidden(true)
         }
-        ForEach(showsOthers ? plan.others : plan.others.filter(\.inTrouble)) { item in
+        ForEach(showsOthers ? plan.others : []) { item in
             row(item, showsPerson: true).transition(.opacity)
         }
     }

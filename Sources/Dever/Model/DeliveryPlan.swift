@@ -83,16 +83,6 @@ struct DeliveryPlan {
         var stale = false
         var id: String { issue.id }
 
-        /// Someone else's issue that is in trouble: shown even while the group is folded.
-        var inTrouble: Bool { situation == .ciFailed || Self.isOverdue(issue.dueDate) }
-
-        private static func isOverdue(_ day: String?) -> Bool {
-            guard let day else { return false }
-            let f = DateFormatter()
-            f.dateFormat = "yyyy-MM-dd"
-            guard let date = f.date(from: String(day.prefix(10))) else { return false }
-            return date < Calendar.current.startOfDay(for: Date())
-        }
     }
 
     /// One issue whose code has landed: done, or merged and waiting for QA.

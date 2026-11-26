@@ -352,11 +352,12 @@ private struct SegmentBody: View {
     @Environment(\.isEnabled) private var isEnabled
     @Environment(\.isFocused) private var isFocused
     @Environment(\.buttonStateOverride) private var override
+    @ObservedObject private var keyboard = KeyboardNavigation.shared
 
     var body: some View {
         let hover = override?.hovered ?? (hovering && isEnabled)
         let pressed = override?.pressed ?? configuration.isPressed
-        let focused = override?.focused ?? isFocused
+        let focused = override?.focused ?? (isFocused && keyboard.active)
         configuration.label
             .overlay(Capsule().fill((on ? Soot.limeInk : Soot.ink).opacity(pressed ? Buttons.pressTone : hover ? Buttons.hoverTone : 0)))
             .overlay(Capsule().strokeBorder(on ? Soot.limeInk : Soot.lime, lineWidth: 2).opacity(focused ? 1 : 0))
@@ -435,11 +436,12 @@ private struct PrimarySegmentBody: View {
     @Environment(\.isEnabled) private var isEnabled
     @Environment(\.isFocused) private var isFocused
     @Environment(\.buttonStateOverride) private var override
+    @ObservedObject private var keyboard = KeyboardNavigation.shared
 
     var body: some View {
         let hover = override?.hovered ?? (hovering && isEnabled)
         let pressed = override?.pressed ?? configuration.isPressed
-        let focused = override?.focused ?? isFocused
+        let focused = override?.focused ?? (isFocused && keyboard.active)
         configuration.label
             .frame(maxHeight: .infinity)
             .background(Soot.limeInk.opacity(pressed ? 0.16 : hover || open ? 0.08 : 0))

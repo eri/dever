@@ -233,10 +233,30 @@ struct SheetTitle<Mark: View>: View {
 
 /// A visible keyboard-focus ring for custom controls (WCAG 2.4.7): lime, 2px, 3px outside —
 /// the same colour a focused text field shows, so focus looks the same everywhere.
+/// Whether the user is moving through the window with the keyboard: on at Tab or an arrow key,
+/// off at the next click. The focus ring shows only then, as a browser's `:focus-visible` does, so
+/// the button macOS focuses when a window opens does not stand out from the ones beside it.
+@MainActor
+final class KeyboardNavigation: ObservableObject {
+    static let shared = KeyboardNavigation()
+    @Published private(set) var active = false
+    private var monitor: Any?
+
+    private init() {
+        monitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .leftMouseDown, .rightMouseDown]) { [weak self] event in
+            // Tab, and the arrows that move between controls.
+            let moves = event.type == .keyDown && (event.keyCode == 48 || (123...126).contains(event.keyCode))
+            if moves != self?.active, event.type != .keyDown || moves { self?.active = moves }
+            return event
+        }
+    }
+}
+
 struct FocusOutline: ViewModifier {
     var radius: CGFloat
     @Environment(\.isFocused) private var isFocused
     @Environment(\.buttonStateOverride) private var override
+    @ObservedObject private var keyboard = KeyboardNavigation.shared
 
     func body(content: Content) -> some View {
         content.overlay(
@@ -244,7 +264,7 @@ struct FocusOutline: ViewModifier {
             RoundedRectangle(cornerRadius: radius + 4)
                 .strokeBorder(Soot.lime, lineWidth: 2)
                 .padding(-4)
-                .opacity((override?.focused ?? isFocused) ? 1 : 0)
+                .opacity((override?.focused ?? (isFocused && keyboard.active)) ? 1 : 0)
         )
     }
 }
