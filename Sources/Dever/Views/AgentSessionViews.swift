@@ -281,9 +281,7 @@ struct AgentWorkRow: View {
     private func choice(on: Binding<Bool>, enabled: Bool, text: String, detail: String, service: ServiceKind) -> some View {
         Button { on.wrappedValue.toggle() } label: {
             HStack(spacing: 8) {
-                Image(systemName: on.wrappedValue && enabled ? "checkmark.square.fill" : "square").font(.system(size: 14))
-                    .foregroundStyle(on.wrappedValue && enabled ? Soot.lime : Soot.muted)
-                    .accessibilityHidden(true)
+                SootCheckbox(on: on.wrappedValue, enabled: enabled)
                 Text(text).font(.system(size: 13, weight: .medium)).foregroundStyle(enabled ? Soot.ink : Soot.muted)
                 BrandLogo(service: service, size: 12).foregroundStyle(Soot.muted).accessibilityHidden(true)
                 Text(detail).font(.system(size: 12)).foregroundStyle(Soot.muted)

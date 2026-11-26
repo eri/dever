@@ -11,7 +11,7 @@ struct PreviewPanel: View {
     @ObservedObject var flow: ConnectFlow
     /// Opens the editor on its Preview step.
     let addPreview: () -> Void
-    /// "No preview needed": hides the panel until a pull request is picked in the editor.
+    /// "Not needed": hides the panel until a pull request is picked in the editor.
     let dismiss: () -> Void
 
     @State private var options = PreviewOptions()
@@ -147,8 +147,8 @@ struct PreviewPanel: View {
         HStack(spacing: 8) {
             Button("Add a preview", action: addPreview).buttonStyle(PrimaryButton())
                 .help("Choose the pull request whose preview this project follows")
-            Button("No preview needed", action: dismiss).buttonStyle(TertiaryButton(tint: .muted))
-                .help("Hides this panel; pick a pull request later in Edit project to bring it back")
+            Button("Not needed", action: dismiss).buttonStyle(SecondaryButton())
+                .help("This project needs no preview: hides the panel. Pick a pull request later in Edit project to bring it back")
         }
         .fixedSize()
     }

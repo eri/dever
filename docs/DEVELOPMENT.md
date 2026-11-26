@@ -29,7 +29,7 @@ Tokens are stored in the macOS Keychain (`io.github.eri.dever`), projects in `~/
   repositories stay saved while the single mode ignores them. Imports in the per-project and mixed modes link a
   repository named like the project.
 - **Preview environment** (optional, needs a GitHub repository): the project follows the preview of one pull request,
-  chosen in the editor ("Preview" step); "No preview needed" on the project page hides the panel until one is picked.
+  chosen in the editor ("Preview" step); "Not needed" on the project page hides the panel until one is picked.
   The panel sits above Delivery and shows the PR, the state (not deployed, deploying, updating,
   live, failed, deleted), the deployed products (App, Back office, Client Hub: each chip opens the front, its mark folds in the
   API's health, probed with a HEAD request on `pr-<N>-<target>.<domain>`, the domain being `preview.domain` in `config/dever.json`). Deploy (one click, or with
