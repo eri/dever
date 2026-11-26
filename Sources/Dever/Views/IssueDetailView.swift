@@ -345,8 +345,7 @@ struct IssueDetailView: View {
                     }
                     .padding(.horizontal, 16)
                     .background(Soot.ground, in: RoundedRectangle(cornerRadius: 12))
-                    .overlay(RoundedRectangle(cornerRadius: 12)
-                        .strokeBorder(session?.state == .waiting ? Theme.chart3.opacity(0.5) : Soot.edge.opacity(0.6)))
+
                 }
             }
             card(symbol: "doc.text", title: "Description") {

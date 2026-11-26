@@ -85,9 +85,12 @@ struct DeliveryBoard: View {
             // The agents that wait for you or finished, apart: Start here stays your own next task.
             if !plan.agents.isEmpty { agentsSection.transition(.opacity) }
             if let start = plan.start {
-                startTile(start, grab: plan.startIsGrab)
-                    .id(start.id)
-                    .transition(.opacity)
+                VStack(alignment: .leading, spacing: 8) {
+                    sectionLabel(plan.startIsGrab ? "UP FOR GRABS" : "START HERE")
+                    startTile(start, grab: plan.startIsGrab)
+                }
+                .id(start.id)
+                .transition(.opacity)
             } else if plan.left > 0 {
                 QuietEmpty(symbol: "checkmark.circle", text: "Nothing waiting on you")
             }
@@ -268,18 +271,39 @@ struct DeliveryBoard: View {
             .zIndex(open || agentMenu ? 1 : 0)
     }
 
+    /// A block's title, above it: "START HERE", "AGENTS", the same small lime capitals, and a few words.
+    private func sectionLabel(_ title: String, detail: String? = nil) -> some View {
+        HStack(spacing: 6) {
+            Text(title).font(.system(size: 11, weight: .bold)).tracking(0.6).foregroundStyle(Soot.lime)
+            if let detail { Text(detail).font(.system(size: 12)).foregroundStyle(Soot.muted) }
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isHeader)
+    }
+
+    /// The Start tile's headline when the move is on a pull request: what to do with it. The issue's
+    /// own title is the headline otherwise (to start, to continue), and moves under it here.
+    private func headline(_ item: DeliveryPlan.Item) -> String? {
+        let number = item.pull.map { "#\($0.number)" } ?? ""
+        switch item.situation {
+        case .ciFailed: return "Fix the checks of \(number)"
+        case .changesRequested: return "Make the changes asked on \(number)"
+        case .reviewRequested: return "Review \(number) by \(item.pull?.author ?? "a teammate")"
+        case .behind: return "Move the issue: \(item.merged.first.map { "#\($0.number)" } ?? "its pull request") is merged"
+        case .readyToMerge: return "Merge \(number)"
+        case .draft: return "Finish the draft \(number)"
+        case .waitingReview: return item.pull == nil ? nil : "Waiting for a review of \(number)"
+        default: return nil
+        }
+    }
+
     /// "AGENTS · 1 waiting for you", then one card per issue whose agent waits or finished.
     private var agentsSection: some View {
         let waiting = plan.agents.filter { $0.situation == .agentWaiting }.count
         let review = plan.agents.count - waiting
         let words = [waiting > 0 ? "\(waiting) waiting for you" : nil, review > 0 ? "\(review) to review" : nil].compactMap { $0 }
         return VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 6) {
-                Text("AGENTS").font(.system(size: 11, weight: .bold)).tracking(0.6).foregroundStyle(Soot.lime)
-                Text(words.joined(separator: " · ")).font(.system(size: 12)).foregroundStyle(Soot.muted)
-            }
-            .accessibilityElement(children: .combine)
-            .accessibilityAddTraits(.isHeader)
+            sectionLabel("AGENTS", detail: words.joined(separator: " · "))
             VStack(spacing: 0) {
                 ForEach(Array(plan.agents.enumerated()), id: \.element.id) { index, item in
                     AgentWorkRow(project: project, issue: item.issue, session: agents.session(branch: item.issue.branchName),
@@ -288,20 +312,19 @@ struct DeliveryBoard: View {
                 }
             }
             .padding(.horizontal, 16)
+            // The same ground as Start here; the waiting agent says so with its icon, not the frame.
             .background(Soot.ground, in: RoundedRectangle(cornerRadius: 10))
-            // An agent waiting for an answer edges the block in its colour.
-            .overlay(RoundedRectangle(cornerRadius: 10)
-                .strokeBorder(waiting > 0 ? Theme.chart3.opacity(0.5) : Soot.edge.opacity(0.6)))
         }
     }
 
     private func startLink(_ item: DeliveryPlan.Item, grab: Bool, failure: FailureStore.Key?, open: Bool) -> some View {
         let move = move(for: item, grab: grab)
         let why = reason(item, grab: grab)
+        let action = headline(item)
         // The failed state is the button: it opens the checks that failed and why.
         let ask = Button { Motion.run(Motion.ui, fade: true) { self.why = open ? nil : failure } } label: {
             HStack(spacing: 4) {
-                Text(why)
+                Text("Why it failed")
                 Image(systemName: "chevron.down").font(.system(size: 9, weight: .bold)).rotationEffect(.degrees(open ? 180 : 0))
                     .accessibilityHidden(true)
             }
@@ -313,17 +336,19 @@ struct DeliveryBoard: View {
             HStack(alignment: .center, spacing: 14) {
                 SituationGlyph(situation: item.situation, size: 22)
                 VStack(alignment: .leading, spacing: 6) {
-                    Text(grab ? "UP FOR GRABS" : "START HERE").font(.system(size: 11, weight: .bold)).tracking(0.6)
-                        .foregroundStyle(Soot.lime)
-                    Text(MarkdownTheme.inline(item.issue.title, size: 16)).font(.system(size: 16, weight: .semibold))
+                    // What there is to do, in words; the issue it belongs to sits under it.
+                    Text(MarkdownTheme.inline(action ?? item.issue.title, size: 16)).font(.system(size: 16, weight: .semibold))
                         .foregroundStyle(Soot.ink).lineLimit(2).multilineTextAlignment(.leading)
                     HStack(spacing: 8) {
                         Text(verbatim: item.issue.identifier).font(.system(size: 12, weight: .medium, design: .monospaced))
+                        if action != nil {
+                            Text(MarkdownTheme.inline(item.issue.title, size: 13)).lineLimit(1)
+                        }
                         if failure != nil {
                             // Room for the button, which sits on top so it takes its own click.
                             ask.hidden().accessibilityHidden(true).padding(.leading, -8)
                                 .anchorPreference(key: WhyAnchor.self, value: .bounds) { $0 }
-                        } else {
+                        } else if action == nil {
                             Text(why).lineLimit(1)
                         }
                         // An agent already working on it: said inside the tile, so it reads as the same issue.
