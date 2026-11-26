@@ -240,9 +240,10 @@ struct FocusOutline: ViewModifier {
 
     func body(content: Content) -> some View {
         content.overlay(
-            RoundedRectangle(cornerRadius: radius + 3)
+            // A 2-point gap: around a lime button a tighter ring read as a bigger button, not as focus.
+            RoundedRectangle(cornerRadius: radius + 4)
                 .strokeBorder(Soot.lime, lineWidth: 2)
-                .padding(-3)
+                .padding(-4)
                 .opacity((override?.focused ?? isFocused) ? 1 : 0)
         )
     }
