@@ -19,7 +19,7 @@ enum AgentPluginError: LocalizedError, Equatable {
 /// tools' configuration files. "Disconnect" has the tool remove it.
 enum AgentPlugin {
     static let name = "dever"
-    static let version = "1.2.0"
+    static let version = "1.3.0"
     static let summary = "Tells Dever, on this Mac, when a session starts, works, waits for you and finishes, and lets the agent read the issue it works on."
 
     /// The command every hook runs.
@@ -47,14 +47,16 @@ enum AgentPlugin {
     static let hookScript = """
     #!/bin/sh
     # Dever: tells the Dever app, on this Mac only, that a coding agent's session changed state.
-    # It posts the hook's payload to Dever's local listener and never blocks or fails the agent.
+    # It posts the hook's payload to Dever's local listener and never fails the agent. At the end of
+    # a turn Dever may answer with a reminder for the agent, printed here as the hook's output.
     address="${DEVER_BRIDGE:-$HOME/Library/Application Support/Dever/agent/bridge.json}"
     [ -r "$address" ] || exit 0
     port=$(sed -n 's/.*"port" *: *\\([0-9][0-9]*\\).*/\\1/p' "$address")
     token=$(sed -n 's/.*"token" *: *"\\([0-9a-f]*\\)".*/\\1/p' "$address")
     [ -n "$port" ] || exit 0
-    /usr/bin/curl -s -m 2 -o /dev/null -X POST -H "Authorization: Bearer $token" \\
-      -H "Content-Type: application/json" --data-binary @- "http://127.0.0.1:$port/hook/$1" 2>/dev/null
+    answer=$(/usr/bin/curl -s -f -m 5 -X POST -H "Authorization: Bearer $token" \\
+      -H "Content-Type: application/json" --data-binary @- "http://127.0.0.1:$port/hook/$1" 2>/dev/null)
+    [ -n "$answer" ] && printf '%s\\n' "$answer"
     exit 0
 
     """

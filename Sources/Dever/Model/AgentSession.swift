@@ -15,11 +15,13 @@ struct AgentEvent: Decodable, Equatable {
     var message: String?
     var notificationType: String?
     var toolName: String?
+    /// On Stop: the turn was already continued by a Stop hook (no second reminder).
+    var stopHookActive: Bool?
 
     enum CodingKeys: String, CodingKey {
         case hookEventName = "hook_event_name", sessionID = "session_id", cwd
         case lastAssistantMessage = "last_assistant_message", message
-        case notificationType = "notification_type", toolName = "tool_name"
+        case notificationType = "notification_type", toolName = "tool_name", stopHookActive = "stop_hook_active"
     }
 }
 
@@ -183,5 +185,33 @@ enum BridgeRequest: Equatable {
         let body = data[end.upperBound...]
         guard body.count >= length else { return .incomplete }
         return .request(method: String(first[0]), path: String(first[1]), bearer: bearer, body: Data(body.prefix(length)))
+    }
+}
+
+/// The reminder a Stop hook gives back to the agent (docs/agents-integration.md, phase 4): once per
+/// session, when the agent ends a turn on a branch Dever knows as an issue's, with Dever's tools at
+/// hand and no account of its work left yet. Both tools take `{"decision": "block", "reason": …}` on
+/// a Stop hook's output as "continue, with this as the next instruction".
+enum AgentReminder {
+    /// The reason the agent reads; it may well not be finished, and is told to just stop then.
+    static func reason(identifier: String) -> String {
+        "Dever: if you have finished the work on \(identifier), call the dever tool propose_update once, with a short summary, "
+            + "what you did not verify, and, if it applies, the workflow state the issue should move to and a reply for its Slack thread. "
+            + "It changes nothing: the developer applies it. If the work is not finished, or you are waiting for the developer, "
+            + "do not call it and just end your turn."
+    }
+
+    /// The Stop hook's output.
+    static func output(identifier: String) -> Data {
+        (try? JSONSerialization.data(withJSONObject: ["decision": "block", "reason": reason(identifier: identifier)])) ?? Data()
+    }
+
+    /// Whether to remind: a Stop not already continued, the tools on for this agent, an issue known
+    /// for the branch, no reminder yet in this session, and no proposal left since it began.
+    static func needed(event: AgentEvent, contextOn: Bool, issue: String?, reminded: Bool,
+                       proposalAt: Date?, sessionStart: Date?) -> Bool {
+        guard event.hookEventName == "Stop", event.stopHookActive != true, contextOn, issue != nil, !reminded else { return false }
+        if let proposalAt { return proposalAt < (sessionStart ?? .distantPast) }
+        return true
     }
 }

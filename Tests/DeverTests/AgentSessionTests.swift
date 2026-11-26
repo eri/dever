@@ -192,6 +192,22 @@ final class AgentSessionTests: XCTestCase {
         XCTAssertEqual(alone.first?["id"] as? Int, 7)
         XCTAssertNotNil(alone.first?["error"])
 
+        // A Stop on a branch no issue has: the hook prints nothing, and the agent stops as usual.
+        let stopped = Process()
+        stopped.executableURL = URL(fileURLWithPath: "/bin/sh")
+        stopped.arguments = [script.path, "codex"]
+        stopped.environment = ["DEVER_BRIDGE": address.path, "HOME": folder.path]
+        let stopIn = Pipe(), stopOut = Pipe()
+        stopped.standardInput = stopIn
+        stopped.standardOutput = stopOut
+        try stopped.run()
+        stopIn.fileHandleForWriting.write(Data("{\"hook_event_name\": \"Stop\", \"session_id\": \"\(id)\", \"cwd\": \"\(folder.path)\"}".utf8))
+        try stopIn.fileHandleForWriting.close()
+        let printed = try await Task.detached { stopOut.fileHandleForReading.readDataToEndOfFile() }.value
+        stopped.waitUntilExit()
+        XCTAssertEqual(stopped.terminationStatus, 0)
+        XCTAssertTrue(printed.isEmpty)
+
         // Without Dever (no address file), and with a wrong token, the hook still succeeds and nothing arrives.
         XCTAssertEqual(try call("{}", bridge: folder.appendingPathComponent("absent.json").path), 0)
         let forged = folder.appendingPathComponent("forged.json")
@@ -414,5 +430,31 @@ final class AgentSessionTests: XCTestCase {
                                   agents: ["ENG-1": .finished], now: now)
         XCTAssertEqual(broken.start?.situation, .ciFailed)
         XCTAssertTrue(DeliveryPlan.Situation.agentFinished.actionable)
+    }
+
+    func testTheEndOfATurnRemindsTheAgentOnceToLeaveItsAccount() throws {
+        let now = Date(timeIntervalSince1970: 1_794_571_200)
+        func stop(active: Bool? = nil) -> AgentEvent {
+            let flag = active.map { ", \"stop_hook_active\": \($0)" } ?? ""
+            return try! JSONDecoder().decode(AgentEvent.self, from: Data("{\"hook_event_name\": \"Stop\", \"session_id\": \"s\"\(flag)}".utf8))
+        }
+        XCTAssertTrue(AgentReminder.needed(event: stop(), contextOn: true, issue: "ENG-1", reminded: false, proposalAt: nil, sessionStart: now))
+        // Already continued by a Stop hook, tools off, no known issue, already reminded: nothing.
+        XCTAssertFalse(AgentReminder.needed(event: stop(active: true), contextOn: true, issue: "ENG-1", reminded: false, proposalAt: nil, sessionStart: now))
+        XCTAssertFalse(AgentReminder.needed(event: stop(), contextOn: false, issue: "ENG-1", reminded: false, proposalAt: nil, sessionStart: now))
+        XCTAssertFalse(AgentReminder.needed(event: stop(), contextOn: true, issue: nil, reminded: false, proposalAt: nil, sessionStart: now))
+        XCTAssertFalse(AgentReminder.needed(event: stop(), contextOn: true, issue: "ENG-1", reminded: true, proposalAt: nil, sessionStart: now))
+        // A proposal left in this session: nothing; one left before it began does not count.
+        XCTAssertFalse(AgentReminder.needed(event: stop(), contextOn: true, issue: "ENG-1", reminded: false, proposalAt: now.addingTimeInterval(60), sessionStart: now))
+        XCTAssertTrue(AgentReminder.needed(event: stop(), contextOn: true, issue: "ENG-1", reminded: false, proposalAt: now.addingTimeInterval(-60), sessionStart: now))
+        // Only a Stop.
+        let other = try JSONDecoder().decode(AgentEvent.self, from: Data(#"{"hook_event_name": "PostToolUse", "session_id": "s"}"#.utf8))
+        XCTAssertFalse(AgentReminder.needed(event: other, contextOn: true, issue: "ENG-1", reminded: false, proposalAt: nil, sessionStart: now))
+        // The output both tools read as "continue with this instruction".
+        let output = try XCTUnwrap(JSONSerialization.jsonObject(with: AgentReminder.output(identifier: "ENG-1")) as? [String: String])
+        XCTAssertEqual(output["decision"], "block")
+        XCTAssertTrue(output["reason"]?.contains("propose_update") == true)
+        XCTAssertTrue(output["reason"]?.contains("ENG-1") == true)
+        XCTAssertTrue(AgentPlugin.hookScript.contains("printf"))
     }
 }

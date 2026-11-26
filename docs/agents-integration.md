@@ -478,6 +478,15 @@ to `ProposalStore` (memory only, one per issue, a new one replaces the last) and
 Not verified by a click: Apply and Send against Linear and Slack, and an agent calling `propose_update`
 in a real session. A proposal is lost when Dever quits.
 
+**The end-of-turn reminder** (added after phase 5): the skill alone does not make an agent call
+`propose_update`. The Stop hook now asks Dever on its way out; once per session, when the agent ends a
+turn on a branch that is a known issue's, with Dever's tools on for it, and no proposal was left since
+the session began, Dever answers `{"decision": "block", "reason": …}` and the hook prints it. Both tools
+read that as "continue, with this as the next instruction" ([Claude Code](https://code.claude.com/docs/en/hooks),
+[Codex](https://learn.chatgpt.com/docs/hooks)); the reason tells the agent to leave its account if the work is
+finished, and to just end its turn otherwise. `stop_hook_active` keeps it to one reminder. Not verified in a
+real session: that each agent follows it.
+
 What phase 5 built: an **Agents** screen in the rail (shown once an agent is followed or a session
 is heard; an amber dot when one waits). `Model/AgentBoard.swift` groups the open sessions by project,
 tied to their issue by the branch, what waits first, then finished, working, open; sessions on no

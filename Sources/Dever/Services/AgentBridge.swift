@@ -71,8 +71,24 @@ final class AgentBridge: @unchecked Sendable {
                     return
                 }
                 let status = self.handle(method: method, path: path, bearer: bearer, body: body)
-                let answer = "HTTP/1.1 \(status)\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
-                connection.send(content: Data(answer.utf8), completion: .contentProcessed { _ in connection.cancel() })
+                // A Stop may get the reminder back: the hook command prints it for the agent.
+                guard status == "204 No Content", let tool = AgentTool(rawValue: String(parts.last ?? "")),
+                      let event = try? JSONDecoder().decode(AgentEvent.self, from: body), event.hookEventName == "Stop" else {
+                    let answer = "HTTP/1.1 \(status)\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                    connection.send(content: Data(answer.utf8), completion: .contentProcessed { _ in connection.cancel() })
+                    return
+                }
+                let branch = event.cwd.flatMap { cwd -> String? in
+                    guard FileManager.default.fileExists(atPath: cwd) else { return nil }
+                    let answer = AgentLauncher.git(["rev-parse", "--abbrev-ref", "HEAD"], in: URL(fileURLWithPath: cwd, isDirectory: true), timeout: 3)
+                    return answer.status == 0 && answer.output != "HEAD" && !answer.output.isEmpty ? answer.output : nil
+                }
+                Task { @MainActor in
+                    let reminder = AgentStore.shared.reminder(for: event, tool: tool, branch: branch)
+                    let head = reminder.map { "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: \($0.count)\r\nConnection: close\r\n\r\n" }
+                        ?? "HTTP/1.1 204 No Content\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                    connection.send(content: Data(head.utf8) + (reminder ?? Data()), completion: .contentProcessed { _ in connection.cancel() })
+                }
             case .malformed:
                 connection.cancel()
             case .incomplete:

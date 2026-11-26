@@ -8,6 +8,9 @@ final class AgentStore: ObservableObject {
     static let shared = AgentStore()
 
     @Published private(set) var sessions: [String: AgentSession] = [:]
+    /// Sessions already reminded to leave their account, and when each session was first heard.
+    private var reminded: Set<String> = []
+    private var started: [String: Date] = [:]
 
     init() {
         // Captures: DEVER_SNAPSHOT_AGENT_SESSION=working|waiting|finished|stale puts a made-up session
@@ -52,8 +55,25 @@ final class AgentStore: ObservableObject {
         AgentSession.current(for: branch, in: Array(sessions.values))
     }
 
+    /// What a Stop hook should hand back to the agent, if anything: the reminder to call
+    /// propose_update, once per session. `branch` is read in the hook's folder before the call.
+    func reminder(for event: AgentEvent, tool: AgentTool, branch: String?) -> Data? {
+        let issue = branch.flatMap { branch in
+            IssueStore.shared.projects.values.lazy.flatMap(\.issues)
+                .first { $0.branchName?.lowercased() == branch.lowercased() }?.identifier
+        }
+        guard AgentReminder.needed(event: event, contextOn: AgentPreferences.context(tool) && AgentPreferences.followed(tool),
+                                   issue: issue, reminded: reminded.contains(event.sessionID),
+                                   proposalAt: issue.flatMap { ProposalStore.shared.proposal(for: $0)?.at },
+                                   sessionStart: started[event.sessionID]),
+              let issue else { return nil }
+        reminded.insert(event.sessionID)
+        return AgentReminder.output(identifier: issue)
+    }
+
     /// One hook call from a tool.
     func receive(_ event: AgentEvent, tool: AgentTool, at now: Date = Date()) {
+        if started[event.sessionID] == nil { started[event.sessionID] = now }
         prune(at: now)
         let before = sessions[event.sessionID]
         var session = before?.applying(event, at: now) ?? AgentSession.starting(event, tool: tool, at: now)
