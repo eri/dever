@@ -17,7 +17,9 @@ struct AgentBoardView: View {
     private var groups: [AgentBoard.Group] {
         // Active projects first; the sessions left on a done project come after them.
         AgentBoard.groups(sessions: Array(agents.sessions.values), projects: app.activeProjects + app.doneProjects) { project in
-            project.linear.map { issues.issues(project: $0.id) } ?? []
+            // Canary's project lists its made-up issues.
+            if Canary.isOn, project.id == Canary.projectID { return DeliveryPlan.canaryIssues }
+            return project.linear.map { issues.issues(project: $0.id) } ?? []
         }
     }
     private var followed: Bool { AgentTool.allCases.contains(where: AgentPreferences.followed) }

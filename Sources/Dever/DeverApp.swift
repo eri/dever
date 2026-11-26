@@ -5,10 +5,15 @@ import UserNotifications
 struct DeverApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
     @StateObject private var app = AppState()
+
+    init() {
+        // Dever Canary turns its demo on before any screen or store reads it.
+        Canary.prepare()
+    }
     @StateObject private var store = OverviewStore()
 
     var body: some Scene {
-        WindowGroup("Dever") {
+        WindowGroup(Canary.isOn ? "Dever Canary" : "Dever") {
             ContentView()
                 .environmentObject(app)
                 .environmentObject(store)
@@ -33,7 +38,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     func applicationDidFinishLaunching(_ notification: Notification) {
         UNUserNotificationCenter.current().delegate = self
         // The coding agents' hooks tell Dever about their sessions here; a capture run listens to nothing.
-        if ProcessInfo.processInfo.environment["DEVER_SNAPSHOT_DIR"] == nil {
+        // Canary listens to no agent and leaves the agents' plugins alone.
+        if ProcessInfo.processInfo.environment["DEVER_SNAPSHOT_DIR"] == nil, !Canary.isOn {
             AgentBridge.shared.start()
             Task {
                 for tool in AgentTool.allCases {

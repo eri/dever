@@ -328,7 +328,7 @@ final class AppState: ObservableObject {
 
     private let projectsURL: URL = {
         let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("Dever", isDirectory: true)
+            .appendingPathComponent(Canary.folder, isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir.appendingPathComponent("projects.json")
     }()
@@ -373,6 +373,8 @@ final class AppState: ObservableObject {
            let list = try? JSONDecoder().decode([Project].self, from: data) {
             projects = list
         }
+        // Canary opens on its made-up project, added once to its own folder.
+        if Canary.isOn, !projects.contains(where: { $0.id == Canary.projectID }) { projects.insert(Canary.project, at: 0) }
         if !simulatedRepos.isEmpty, !projects.isEmpty {
             simulatedMode = simulatedMode ?? repositoryMode
             projects[0].githubRepos = simulatedRepos
@@ -417,6 +419,7 @@ final class AppState: ObservableObject {
 
     /// Snapshot runs only: throws the failure the environment asks for.
     private func simulateFailure(_ s: ServiceKind) throws {
+        if Canary.isOn { throw AppError.message(Canary.refusal) }
         if expired.contains(s), !Self.simulated("DEVER_SNAPSHOT_UNAUTHORIZED").isEmpty { throw AppError.unauthorized(s) }
         guard let mode = simulatedFailing[s.rawValue] else { return }
         switch mode {
@@ -445,6 +448,8 @@ final class AppState: ObservableObject {
 
     /// The tools this project links that have no token: what the project page invites to connect.
     func missingServices(for p: Project) -> [ServiceKind] {
+        // Canary's made-up project needs no account: its data is drawn, not fetched.
+        if Canary.isOn { return [] }
         var out: [ServiceKind] = []
         if p.slack != nil, slack == nil { out.append(.slack) }
         if p.linear != nil, linear == nil { out.append(.linear) }

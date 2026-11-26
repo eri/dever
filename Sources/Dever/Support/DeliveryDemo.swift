@@ -6,6 +6,21 @@ import Foundation
 /// (nothing of the viewer's left, one unassigned issue to take), `done` (everything merged),
 /// `agent` (the viewer's issue in progress with no pull request yet: "Continue with" an agent).
 extension DeliveryPlan {
+    /// The made-up team of the demo's issues: the usual states, so Start and Move have somewhere to go.
+    static var demoTeam: LinearTeamContext {
+        func state(_ name: String, _ type: String, _ position: Double) -> LinearTeamContext.WorkflowState {
+            .init(id: "demo-\(name)", name: name, type: type, color: "#888888", position: position)
+        }
+        return LinearTeamContext(states: [state("Backlog", "backlog", 0), state("Todo", "unstarted", 1), state("In Progress", "started", 2),
+                                          state("In Review", "started", 3), state("Done", "completed", 4)], members: [])
+    }
+
+    /// The made-up issues of Canary's project, for the screens that list issues by project (the agents' board).
+    static var canaryIssues: [LinearIssue] {
+        guard let plan = snapshotDemo() else { return [] }
+        return ([plan.start].compactMap { $0 } + plan.agents + plan.next + plan.others).map(\.issue) + plan.shipped.map(\.issue)
+    }
+
     /// `agents` says, from the made-up issues, what their agents ask (made-up sessions and proposals).
     static func snapshotDemo(agents: ([LinearIssue]) -> [String: AgentAttention] = { _ in [:] }) -> DeliveryPlan? {
         guard let scene = ProcessInfo.processInfo.environment["DEVER_SNAPSHOT_DELIVERY"] else { return nil }
@@ -29,7 +44,7 @@ extension DeliveryPlan {
                         updatedAt: iso.string(from: now.addingTimeInterval(-idle * 86_400)),
                         state: .init(id: nil, name: state, type: type, color: nil), assignee: who,
                         branchName: "sam/app-\(n)", attachments: nil, priority: priority, dueDate: due.map(day),
-                        labels: nil, archivedAt: nil)
+                        labels: nil, archivedAt: nil, team: .init(id: "demo-team"))
         }
         func pull(_ n: Int, _ title: String, by author: String = "sam", idle: Double = 0.2, draft: Bool = false,
                   pipeline: ProjectSnapshot.PipelineState? = .passing, review: Review = .pending, asks: [String] = []) -> Pull {
@@ -65,6 +80,23 @@ extension DeliveryPlan {
             issues.append(issue(312, "Webhook retries with backoff", "In Progress", "started", ana, idle: 2))
             return DeliveryPlan(issues: issues, open: open, merged: merged, blockers: blockers,
                                 viewer: .init(linearID: "me", linearName: me.name, githubLogin: "sam"), now: now)
+        }
+        if scene == "canary" {
+            // Dever Canary: an agent waiting for an answer, one that finished with a pull request,
+            // one at work on the issue to pick up, and the rest of a project around them.
+            issues.append(issue(306, "Offline banner and retry", "In Progress", "started", me, priority: 2))
+            issues.append(issue(311, "Export a report as CSV", "In Progress", "started", me))
+            open["APP-311"] = [pull(961, "Export a report as CSV", idle: 0.05)]
+            issues.append(issue(301, "Search indexes drafts, filtered by permission", "In Progress", "started", me, priority: 2))
+            issues.append(issue(308, "Two-factor recovery codes", "Todo", "unstarted", me, priority: 2, due: 3))
+            issues.append(issue(309, "Session timeout setting", "Todo", "unstarted", me, priority: 3))
+            blockers["APP-309"] = ["APP-308"]
+            issues.append(issue(303, "Notification digest, once a day", "In Review", "started", ana))
+            open["APP-303"] = [pull(953, "Daily digest", by: "ana", asks: ["sam"])]
+            issues.append(issue(320, "Billing page shows the next invoice", "In Progress", "started", leo, priority: 2))
+            open["APP-320"] = [pull(960, "Next invoice", by: "leo", pipeline: .failing)]
+            return DeliveryPlan(issues: issues, open: open, merged: merged, blockers: blockers,
+                                viewer: .init(linearID: "me", linearName: me.name, githubLogin: "sam"), agents: agents(issues), now: now)
         }
         if scene == "agent" {
             issues.append(issue(306, "Offline banner and retry", "In Progress", "started", me, priority: 2))

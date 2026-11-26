@@ -13,7 +13,7 @@ final class AgentBridge: @unchecked Sendable {
         // Tests point it elsewhere, so they never touch the folder of a Dever that is running.
         if let path = ProcessInfo.processInfo.environment["DEVER_AGENT_FOLDER"] { return URL(fileURLWithPath: path, isDirectory: true) }
         return FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("Dever/agent", isDirectory: true)
+            .appendingPathComponent(Canary.folder, isDirectory: true).appendingPathComponent("agent", isDirectory: true)
     }
     static var address: URL { folder.appendingPathComponent("bridge.json") }
 

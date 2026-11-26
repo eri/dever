@@ -14,6 +14,21 @@ final class AgentStore: ObservableObject {
         // on the demo issue's branch.
         guard let scene = ProcessInfo.processInfo.environment["DEVER_SNAPSHOT_AGENT_SESSION"] else { return }
         let now = Date()
+        if scene == "canary" {
+            // Dever Canary: Claude Code waits on one issue, Codex finished another, Claude Code works on a third.
+            let made: [AgentSession] = [
+                .init(id: "canary-waiting", tool: .claudeCode, cwd: "/Users/sam/code/app", branch: "sam/app-306", state: .waiting,
+                      sentence: "The retry needs a decision: back off for thirty seconds, or until the network returns?",
+                      since: now.addingTimeInterval(-3 * 60), heard: now.addingTimeInterval(-3 * 60)),
+                .init(id: "canary-finished", tool: .codex, cwd: "/Users/sam/code/.dever/worktrees/app/sam-app-311", branch: "sam/app-311",
+                      state: .finished, sentence: "The export is in place; the pull request is open.",
+                      since: now.addingTimeInterval(-6 * 60), heard: now.addingTimeInterval(-6 * 60)),
+                .init(id: "canary-working", tool: .claudeCode, cwd: "/Users/sam/code/.dever/worktrees/app/sam-app-301", branch: "sam/app-301",
+                      state: .working, sentence: nil, since: now.addingTimeInterval(-12 * 60), heard: now.addingTimeInterval(-20)),
+            ]
+            for session in made { sessions[session.id] = session }
+            return
+        }
         var session = AgentSession(id: "demo", tool: .claudeCode, cwd: "/Users/sam/code/app", branch: "sam/app-306", state: .working, sentence: nil,
                                    since: now.addingTimeInterval(-12 * 60), heard: now.addingTimeInterval(-20))
         switch scene {

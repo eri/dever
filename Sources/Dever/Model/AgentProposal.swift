@@ -121,7 +121,16 @@ final class ProposalStore: ObservableObject {
     @Published private(set) var reviewed: Set<String> = []
 
     init() {
-        // Captures: with DEVER_SNAPSHOT_AGENT_SESSION=finished, the demo issue carries a proposal.
+        // Captures and Canary: the finished demo issue carries a proposal.
+        if ProcessInfo.processInfo.environment["DEVER_SNAPSHOT_AGENT_SESSION"] == "canary",
+           let made = AgentProposal(tool: .codex, arguments: [
+            "issue": "APP-311", "summary": "The report can be exported as CSV from the toolbar; the file respects the active filters.",
+            "not_verified": "A report over 50,000 rows.", "status": "In Review",
+            "reply": "The CSV export is up on the preview: Export in the report's toolbar, filters included."],
+                                    at: Date().addingTimeInterval(-6 * 60)) {
+            proposals[Self.key(made.identifier)] = made
+            return
+        }
         guard ProcessInfo.processInfo.environment["DEVER_SNAPSHOT_AGENT_SESSION"] == "finished",
               let demo = AgentProposal(tool: .claudeCode, arguments: [
                 "issue": "APP-306", "summary": "The banner shows when the network drops and the last request is retried on reconnect.",

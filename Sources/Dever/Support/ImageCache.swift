@@ -25,7 +25,7 @@ actor ImageCache {
     private let concurrency = 4
     private let root: URL = {
         let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("Dever", isDirectory: true)
+            .appendingPathComponent(Canary.folder, isDirectory: true)
         for kind in [Kind.avatars, .files] {
             try? FileManager.default.createDirectory(at: dir.appendingPathComponent(kind.rawValue, isDirectory: true),
                                                      withIntermediateDirectories: true)

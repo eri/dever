@@ -3,7 +3,7 @@ import Security
 
 /// Small Keychain wrapper: each service stores a JSON blob under a key.
 enum Keychain {
-    private static let service = "io.github.eri.dever"
+    private static var service: String { Canary.keychainService }
 
     static func save<T: Encodable>(_ value: T, for key: String) throws {
         let data = try JSONEncoder().encode(value)

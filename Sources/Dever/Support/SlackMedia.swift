@@ -19,14 +19,14 @@ actor SlackMediaCache {
     /// Caches, which macOS may clear and which `purge()` keeps under 200 MB and two weeks.
     private let root: URL = {
         let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("Dever", isDirectory: true)
+            .appendingPathComponent(Canary.folder, isDirectory: true)
         try? FileManager.default.createDirectory(at: dir.appendingPathComponent(Kind.avatars.rawValue, isDirectory: true),
                                                  withIntermediateDirectories: true)
         return dir
     }()
     static let cachesRoot: URL = {
         let dir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("Dever", isDirectory: true)
+            .appendingPathComponent(Canary.folder, isDirectory: true)
         for sub in ["files", "originals"] {
             try? FileManager.default.createDirectory(at: dir.appendingPathComponent(sub, isDirectory: true), withIntermediateDirectories: true)
         }
@@ -222,7 +222,7 @@ actor SlackDirectory {
 
     private static func file(_ team: String) -> URL {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("Dever", isDirectory: true)
+            .appendingPathComponent(Canary.folder, isDirectory: true)
             .appendingPathComponent("users-\(team).json")
     }
 }

@@ -253,8 +253,8 @@ struct ContentView: View {
             DeverMark().frame(width: 22, height: 22)
                 .padding(.top, 12)
                 .padding(.bottom, 14)
-                .sootTip("Dever", detail: scope)
-                .accessibilityLabel("Dever, \(scope)")
+                .sootTip(Canary.isOn ? "Dever Canary" : "Dever", detail: Canary.isOn ? "Made-up data, nothing is sent" : scope)
+                .accessibilityLabel(Canary.isOn ? "Dever Canary, made-up data" : "Dever, \(scope)")
             railButton(symbol: "square.grid.2x2", label: "Overview", item: .overview)
             // The agents' board, once Dever follows an agent or hears a session.
             if !agents.sessions.isEmpty || AgentTool.allCases.contains(where: AgentPreferences.followed) || selection == .agents {
@@ -428,7 +428,8 @@ struct ContentView: View {
 struct DeverMark: View {
     var body: some View {
         DeverMarkShape()
-            .fill(Soot.lime, style: FillStyle(eoFill: true))
+            // Canary yellow in Dever Canary, so the two apps are never mistaken.
+            .fill(Canary.isOn ? Canary.tint : Soot.lime, style: FillStyle(eoFill: true))
             .aspectRatio(1, contentMode: .fit)
             .accessibilityHidden(true)
     }

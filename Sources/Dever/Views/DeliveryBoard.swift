@@ -505,6 +505,11 @@ struct DeliveryBoard: View {
 
     /// The workflow states behind "Start" and "Move to …"; without them the tile only opens the issue.
     private func loadTeams() async {
+        // The demo's issues belong to a made-up team, with the usual states.
+        if DeliveryPlan.snapshotDemo() != nil {
+            for id in teamIDs { teams[id] = DeliveryPlan.demoTeam }
+            return
+        }
         for id in teamIDs where teams[id] == nil {
             if let context = try? await store.team(id, app: app) { teams[id] = context }
         }

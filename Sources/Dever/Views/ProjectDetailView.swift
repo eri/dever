@@ -896,6 +896,12 @@ struct ProjectDetailView: View {
     /// - Parameter quiet: a refresh nobody asked for: the Refresh button stays still and a
     ///   panel that failed before keeps its row until the tool answers.
     private func load(force: Bool = false, quiet: Bool = false) async {
+        // Canary draws its made-up data: nothing to fetch, nothing missing.
+        if Canary.isOn {
+            states = [:]
+            loaded = true
+            return
+        }
         if !quiet { loading = true }
         guard !inFlight else { return }
         inFlight = true

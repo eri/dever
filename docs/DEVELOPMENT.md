@@ -78,6 +78,14 @@ Unit tests for the data layer (the resource cache, pull request matching, checks
 To see what a refresh costs, run with `DEVER_TRACE_REQUESTS=1`: every request to Slack, Linear and GitHub
 is printed to stderr with its status, size and duration, and the running total.
 
+## Dever Canary
+
+`CANARY=1 ./scripts/build-app.sh` builds `build/Dever Canary.app`: the app with made-up data, to see every
+state without a project in progress (a project with agents waiting, finished and at work, a proposal to
+review, the agents' board, plan usage). It is a separate app: its own bundle identifier, settings, Keychain
+entry and folder (`~/Library/Application Support/Dever Canary`), and a yellow mark. It sends nothing to Slack,
+Linear or GitHub and listens to no agent. See `Sources/Dever/Support/Canary.swift`.
+
 ## Screenshots for development
 
 Dever can photograph its own window, without screen-recording permission:

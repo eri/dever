@@ -1,28 +1,42 @@
 #!/bin/zsh
 # Builds Dever and packages it as Dever.app (ad-hoc signed).
 # DMG=1 ./scripts/build-app.sh  → also produces build/Dever.dmg to share.
+# CANARY=1 ./scripts/build-app.sh → build/Dever Canary.app: made-up data, its own settings, Keychain
+# entry and folder, a yellow mark (see Sources/Dever/Support/Canary.swift).
 set -euo pipefail
 cd "$(dirname "$0")/.."
+if [[ "${CANARY:-0}" == "1" ]]; then
+  NAME="Dever Canary"; BUNDLE_ID="io.github.eri.dever.canary"
+else
+  NAME="Dever"; BUNDLE_ID="io.github.eri.dever"
+fi
 
 CONFIG=${1:-release}
 swift build -c "$CONFIG"
 BIN="$(swift build -c "$CONFIG" --show-bin-path)/Dever"
 
-APP=build/Dever.app
+APP="build/$NAME.app"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN" "$APP/Contents/MacOS/Dever"
 [[ -f assets/AppIcon.icns ]] || ./scripts/make-icon.sh
-cp assets/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
+if [[ "${CANARY:-0}" == "1" ]]; then
+  # The same icon, its mark canary yellow instead of lime.
+  sed 's/#DAFA9C/#FFCC3D/' docs/brand/app-icon.svg > build/app-icon-canary.svg
+  ICON_SVG=build/app-icon-canary.svg ICON_OUT=build/AppIcon-canary.icns ./scripts/make-icon.sh >/dev/null
+  cp build/AppIcon-canary.icns "$APP/Contents/Resources/AppIcon.icns"
+else
+  cp assets/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
+fi
 
-cat > "$APP/Contents/Info.plist" <<'PLIST'
+cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-  <key>CFBundleName</key><string>Dever</string>
-  <key>CFBundleDisplayName</key><string>Dever</string>
-  <key>CFBundleIdentifier</key><string>io.github.eri.dever</string>
+  <key>CFBundleName</key><string>$NAME</string>
+  <key>CFBundleDisplayName</key><string>$NAME</string>
+  <key>CFBundleIdentifier</key><string>$BUNDLE_ID</string>
   <key>CFBundleExecutable</key><string>Dever</string>
   <key>CFBundleIconFile</key><string>AppIcon</string>
   <key>CFBundlePackageType</key><string>APPL</string>

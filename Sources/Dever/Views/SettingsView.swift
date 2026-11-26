@@ -1713,8 +1713,8 @@ private struct AgentCard: View {
             binary = AgentPlugin.binary(tool, codexApp: AgentApps.app(.codex))
             looked = true
             guard let binary else { return }
-            if ProcessInfo.processInfo.environment["DEVER_SNAPSHOT_DIR"] != nil {
-                // A capture asks no tool: DEVER_SNAPSHOT_AGENT_SESSION shows them followed.
+            if ProcessInfo.processInfo.environment["DEVER_SNAPSHOT_DIR"] != nil || Canary.isOn {
+                // A capture and Canary ask no tool: DEVER_SNAPSHOT_AGENT_SESSION shows them followed.
                 connected = ProcessInfo.processInfo.environment["DEVER_SNAPSHOT_AGENT_SESSION"] != nil
                 return
             }
@@ -1774,7 +1774,8 @@ private struct AgentCard: View {
     }
 
     private func change(connect: Bool) {
-        guard let binary, !busy else { return }
+        // Canary leaves the agents' real plugins alone.
+        guard let binary, !busy, !Canary.isOn else { return }
         busy = true
         problem = nil
         Task {

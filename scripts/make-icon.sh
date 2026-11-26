@@ -1,12 +1,15 @@
 #!/bin/zsh
 # Renders docs/brand/app-icon.svg into assets/AppIcon.icns (every size macOS asks for).
+# ICON_SVG and ICON_OUT render another source to another file (Dever Canary's yellow icon).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 SET=build/AppIcon.iconset
+export ICON_SVG=${ICON_SVG:-docs/brand/app-icon.svg}
+OUT=${ICON_OUT:-assets/AppIcon.icns}
 rm -rf "$SET"; mkdir -p "$SET" assets
 swift - <<'SWIFT'
 import AppKit
-let svg = URL(fileURLWithPath: "docs/brand/app-icon.svg")
+let svg = URL(fileURLWithPath: ProcessInfo.processInfo.environment["ICON_SVG"]!)
 guard let image = NSImage(contentsOf: svg) else { fatalError("cannot read app-icon.svg") }
 let sizes: [(String, Int)] = [("16x16", 16), ("16x16@2x", 32), ("32x32", 32), ("32x32@2x", 64), ("128x128", 128), ("128x128@2x", 256),
                               ("256x256", 256), ("256x256@2x", 512), ("512x512", 512), ("512x512@2x", 1024)]
@@ -22,5 +25,5 @@ for (name, px) in sizes {
     try! png.write(to: URL(fileURLWithPath: "build/AppIcon.iconset/icon_\(name).png"))
 }
 SWIFT
-iconutil -c icns "$SET" -o assets/AppIcon.icns
-echo "→ assets/AppIcon.icns"
+iconutil -c icns "$SET" -o "$OUT"
+echo "→ $OUT"

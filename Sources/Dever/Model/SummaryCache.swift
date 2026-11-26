@@ -28,7 +28,7 @@ struct SummaryCache {
     /// The file in the app's own folder.
     static var defaultURL: URL {
         let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("Dever", isDirectory: true)
+            .appendingPathComponent(Canary.folder, isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir.appendingPathComponent("message-summaries.json")
     }
