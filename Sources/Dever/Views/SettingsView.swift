@@ -1749,11 +1749,14 @@ private struct AgentCard: View {
                                     .foregroundStyle(Soot.ink).frame(width: 36, alignment: .trailing)
                             }
                         }
-                        if usage.tight(at: now) || now.timeIntervalSince(usage.readAt) > AgentUsage.fresh || entry?.problem != nil {
-                            Text(entry?.problem ?? usage.short(at: now)).font(.system(size: 12))
-                                .foregroundStyle(entry?.problem == nil ? Soot.muted : Theme.negative).lineLimit(2)
+                        if let problem = entry?.problem {
+                            UsageProblem(text: problem, detail: entry?.detail)
+                        } else if usage.tight(at: now) || now.timeIntervalSince(usage.readAt) > AgentUsage.fresh {
+                            Text(usage.short(at: now)).font(.system(size: 12)).foregroundStyle(Soot.muted).lineLimit(2)
                         }
                     }
+                } else if let problem = entry?.problem, usage == nil {
+                    UsageProblem(text: problem, detail: entry?.detail)
                 } else {
                     Text(quiet(usage, now: now)).font(.system(size: 13)).foregroundStyle(Soot.muted)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -1788,6 +1791,46 @@ private struct AgentCard: View {
             connected = await AgentPlugin.connected(tool, binary: binary)
             busy = false
         }
+    }
+}
+
+/// Why a usage reading failed: one sentence, and what the tool said word for word folded under
+/// "Details", so a long error never floods the card.
+private struct UsageProblem: View {
+    let text: String
+    let detail: String?
+    @State private var open = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Image(systemName: "exclamationmark.circle.fill").font(.system(size: 11)).foregroundStyle(Theme.negative)
+                    .accessibilityHidden(true)
+                Text(text).font(.system(size: 12)).foregroundStyle(Soot.ink).fixedSize(horizontal: false, vertical: true)
+            }
+            if let detail, !detail.isEmpty {
+                Button { Motion.run(Motion.ui, fade: true) { open.toggle() } } label: {
+                    HStack(spacing: 4) {
+                        Text(open ? "Hide details" : "Details")
+                        Image(systemName: "chevron.down").font(.system(size: 9, weight: .bold))
+                            .rotationEffect(.degrees(open ? 180 : 0)).accessibilityHidden(true)
+                    }
+                }
+                .buttonStyle(TertiaryButton(tint: .muted, lift: Soot.surface, font: .system(size: 12, weight: .medium), height: 22))
+                .padding(.leading, 11)
+                if open {
+                    ScrollView {
+                        Text(detail).font(.system(size: 11, design: .monospaced)).foregroundStyle(Soot.muted)
+                            .textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .frame(maxHeight: 120)
+                    .padding(8)
+                    .background(Soot.ground, in: RoundedRectangle(cornerRadius: 6))
+                    .transition(.opacity)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 

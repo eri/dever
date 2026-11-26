@@ -15,6 +15,11 @@ final class AgentUsageStore: ObservableObject {
         // Captures: DEVER_SNAPSHOT_AGENT_USAGE=1 shows a made-up reading instead of asking the tool.
         if ProcessInfo.processInfo.environment["DEVER_SNAPSHOT_AGENT_USAGE"] == "1" {
             let now = Date()
+            // Claude Code, as its agent would pass it on (report_usage): less room than Codex.
+            entries[.claudeCode] = .init(usage: AgentUsage(
+                windows: [.init(usedPercent: 74, minutes: 300, resetsAt: now.addingTimeInterval(3600 + 1200)),
+                          .init(usedPercent: 45, minutes: 10_080, resetsAt: now.addingTimeInterval(3 * 86_400))],
+                plan: "Team", limitReached: false, readAt: now.addingTimeInterval(-2 * 60)), checkedAt: now)
             entries[.codex] = .init(usage: AgentUsage(
                 windows: [.init(usedPercent: 38, minutes: 300, resetsAt: now.addingTimeInterval(2 * 3600 + 600)),
                           .init(usedPercent: 20, minutes: 10_080, resetsAt: now.addingTimeInterval(4 * 86_400))],
@@ -49,7 +54,8 @@ final class AgentUsageStore: ObservableObject {
             entries[tool] = .init(usage: nil, problem: CodexUsageError.noPlan.localizedDescription, checkedAt: Date())
         } catch {
             // The last value stays, with its age; the reason sits beside it.
-            entries[tool] = .init(usage: entry.usage, problem: error.localizedDescription, checkedAt: Date())
+            entries[tool] = .init(usage: entry.usage, problem: error.localizedDescription,
+                                  detail: (error as? CodexUsageError)?.detail, checkedAt: Date())
         }
     }
 

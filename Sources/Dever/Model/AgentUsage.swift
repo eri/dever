@@ -159,6 +159,8 @@ struct AgentUsageEntry: Equatable {
     var usage: AgentUsage?
     /// Why the last reading failed, in the tool's own words when it gave some; the last value stays.
     var problem: String?
+    /// What the tool said, word for word, behind "Details".
+    var detail: String?
     var loading = false
     /// The last time the tool was asked, answered or not: a refusal is not asked again within the budget either.
     var checkedAt: Date?

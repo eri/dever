@@ -76,6 +76,13 @@ final class AgentUsageTests: XCTestCase {
     func testAnApiKeyLoginIsNotAFailure() {
         XCTAssertEqual(CodexUsageError.from(message: "chatgpt authentication required to read rate limits"), .noPlan)
         XCTAssertEqual(CodexUsageError.from(message: "boom"), .failed("boom"))
+        // An expired sign-in says what to do in one sentence; the tool's words wait under "Details".
+        let expired = CodexUsageError.from(message: #"GET https://example.com/usage failed: 401 Unauthorized; {"code": "token_expired"}"#)
+        guard case .signInExpired = expired else { return XCTFail("not read as an expired sign-in") }
+        XCTAssertEqual(expired.localizedDescription, "Codex's sign-in has expired: open Codex to sign in again")
+        XCTAssertTrue(expired.detail?.contains("token_expired") == true)
+        XCTAssertEqual(CodexUsageError.failed("boom").localizedDescription, "Codex could not say what is left")
+        XCTAssertNil(CodexUsageError.noPlan.detail)
         XCTAssertTrue(AgentTool.codex.usageIsReadable)
         XCTAssertFalse(AgentTool.claudeCode.usageIsReadable)
         XCTAssertNil(CodexUsageReader.binary(app: URL(fileURLWithPath: "/nowhere/Nothing.app"))

@@ -5,19 +5,34 @@ enum CodexUsageError: LocalizedError, Equatable {
     case notInstalled
     /// Signed in with an API key: billed per token, no plan window to show.
     case noPlan
+    /// Codex's own sign-in has expired: Codex itself must be opened to sign in again.
+    case signInExpired(String)
     case failed(String)
 
+    /// One short sentence; what the tool said, word for word, is in `detail`.
     var errorDescription: String? {
         switch self {
         case .notInstalled: "Codex is not installed"
         case .noPlan: "Billed per token: no plan limit"
-        case .failed(let message): "Codex could not say: \(message)"
+        case .signInExpired: "Codex's sign-in has expired: open Codex to sign in again"
+        case .failed: "Codex could not say what is left"
+        }
+    }
+
+    /// What the tool said, for the "Details" under the sentence.
+    var detail: String? {
+        switch self {
+        case .signInExpired(let message), .failed(let message): message
+        default: nil
         }
     }
 
     /// The tool's refusal, read as what it means.
     static func from(message: String) -> CodexUsageError {
-        message.lowercased().contains("chatgpt authentication required") ? .noPlan : .failed(message)
+        let text = message.lowercased()
+        if text.contains("chatgpt authentication required") { return .noPlan }
+        if text.contains("token_expired") || text.contains("token has expired") || text.contains("401") { return .signInExpired(message) }
+        return .failed(message)
     }
 }
 
